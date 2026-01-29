@@ -43,13 +43,16 @@ const MultiDonut = ({ segments, total, onSegmentClick }) => {
         </div>
       </div>
       
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2 w-full px-4">
+       <div className="grid grid-cols-1 gap-6 w-full px-6"> {/* Dibuat 1 kolom supaya tulisan bisa panjang & besar */}
         {segments.map((s, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: s.color }}></div>
-            <div className="flex flex-col">
-              <span className="text-[10px] font-black text-gray-400 uppercase leading-none">{s.name}</span>
-              <span className="text-xs font-bold text-gray-700">{s.value.toLocaleString('id-ID')}</span>
+          <div key={i} className="flex items-center justify-between bg-gray-50 p-6 rounded-[2rem] border border-gray-100 shadow-sm">
+            <div className="flex items-center gap-4">
+              <div className="w-6 h-6 rounded-full shrink-0" style={{ backgroundColor: s.color }}></div>
+              <span className="text-lg font-black text-gray-500 uppercase tracking-tighter">{s.name}</span>
+            </div>
+            {/* ANGKA DATA DI KANAN: Dibuat Sangat Besar */}
+            <div className="text-4xl font-black text-gray-800">
+              {s.value.toLocaleString('id-ID')}
             </div>
           </div>
         ))}

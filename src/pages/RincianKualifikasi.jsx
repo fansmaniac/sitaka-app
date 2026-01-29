@@ -105,7 +105,7 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
               <ArrowLeft size={20} />
             </button>
             <div>
-              <h3 className="text-xl font-black uppercase tracking-tight">Tabel Audit Guru</h3>
+              <h3 className="text-xl font-black uppercase tracking-tight">Rincian Data Kualifikasi Guru</h3>
               <p className="text-xs opacity-80 font-bold uppercase">
                 Kualifikasi: {qualificationLabel === 'SEMUA' ? 'SEMUA JENJANG' : qualificationLabel} | {title}
               </p>

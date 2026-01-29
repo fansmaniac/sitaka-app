@@ -68,7 +68,7 @@ const InfoCard = ({ title, icon: Icon, segments, total, onClick, onSegmentClick,
             {group1.map((s, i) => (
               <div key={i} className="flex items-center gap-2 whitespace-nowrap">
                 <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }}></div>
-                <div className="flex items-baseline gap-1.5">
+                <div className="flex items-baseline gap-2">
                   <span className="text-sm font-black text-gray-400 uppercase">{s.name}</span>
                   <span className="text-base font-black text-gray-800">{s.value.toLocaleString('id-ID')}</span>
                 </div>
@@ -82,7 +82,7 @@ const InfoCard = ({ title, icon: Icon, segments, total, onClick, onSegmentClick,
               {group2.map((s, i) => (
                 <div key={i} className="flex items-center gap-2 whitespace-nowrap">
                   <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }}></div>
-                  <div className="flex items-baseline gap-1.5">
+                  <div className="flex items-baseline gap-2">
                     <span className="text-sm font-black text-gray-400 uppercase">{s.name}</span>
                     <span className="text-base font-black text-gray-800">{s.value.toLocaleString('id-ID')}</span>
                   </div>

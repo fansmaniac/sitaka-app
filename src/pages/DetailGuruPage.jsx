@@ -34,7 +34,7 @@ const DonutChart = ({ segments, total, onSegmentClick }) => {
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
         <span className="text-2xl font-black text-gray-800 leading-none">{total.toLocaleString('id-ID')}</span>
         {/* Tulisan TOTAL diperbesar agar seimbang */}
-        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mt-1">Total</span>
+        <span className="text-sm font-blackk text-gray-400 uppercase tracking-widest mt-1">Total</span>
       </div>
     </div>
   );
@@ -69,7 +69,7 @@ const InfoCard = ({ title, icon: Icon, segments, total, onClick, onSegmentClick,
               <div key={i} className="flex items-center gap-2 whitespace-nowrap">
                 <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }}></div>
                 <div className="flex items-baseline gap-1.5">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">{s.name}</span>
+                  <span className="text-sm font-black text-gray-400 uppercase">{s.name}</span>
                   <span className="text-base font-black text-gray-800">{s.value.toLocaleString('id-ID')}</span>
                 </div>
               </div>
@@ -83,7 +83,7 @@ const InfoCard = ({ title, icon: Icon, segments, total, onClick, onSegmentClick,
                 <div key={i} className="flex items-center gap-2 whitespace-nowrap">
                   <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }}></div>
                   <div className="flex items-baseline gap-1.5">
-                    <span className="text-[10px] font-bold text-gray-400 uppercase">{s.name}</span>
+                    <span className="text-sm font-black text-gray-400 uppercase">{s.name}</span>
                     <span className="text-base font-black text-gray-800">{s.value.toLocaleString('id-ID')}</span>
                   </div>
                 </div>
@@ -175,9 +175,9 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
           title="Proyeksi Pensiun" icon={Calendar} colorClass="bg-orange-600"
           total={Object.values(stats.pensiun).reduce((a, b) => a + b, 0)}
           segments={[
-            { name: 'u56', value: stats.pensiun.u56, color: '#f97316' }, { name: 'u57', value: stats.pensiun.u57, color: '#ea580c' },
-            { name: 'u58', value: stats.pensiun.u58, color: '#c2410c' }, { name: 'u59', value: stats.pensiun.u59, color: '#9a3412' },
-            { name: 'u60', value: stats.pensiun.u60, color: '#7c2d12' }
+            { name: 'Usia 56', value: stats.pensiun.u56, color: '#f97316' }, { name: 'Usia 57', value: stats.pensiun.u57, color: '#ea580c' },
+            { name: 'Usia 58', value: stats.pensiun.u58, color: '#c2410c' }, { name: 'Usia 59', value: stats.pensiun.u59, color: '#9a3412' },
+            { name: 'Usia 60', value: stats.pensiun.u60, color: '#7c2d12' }
           ]}
         />
 

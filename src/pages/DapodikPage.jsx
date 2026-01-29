@@ -3,7 +3,7 @@ import { MapPin, ArrowLeft, Layers, Loader2 } from 'lucide-react';
 import { KABUPATEN_LIST, JENJANG_LIST } from '../constants/listData';
 import { StatusDoughnut } from '../components/StatusDoughnut';
 import { db } from '../firebase/config';
-import { collection, getDocs, query, where } from 'firebase/firestore'; // Impor query & where ditambahkan
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import DetailGuruPage from './DetailGuruPage';
 
 export default function DapodikPage({ onBack, Header }) {
@@ -17,12 +17,11 @@ export default function DapodikPage({ onBack, Header }) {
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('main'); 
 
-  // --- 2. FETCH DATA (OPTIMIZED FOR SITAKA) ---
+  // --- 2. FETCH DATA ---
   useEffect(() => {
     const fetchAllData = async () => {
       setLoading(true);
       try {
-        // Query terfilter di sisi Server (Hemat Kuota & Memori Browser)
         const qPtk = query(collection(db, 'dapodik_ptk'), where("tahun_data", "==", selectedYear));
         const qSekolah = query(collection(db, 'dapodik_sekolah'), where("tahun_data", "==", selectedYear));
         const qKepsek = query(collection(db, 'dapodik_kepsek'), where("tahun_data", "==", selectedYear));
@@ -42,9 +41,9 @@ export default function DapodikPage({ onBack, Header }) {
     };
 
     fetchAllData();
-  }, [selectedYear]); // Data akan di-fetch ulang otomatis saat user ganti tahun
+  }, [selectedYear]);
 
-  // --- 3. FILTER LOGIC (LOCAL FILTER UNTUK WILAYAH & JENJANG) ---
+  // --- 3. FILTER LOGIC ---
   const filtered = useMemo(() => {
     const filterFn = (d) => {
       const matchJenjang = selectedJenjang.some(j => 
@@ -60,7 +59,8 @@ export default function DapodikPage({ onBack, Header }) {
       ptk: ptkData.filter(filterFn),
       kepsek: kepsekData.filter(filterFn)
     };
-  }, [sekolahData, ptkData, kepsekData, selectedJenjang, selectedKabupaten]);
+    // Menambahkan selectedYear ke dependency agar sinkron saat tahun berubah
+  }, [sekolahData, ptkData, kepsekData, selectedJenjang, selectedKabupaten, selectedYear]);
 
   const displayTitle = useMemo(() => {
     if (selectedKabupaten.length === KABUPATEN_LIST.length) return `PROVINSI KALIMANTAN BARAT`;
@@ -68,7 +68,7 @@ export default function DapodikPage({ onBack, Header }) {
     return "WILAYAH TERPILIH";
   }, [selectedKabupaten]);
 
-  // --- 4. HELPER PERHITUNGAN ---
+  // --- 4. HELPER PERHITUNGAN (LOGIKA SITAKA) ---
   const getStat = (source, field, isStatusNegeri = null) => {
     return filtered[source]
       .filter(d => {
@@ -83,12 +83,15 @@ export default function DapodikPage({ onBack, Header }) {
   };
 
   const countGuru = (isStatusNegeri = null) => {
-    const listGuru = ["GURU", "GURU MAPEL", "GURU KELAS"];
     return filtered.ptk.filter(d => {
       const jenis = String(d['Jenis PTK'] || '').trim().toUpperCase();
-      const matchJenis = listGuru.includes(jenis);
-      if (!matchJenis) return false;
+      
+      // Logika SITAKA: Mencari semua yang mengandung kata "GURU"
+      const isGuru = jenis.includes("GURU"); 
+      
+      if (!isGuru) return false;
       if (isStatusNegeri === null) return true;
+      
       const status = String(d['Status Sekolah'] || '').trim().toUpperCase();
       return isStatusNegeri ? status === 'NEGERI' : status === 'SWASTA';
     }).length;
@@ -97,9 +100,13 @@ export default function DapodikPage({ onBack, Header }) {
   const countTendik = (isStatusNegeri = null) => {
     return filtered.ptk.filter(d => {
       const jenis = String(d['Jenis PTK'] || '').trim().toUpperCase();
-      const matchJenis = jenis === "TENAGA KEPENDIDIKAN";
-      if (!matchJenis) return false;
+      
+      // Khusus Tenaga Kependidikan
+      const isTendik = jenis === "TENAGA KEPENDIDIKAN";
+      
+      if (!isTendik) return false;
       if (isStatusNegeri === null) return true;
+      
       const status = String(d['Status Sekolah'] || '').trim().toUpperCase();
       return isStatusNegeri ? status === 'NEGERI' : status === 'SWASTA';
     }).length;
@@ -214,7 +221,8 @@ export default function DapodikPage({ onBack, Header }) {
             ) : (
               <div className="animate-in slide-in-from-right duration-500 h-full">
                 <DetailGuruPage 
-                  data={filtered.ptk.filter(d => ["GURU", "GURU MAPEL", "GURU KELAS"].includes(String(d['Jenis PTK'] || '').trim().toUpperCase()))} 
+                  // Filter sinkron dengan dashboard: Hanya ambil yang mengandung "GURU"
+                  data={filtered.ptk.filter(d => String(d['Jenis PTK'] || '').toUpperCase().includes("GURU"))} 
                   onBack={() => setViewMode('main')}
                   selectedYear={selectedYear}
                   title={displayTitle}

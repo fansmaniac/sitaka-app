@@ -40,7 +40,7 @@ export default function AdminDashboard({ Header }) {
 
   useEffect(() => { if (adminView === 'input') checkDatabaseStatus(); }, [adminView]);
 
-  // --- 2. LOGIKA HAPUS DATA PER TAHUN (OPTIMIZED CHUNK) ---
+  // --- 2. LOGIKA HAPUS DATA PER TAHUN ---
   const handleDeleteData = async (target) => {
     const confirmDelete = window.confirm(`PERINGATAN KERAS!\n\nYakin Menghapus Database ${target.label} Tahun ${target.year}?\nData yang dihapus tidak bisa dikembalikan.`);
     if (!confirmDelete) return;
@@ -60,7 +60,6 @@ export default function AdminDashboard({ Header }) {
 
       const allDocs = snapshot.docs;
       const totalDocs = allDocs.length;
-
       const chunkSize = 500;
       for (let i = 0; i < totalDocs; i += chunkSize) {
         const batch = writeBatch(db);
@@ -80,7 +79,7 @@ export default function AdminDashboard({ Header }) {
     }
   };
 
-  // --- 3. LOGIKA SMART SYNC & UPLOAD (DENGAN SANITASI DATA) ---
+  // --- 3. LOGIKA SMART SYNC & UPLOAD (DENGAN SANITASI DATA SITAKA) ---
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -91,7 +90,7 @@ export default function AdminDashboard({ Header }) {
     try {
       const jsonData = await readExcel(file);
       const collectionName = activeTarget.collection;
-      const cleanTahun = String(activeTarget.year); // Pastikan tahun adalah String
+      const cleanTahun = String(activeTarget.year);
       
       // Ambil data lama untuk Smart Sync
       const existingDocs = {};
@@ -101,14 +100,14 @@ export default function AdminDashboard({ Header }) {
 
       const toUpdate = [];
       jsonData.forEach((newData) => {
-        // SANITASI DATA: Bersihkan spasi dan pastikan tipe data String
-        const cleanNIK = String(newData['NIK'] || '').trim();
+        // --- PROSES SANITASI DATA (ANTI KARAKTER GAIB) ---
+        // \D menghapus semua karakter yang bukan angka (termasuk \u200c)
+        const cleanNIK = String(newData['NIK'] || '').replace(/\D/g, ''); 
         const cleanNPSN = String(newData['NPSN'] || '').trim();
         const cleanJenisPTK = String(newData['Jenis PTK'] || '').trim();
         
         let docId = null;
 
-        // Logika ID Unik: NIK untuk individu, NPSN untuk sekolah
         if (collectionName === 'dapodik_ptk' || collectionName === 'dapodik_kepsek') {
           docId = cleanNIK ? `${cleanNIK}_${cleanTahun}` : null;
         } else {
@@ -118,8 +117,6 @@ export default function AdminDashboard({ Header }) {
         if (!docId) return;
 
         const oldData = existingDocs[docId];
-        
-        // Cek apakah ada perubahan data (termasuk trim)
         const isChanged = !oldData || Object.keys(newData).some(key => 
           String(newData[key] || '').trim() !== String(oldData[key] || '').trim()
         );
@@ -129,10 +126,10 @@ export default function AdminDashboard({ Header }) {
             id: docId, 
             data: {
               ...newData,
-              NIK: cleanNIK,           // Simpan hasil sanitasi
-              NPSN: cleanNPSN,         // Simpan hasil sanitasi
-              'Jenis PTK': cleanJenisPTK, // Simpan hasil sanitasi
-              tahun_data: cleanTahun   // Simpan sebagai String untuk filter query
+              NIK: cleanNIK,
+              NPSN: cleanNPSN,
+              'Jenis PTK': cleanJenisPTK,
+              tahun_data: cleanTahun
             } 
           });
         }
@@ -150,6 +147,7 @@ export default function AdminDashboard({ Header }) {
         const chunk = toUpdate.slice(i, i + chunkSize);
         chunk.forEach((item) => {
           const docRef = doc(db, collectionName, item.id);
+          // Menggunakan item.data yang sudah disanitasi di atas
           batch.set(docRef, { 
             ...item.data, 
             updatedAt: new Date().toISOString() 
@@ -163,7 +161,7 @@ export default function AdminDashboard({ Header }) {
       checkDatabaseStatus();
     } catch (error) {
       console.error("Upload error:", error);
-      alert("Error saat sinkronisasi. Periksa format file Anda.");
+      alert("Error saat sinkronisasi.");
     } finally {
       setUploading(false);
       e.target.value = null; 
@@ -193,7 +191,6 @@ export default function AdminDashboard({ Header }) {
 
     sheet.addRow(headers[category]);
     sheet.getRow(1).font = { bold: true };
-    
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
@@ -261,7 +258,6 @@ export default function AdminDashboard({ Header }) {
       )}
 
       <div className={`flex-1 flex flex-col items-center p-12 overflow-y-auto ${adminView === 'main' ? 'justify-center' : 'justify-start pt-10'}`}>
-        
         {adminView === 'main' && (
           <div className="w-full flex flex-col items-center animate-in fade-in zoom-in duration-300">
             <div className="bg-blue-600 text-white w-20 h-20 rounded-3xl flex items-center justify-center mb-8 shadow-lg"><Database size={40} /></div>
@@ -282,16 +278,11 @@ export default function AdminDashboard({ Header }) {
         {adminView === 'input' && (
           <div className="flex flex-col items-center w-full max-w-6xl animate-in slide-in-from-top-4 duration-500">
             <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".xlsx, .xls" />
-            
             <div className="w-full flex justify-start mb-8">
-              <button 
-                onClick={() => setAdminView('main')} 
-                className="flex items-center gap-2 text-blue-700 font-black uppercase hover:bg-blue-100 px-6 py-3 rounded-2xl transition-all active:scale-90"
-              >
+              <button onClick={() => setAdminView('main')} className="flex items-center gap-2 text-blue-700 font-black uppercase hover:bg-blue-100 px-6 py-3 rounded-2xl transition-all active:scale-90">
                 <ArrowLeft size={24} /> Kembali ke Menu Utama
               </button>
             </div>
-            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full pb-20">
               <YearUploadGroup label="Satuan Pendidikan" collection="dapodik_sekolah" icon={School} colorClass="bg-blue-600" />
               <YearUploadGroup label="Database PTK" collection="dapodik_ptk" icon={Users} colorClass="bg-blue-500" />
@@ -305,14 +296,10 @@ export default function AdminDashboard({ Header }) {
         {adminView === 'settings' && (
           <div className="flex flex-col items-center w-full max-w-2xl animate-in slide-in-from-top-4 duration-500">
             <div className="w-full flex justify-start mb-8">
-              <button 
-                onClick={() => setAdminView('main')} 
-                className="flex items-center gap-2 text-gray-700 font-black uppercase hover:bg-gray-200 px-6 py-3 rounded-2xl transition-all active:scale-90"
-              >
+              <button onClick={() => setAdminView('main')} className="flex items-center gap-2 text-gray-700 font-black uppercase hover:bg-gray-200 px-6 py-3 rounded-2xl transition-all active:scale-90">
                 <ArrowLeft size={24} /> Kembali ke Menu Utama
               </button>
             </div>
-            
             <div className="bg-white w-full p-12 rounded-[3.5rem] shadow-2xl border border-gray-100">
               <div className="flex flex-col gap-8">
                 <div className="space-y-3 text-left">

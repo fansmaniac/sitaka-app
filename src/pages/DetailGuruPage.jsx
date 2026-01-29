@@ -1,0 +1,159 @@
+import React, { useMemo } from 'react';
+import { ArrowLeft, Users } from 'lucide-react';
+
+// --- KOMPONEN GRAFIK CUSTOM (MULTI-COLOR DONUT) ---
+const MultiDonut = ({ segments, total, label }) => {
+  let cumulativePercent = 0;
+
+  // Fungsi untuk membuat path SVG Arc
+  const getCoordinatesForPercent = (percent) => {
+    const x = Math.cos(2 * Math.PI * percent);
+    const y = Math.sin(2 * Math.PI * percent);
+    return [x, y];
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-6 w-full">
+      <div className="relative w-48 h-48">
+        <svg viewBox="-1 -1 2 2" className="transform -rotate-90 w-full h-full">
+          {segments.map((s, i) => {
+            if (s.value === 0) return null;
+            const [startX, startY] = getCoordinatesForPercent(cumulativePercent);
+            cumulativePercent += s.value / (total || 1);
+            const [endX, endY] = getCoordinatesForPercent(cumulativePercent);
+            const largeArcFlag = s.value / total > 0.5 ? 1 : 0;
+            const pathData = `M ${startX} ${startY} A 1 1 0 ${largeArcFlag} 1 ${endX} ${endY} L 0 0`;
+            return <path key={i} d={pathData} fill={s.color} />;
+          })}
+          <circle r="0.7" fill="white" /> {/* Membuat Lubang Donut */}
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-2xl font-black text-gray-800">{total.toLocaleString()}</span>
+          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Total PTK</span>
+        </div>
+      </div>
+      
+      {/* Legend / Keterangan Warna */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 w-full px-4">
+        {segments.map((s, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: s.color }}></div>
+            <div className="flex flex-col">
+              <span className="text-[10px] font-black text-gray-400 uppercase leading-none">{s.name}</span>
+              <span className="text-xs font-bold text-gray-700">{s.value.toLocaleString()} ({((s.value / (total || 1)) * 100).toFixed(1)}%)</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
+  
+  const stats = useMemo(() => {
+    const res = {
+      kualifikasi: { s1Atas: 0, s1Bawah: 0 },
+      sertifikasi: { sudah: 0, belum: 0 },
+      pegawai: { pns: 0, pppk: 0, gty: 0, honorS: 0, honorD: 0 },
+      pensiun: { u56: 0, u57: 0, u58: 0, u59: 0, u60: 0 }
+    };
+
+    data.forEach(ptk => {
+      // 1. Kualifikasi
+      if (String(ptk['Kualifikasi']).includes('> S1')) res.kualifikasi.s1Atas++;
+      else res.kualifikasi.s1Bawah++;
+
+      // 2. Sertifikasi
+      if (String(ptk['Sertifikasi']).includes('Sudah')) res.sertifikasi.sudah++;
+      else res.sertifikasi.belum++;
+
+      // 3. Pegawai
+      const sp = String(ptk['Status Kepegawaian'] || '').toUpperCase();
+      if (sp.includes('PNS')) res.pegawai.pns++;
+      else if (sp.includes('PPPK')) res.pegawai.pppk++;
+      else if (sp.includes('GTY')) res.pegawai.gty++;
+      else if (sp.includes('SEKOLAH')) res.pegawai.honorS++;
+      else if (sp.includes('DAERAH')) res.pegawai.honorD++;
+
+      // 4. Pensiun
+      if (ptk['Tanggal Lahir']) {
+        const age = parseInt(selectedYear) - new Date(ptk['Tanggal Lahir']).getFullYear();
+        if (age === 56) res.pensiun.u56++;
+        else if (age === 57) res.pensiun.u57++;
+        else if (age === 58) res.pensiun.u58++;
+        else if (age === 59) res.pensiun.u59++;
+        else if (age === 60) res.pensiun.u60++;
+      }
+    });
+    return res;
+  }, [data, selectedYear]);
+
+  return (
+    <div className="flex flex-col h-full animate-in fade-in duration-500">
+      {/* HEADER DETAIL */}
+      <div className="flex items-center justify-between mb-8 bg-white p-6 rounded-[2.5rem] shadow-sm border border-gray-100">
+        <div className="flex items-center gap-4">
+          <button onClick={onBack} className="p-3 bg-blue-50 text-blue-600 rounded-2xl hover:bg-blue-100 transition-all active:scale-90">
+            <ArrowLeft size={24} />
+          </button>
+          <div className="text-left">
+            <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tighter leading-none">Rincian Guru</h2>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em] mt-1">{title} • {selectedYear}</p>
+          </div>
+        </div>
+        <div className="bg-blue-600 px-6 py-3 rounded-2xl text-white shadow-lg flex items-center gap-3">
+          <Users size={20} />
+          <span className="text-xl font-black">{data.length.toLocaleString()}</span>
+        </div>
+      </div>
+
+      {/* GRID DIAGRAM */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-10">
+        
+        {/* Card Kualifikasi */}
+        <div className="bg-white p-8 rounded-[3.5rem] shadow-xl border border-gray-100 flex flex-col items-center">
+          <h4 className="text-sm font-black text-gray-800 uppercase tracking-widest mb-8">Kualifikasi Guru</h4>
+          <MultiDonut total={data.length} segments={[
+            { name: '> S1', value: stats.kualifikasi.s1Atas, color: '#2563eb' },
+            { name: '< S1', value: stats.kualifikasi.s1Bawah, color: '#001b5e' }
+          ]} />
+        </div>
+
+        {/* Card Sertifikasi */}
+        <div className="bg-white p-8 rounded-[3.5rem] shadow-xl border border-gray-100 flex flex-col items-center">
+          <h4 className="text-sm font-black text-gray-800 uppercase tracking-widest mb-8">Status Sergur Guru</h4>
+          <MultiDonut total={data.length} segments={[
+            { name: 'Sudah Sergur', value: stats.sertifikasi.sudah, color: '#0ea5e9' },
+            { name: 'Belum Sergur', value: stats.sertifikasi.belum, color: '#001b5e' }
+          ]} />
+        </div>
+
+        {/* Card Usia Pensiun */}
+        <div className="bg-white p-8 rounded-[3.5rem] shadow-xl border border-gray-100 flex flex-col items-center">
+          <h4 className="text-sm font-black text-gray-800 uppercase tracking-widest mb-8">Guru Berusia 56-60 Tahun</h4>
+          <MultiDonut total={Object.values(stats.pensiun).reduce((a, b) => a + b, 0)} segments={[
+            { name: 'u56', value: stats.pensiun.u56, color: '#3b82f6' },
+            { name: 'u57', value: stats.pensiun.u57, color: '#1d4ed8' },
+            { name: 'u58', value: stats.pensiun.u58, color: '#f97316' },
+            { name: 'u59', value: stats.pensiun.u59, color: '#7e22ce' },
+            { name: 'u60', value: stats.pensiun.u60, color: '#ec4899' }
+          ]} />
+        </div>
+
+        {/* Card Status Pegawai */}
+        <div className="bg-white p-8 rounded-[3.5rem] shadow-xl border border-gray-100 flex flex-col items-center">
+          <h4 className="text-sm font-black text-gray-800 uppercase tracking-widest mb-8">Status Pegawai Guru</h4>
+          <MultiDonut total={data.length} segments={[
+            { name: 'PNS', value: stats.pegawai.pns, color: '#3b82f6' },
+            { name: 'PPPK', value: stats.pegawai.pppk, color: '#f97316' },
+            { name: 'GTY/PTY', value: stats.pegawai.gty, color: '#7e22ce' },
+            { name: 'Honor Sekolah', value: stats.pegawai.honorS, color: '#001b5e' },
+            { name: 'Honor Daerah', value: stats.pegawai.honorD, color: '#0ea5e9' }
+          ]} />
+        </div>
+
+      </div>
+    </div>
+  );
+}

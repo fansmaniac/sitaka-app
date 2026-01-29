@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { ArrowLeft, Users, MousePointer2, GraduationCap, Award, Calendar, Briefcase } from 'lucide-react';
 import RincianKualifikasi from './RincianKualifikasi';
 
-// --- KOMPONEN DONUT (SLIM VERSION) ---
+// --- KOMPONEN DONUT (DOMINAN) ---
 const DonutChart = ({ segments, total, onSegmentClick }) => {
   let cumulativePercent = 0;
   const getCoordinatesForPercent = (percent) => {
@@ -12,7 +12,7 @@ const DonutChart = ({ segments, total, onSegmentClick }) => {
   };
 
   return (
-    <div className="relative w-32 h-32 shrink-0">
+    <div className="relative w-40 h-40 shrink-0"> {/* Ukuran Donut Diperbesar */}
       <svg viewBox="-1 -1 2 2" className="transform -rotate-90 w-full h-full">
         {segments.map((s, i) => {
           if (s.value === 0) return null;
@@ -31,61 +31,65 @@ const DonutChart = ({ segments, total, onSegmentClick }) => {
         })}
         <circle r="0.75" fill="white" />
       </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-        <span className="text-lg font-black text-gray-800 leading-none">{total.toLocaleString('id-ID')}</span>
-        <span className="text-[7px] font-black text-gray-400 uppercase mt-0.5">Total</span>
+      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
+        <span className="text-2xl font-black text-gray-800 leading-none">{total.toLocaleString('id-ID')}</span>
+        {/* Tulisan TOTAL diperbesar agar seimbang */}
+        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mt-1">Total</span>
       </div>
     </div>
   );
 };
 
-// --- KOMPONEN KARTU TRIPLE COLUMN (Diagram > Kategori A > Kategori B) ---
+// --- KOMPONEN KARTU (Diagram Dominan + Rincian Ramping) ---
 const InfoCard = ({ title, icon: Icon, segments, total, onClick, onSegmentClick, colorClass }) => {
-  // Pecah segments menjadi 2 grup (maksimal 3 item per grup agar tidak sesak)
   const group1 = segments.slice(0, 3);
   const group2 = segments.slice(3);
 
   return (
     <div 
       onClick={onClick}
-      className={`bg-white p-5 rounded-[2.5rem] shadow-lg border-2 border-transparent ${onClick ? 'hover:border-blue-500 cursor-pointer active:scale-[0.98]' : ''} transition-all flex flex-col gap-3 overflow-hidden relative group`}
+      className={`bg-white p-6 rounded-[3rem] shadow-xl border-2 border-transparent ${onClick ? 'hover:border-blue-500 cursor-pointer active:scale-[0.98]' : ''} transition-all flex flex-col gap-4 overflow-hidden relative group`}
     >
+      {/* JUDUL RINCIAN DIPERBESAR */}
       <div className="flex items-center gap-3 shrink-0">
-        <div className={`${colorClass} p-1.5 rounded-lg text-white`}><Icon size={16} /></div>
-        <h4 className="text-[10px] font-black text-gray-800 uppercase tracking-tight">{title}</h4>
-        {onClick && <MousePointer2 size={12} className="ml-auto text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />}
+        <div className={`${colorClass} p-2 rounded-xl text-white shadow-md`}><Icon size={20} /></div>
+        <h4 className="text-base font-black text-gray-800 uppercase tracking-tighter">{title}</h4>
+        {onClick && <MousePointer2 size={16} className="ml-auto text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />}
       </div>
 
-      <div className="flex items-center justify-between gap-4 flex-1 min-h-0">
-        {/* BAGIAN 1: DIAGRAM (Kiri) */}
+      <div className="flex items-center justify-start gap-8 flex-1 min-h-0">
+        {/* BAGIAN 1: DIAGRAM (Paling Dominan) */}
         <DonutChart segments={segments} total={total} onSegmentClick={onSegmentClick} />
 
-        {/* BAGIAN 2: KATEGORI GRUP A (Tengah) */}
-        <div className="flex-1 flex flex-col gap-1.5">
-          {group1.map((s, i) => (
-            <div key={i} className="bg-gray-50 p-2.5 rounded-xl border border-gray-100 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: s.color }}></div>
-                <span className="text-[9px] font-bold text-gray-500 uppercase leading-none">{s.name}</span>
+        {/* BAGIAN RINCIAN (Ramping & Rapat) */}
+        <div className="flex flex-wrap gap-x-8 gap-y-2 flex-1 items-start">
+          {/* Kolom 1 */}
+          <div className="flex flex-col gap-2">
+            {group1.map((s, i) => (
+              <div key={i} className="flex items-center gap-2 whitespace-nowrap">
+                <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }}></div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase">{s.name}</span>
+                  <span className="text-base font-black text-gray-800">{s.value.toLocaleString('id-ID')}</span>
+                </div>
               </div>
-              <span className="text-sm font-black text-gray-800">{s.value.toLocaleString('id-ID')}</span>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
 
-        {/* BAGIAN 3: KATEGORI GRUP B (Kanan) */}
-        <div className="flex-1 flex flex-col gap-1.5">
-          {group2.map((s, i) => (
-            <div key={i} className="bg-gray-50 p-2.5 rounded-xl border border-gray-100 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: s.color }}></div>
-                <span className="text-[9px] font-bold text-gray-500 uppercase leading-none">{s.name}</span>
-              </div>
-              <span className="text-sm font-black text-gray-800">{s.value.toLocaleString('id-ID')}</span>
+          {/* Kolom 2 */}
+          {group2.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {group2.map((s, i) => (
+                <div key={i} className="flex items-center gap-2 whitespace-nowrap">
+                  <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }}></div>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase">{s.name}</span>
+                    <span className="text-base font-black text-gray-800">{s.value.toLocaleString('id-ID')}</span>
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-          {/* Filler jika grup 2 kosong atau lebih sedikit agar layout tetap simetris */}
-          {group2.length < group1.length && group2.length > 0 && <div className="flex-1"></div>}
+          )}
         </div>
       </div>
     </div>
@@ -136,24 +140,26 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
   }
 
   return (
-    <div className="h-full flex flex-col overflow-hidden p-4 bg-gray-100">
-      <div className="flex items-center justify-between mb-4 bg-white px-8 py-3 rounded-[2.5rem] shadow-sm shrink-0">
+    <div className="h-full flex flex-col overflow-hidden p-4 bg-gray-50">
+      {/* HEADER DASHBOARD */}
+      <div className="flex items-center justify-between mb-6 bg-white px-8 py-5 rounded-[2.5rem] shadow-md shrink-0">
         <div className="flex items-center gap-4">
-          <button onClick={onBack} className="p-2 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 active:scale-90 transition-all"><ArrowLeft size={20} /></button>
+          <button onClick={onBack} className="p-3 bg-blue-50 text-blue-600 rounded-2xl hover:bg-blue-100 active:scale-90 transition-all"><ArrowLeft size={24} /></button>
           <div className="text-left">
-            <h2 className="text-lg font-black text-gray-800 uppercase tracking-tighter leading-none">Rincian Data PTK</h2>
-            <p className="text-[9px] font-bold text-gray-400 uppercase mt-0.5">{title} • {selectedYear}</p>
+            <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tighter leading-none">Statistik Rincian PTK</h2>
+            <p className="text-xs font-bold text-gray-400 uppercase mt-1">{title} • {selectedYear}</p>
           </div>
         </div>
-        <div className="bg-blue-600 px-5 py-2 rounded-2xl text-white shadow-lg flex items-center gap-2">
-          <Users size={16} />
-          <span className="text-base font-black">{data.length.toLocaleString('id-ID')}</span>
+        <div className="bg-blue-600 px-6 py-3 rounded-2xl text-white shadow-lg flex items-center gap-3">
+          <Users size={20} />
+          <span className="text-xl font-black">{data.length.toLocaleString('id-ID')}</span>
         </div>
       </div>
 
-      <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-4 min-h-0 pb-2">
+      {/* GRID 2x2 ONE-SCREEN */}
+      <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-6 min-h-0 pb-4">
         <InfoCard 
-          title="Kualifikasi Akademik" icon={GraduationCap} colorClass="bg-blue-600"
+          title="Kualifikasi Pendidikan" icon={GraduationCap} colorClass="bg-blue-600"
           total={data.length} onClick={() => { setActiveKualifikasi('SEMUA'); setSelectedSubView('table'); }}
           onSegmentClick={(label) => { setActiveKualifikasi(label); setSelectedSubView('table'); }}
           segments={[{ name: '> S1', value: stats.kualifikasi.s1Atas, color: '#2563eb' }, { name: '< S1', value: stats.kualifikasi.s1Bawah, color: '#1e3a8a' }]}
@@ -169,9 +175,9 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
           title="Proyeksi Pensiun" icon={Calendar} colorClass="bg-orange-600"
           total={Object.values(stats.pensiun).reduce((a, b) => a + b, 0)}
           segments={[
-            { name: 'Usia 56', value: stats.pensiun.u56, color: '#f97316' }, { name: 'Usia 57', value: stats.pensiun.u57, color: '#ea580c' },
-            { name: 'Usia 58', value: stats.pensiun.u58, color: '#c2410c' }, { name: 'Usia 59', value: stats.pensiun.u59, color: '#9a3412' },
-            { name: 'Usia 60', value: stats.pensiun.u60, color: '#7c2d12' }
+            { name: 'u56', value: stats.pensiun.u56, color: '#f97316' }, { name: 'u57', value: stats.pensiun.u57, color: '#ea580c' },
+            { name: 'u58', value: stats.pensiun.u58, color: '#c2410c' }, { name: 'u59', value: stats.pensiun.u59, color: '#9a3412' },
+            { name: 'u60', value: stats.pensiun.u60, color: '#7c2d12' }
           ]}
         />
 

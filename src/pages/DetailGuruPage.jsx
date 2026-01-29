@@ -1,11 +1,11 @@
-import React, { useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { ArrowLeft, Users } from 'lucide-react';
+import RincianKualifikasi from './RincianKualifikasi'; // Import file baru untuk tabel
 
 // --- KOMPONEN GRAFIK CUSTOM (MULTI-COLOR DONUT) ---
-const MultiDonut = ({ segments, total, label }) => {
+const MultiDonut = ({ segments, total, label, onSegmentClick }) => {
   let cumulativePercent = 0;
 
-  // Fungsi untuk membuat path SVG Arc
   const getCoordinatesForPercent = (percent) => {
     const x = Math.cos(2 * Math.PI * percent);
     const y = Math.sin(2 * Math.PI * percent);
@@ -23,11 +23,19 @@ const MultiDonut = ({ segments, total, label }) => {
             const [endX, endY] = getCoordinatesForPercent(cumulativePercent);
             const largeArcFlag = s.value / total > 0.5 ? 1 : 0;
             const pathData = `M ${startX} ${startY} A 1 1 0 ${largeArcFlag} 1 ${endX} ${endY} L 0 0`;
-            return <path key={i} d={pathData} fill={s.color} />;
+            return (
+              <path 
+                key={i} 
+                d={pathData} 
+                fill={s.color} 
+                className="cursor-pointer hover:opacity-80 transition-opacity"
+                onClick={() => onSegmentClick && onSegmentClick(s.name)}
+              />
+            );
           })}
-          <circle r="0.7" fill="white" /> {/* Membuat Lubang Donut */}
+          <circle r="0.7" fill="white" />
         </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
           <span className="text-2xl font-black text-gray-800">{total.toLocaleString()}</span>
           <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Total PTK</span>
         </div>
@@ -36,7 +44,11 @@ const MultiDonut = ({ segments, total, label }) => {
       {/* Legend / Keterangan Warna */}
       <div className="grid grid-cols-2 gap-x-4 gap-y-2 w-full px-4">
         {segments.map((s, i) => (
-          <div key={i} className="flex items-center gap-2">
+          <div 
+            key={i} 
+            className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded-lg transition-all"
+            onClick={() => onSegmentClick && onSegmentClick(s.name)}
+          >
             <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: s.color }}></div>
             <div className="flex flex-col">
               <span className="text-[10px] font-black text-gray-400 uppercase leading-none">{s.name}</span>
@@ -50,7 +62,10 @@ const MultiDonut = ({ segments, total, label }) => {
 };
 
 export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
-  
+  // --- STATE UNTUK DRILL-DOWN ---
+  const [selectedSubView, setSelectedSubView] = useState('charts'); // 'charts' atau 'table'
+  const [activeKualifikasi, setActiveKualifikasi] = useState('');
+
   const stats = useMemo(() => {
     const res = {
       kualifikasi: { s1Atas: 0, s1Bawah: 0 },
@@ -61,11 +76,11 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
 
     data.forEach(ptk => {
       // 1. Kualifikasi
-      if (String(ptk['Kualifikasi']).includes('> S1')) res.kualifikasi.s1Atas++;
+      if (String(ptk['Kualifikasi'] || '').includes('> S1')) res.kualifikasi.s1Atas++;
       else res.kualifikasi.s1Bawah++;
 
       // 2. Sertifikasi
-      if (String(ptk['Sertifikasi']).includes('Sudah')) res.sertifikasi.sudah++;
+      if (String(ptk['Sertifikasi'] || '').includes('Sudah')) res.sertifikasi.sudah++;
       else res.sertifikasi.belum++;
 
       // 3. Pegawai
@@ -78,17 +93,49 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
 
       // 4. Pensiun
       if (ptk['Tanggal Lahir']) {
-        const age = parseInt(selectedYear) - new Date(ptk['Tanggal Lahir']).getFullYear();
-        if (age === 56) res.pensiun.u56++;
-        else if (age === 57) res.pensiun.u57++;
-        else if (age === 58) res.pensiun.u58++;
-        else if (age === 59) res.pensiun.u59++;
-        else if (age === 60) res.pensiun.u60++;
+        const birthYear = new Date(ptk['Tanggal Lahir']).getFullYear();
+        if (!isNaN(birthYear)) {
+          const age = parseInt(selectedYear) - birthYear;
+          if (age === 56) res.pensiun.u56++;
+          else if (age === 57) res.pensiun.u57++;
+          else if (age === 58) res.pensiun.u58++;
+          else if (age === 59) res.pensiun.u59++;
+          else if (age === 60) res.pensiun.u60++;
+        }
       }
     });
     return res;
   }, [data, selectedYear]);
 
+  // --- LOGIKA DRILL-DOWN ---
+  const handleSliceClick = (label) => {
+    setActiveKualifikasi(label);
+    setSelectedSubView('table');
+  };
+
+  const dataUntukTabel = useMemo(() => {
+    if (!activeKualifikasi) return [];
+    return data.filter(d => {
+      const qual = String(d['Kualifikasi'] || '');
+      if (activeKualifikasi === '> S1') return qual.includes('> S1');
+      if (activeKualifikasi === '< S1') return !qual.includes('> S1');
+      return false;
+    });
+  }, [data, activeKualifikasi]);
+
+  // RENDER TAMPILAN TABEL JIKA MODE TABLE AKTIF
+  if (selectedSubView === 'table') {
+    return (
+      <RincianKualifikasi 
+        data={dataUntukTabel}
+        qualificationLabel={activeKualifikasi}
+        onBack={() => setSelectedSubView('charts')}
+        title={`${title} ${selectedYear}`}
+      />
+    );
+  }
+
+  // RENDER TAMPILAN DIAGRAM (DEFAULT)
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-500">
       {/* HEADER DETAIL */}
@@ -111,13 +158,17 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
       {/* GRID DIAGRAM */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-10">
         
-        {/* Card Kualifikasi */}
+        {/* Card Kualifikasi (BISA DIKLIK) */}
         <div className="bg-white p-8 rounded-[3.5rem] shadow-xl border border-gray-100 flex flex-col items-center">
-          <h4 className="text-sm font-black text-gray-800 uppercase tracking-widest mb-8">Kualifikasi Guru</h4>
-          <MultiDonut total={data.length} segments={[
-            { name: '> S1', value: stats.kualifikasi.s1Atas, color: '#2563eb' },
-            { name: '< S1', value: stats.kualifikasi.s1Bawah, color: '#001b5e' }
-          ]} />
+          <h4 className="text-sm font-black text-gray-800 uppercase tracking-widest mb-8">Kualifikasi Guru (Klik untuk Detail)</h4>
+          <MultiDonut 
+            total={data.length} 
+            onSegmentClick={handleSliceClick}
+            segments={[
+              { name: '> S1', value: stats.kualifikasi.s1Atas, color: '#2563eb' },
+              { name: '< S1', value: stats.kualifikasi.s1Bawah, color: '#001b5e' }
+            ]} 
+          />
         </div>
 
         {/* Card Sertifikasi */}

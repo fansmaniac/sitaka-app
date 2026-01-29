@@ -116,9 +116,9 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
             {/* TOMBOL UNDUH DATA */}
             <button 
               onClick={downloadExcel}
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-2xl font-black uppercase text-[10px] shadow-lg transition-all active:scale-95 border-b-4 border-emerald-800"
+              className="flex items-center gap-3 bg-emerald-600 hover:bg-emerald-700 text-white px-12 py-5 rounded-3xl font-black uppercase text-sm shadow-2xl transition-all active:scale-95 border-b-4 border-emerald-800"
             >
-              <Download size={16} /> Unduh (.xlsx)
+              <Download size={20} /> Unduh (.xlsx)
             </button>
             
             <div className="bg-white/10 px-4 py-2 rounded-2xl border border-white/20 flex flex-col items-end">

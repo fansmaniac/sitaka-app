@@ -157,7 +157,7 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
       </div>
 
       {/* GRID 2x2 ONE-SCREEN */}
-      <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-6 min-h-0 pb-4">
+      <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-10 min-h-0 pb-4">
         <InfoCard 
           title="Kualifikasi Pendidikan" icon={GraduationCap} colorClass="bg-blue-600"
           total={data.length} onClick={() => { setActiveKualifikasi('SEMUA'); setSelectedSubView('table'); }}

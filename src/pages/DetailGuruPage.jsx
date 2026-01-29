@@ -43,15 +43,22 @@ const MultiDonut = ({ segments, total, onSegmentClick }) => {
         </div>
       </div>
       
-       <div className="grid grid-cols-1 gap-6 w-full px-6"> {/* Dibuat 1 kolom supaya tulisan bisa panjang & besar */}
+      {/* LEGEND: UKURAN SEDANG & ELEGAN (DALAM PADDING KARTU) */}
+      <div className="grid grid-cols-1 gap-3 w-full px-4"> {/* Gap dikurangi agar lebih rapat */}
         {segments.map((s, i) => (
-          <div key={i} className="flex items-center justify-between bg-gray-50 p-6 rounded-[2rem] border border-gray-100 shadow-sm">
-            <div className="flex items-center gap-4">
-              <div className="w-6 h-6 rounded-full shrink-0" style={{ backgroundColor: s.color }}></div>
-              <span className="text-lg font-black text-gray-500 uppercase tracking-tighter">{s.name}</span>
+          <div 
+            key={i} 
+            className="flex items-center justify-between bg-gray-50/50 p-4 rounded-2xl border border-gray-100 shadow-sm"
+          >
+            <div className="flex items-center gap-3">
+              {/* Bulatan Warna: Sedang */}
+              <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: s.color }}></div>
+              {/* Nama Kategori: Sedang */}
+              <span className="text-xs font-black text-gray-400 uppercase tracking-wider">{s.name}</span>
             </div>
-            {/* ANGKA DATA DI KANAN: Dibuat Sangat Besar */}
-            <div className="text-4xl font-black text-gray-800">
+            
+            {/* ANGKA DATA DI KANAN: Ukuran Sedang (2xl) */}
+            <div className="text-2xl font-black text-gray-800 tracking-tight">
               {s.value.toLocaleString('id-ID')}
             </div>
           </div>

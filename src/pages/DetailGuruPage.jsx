@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { ArrowLeft, Users, MousePointer2, GraduationCap, Award, Calendar, Briefcase } from 'lucide-react';
 import RincianKualifikasi from './RincianKualifikasi';
 
-// --- KOMPONEN DONUT (HANYA LINGKARAN) ---
+// --- KOMPONEN DONUT (SLIM VERSION) ---
 const DonutChart = ({ segments, total, onSegmentClick }) => {
   let cumulativePercent = 0;
   const getCoordinatesForPercent = (percent) => {
@@ -12,7 +12,7 @@ const DonutChart = ({ segments, total, onSegmentClick }) => {
   };
 
   return (
-    <div className="relative w-36 h-36 shrink-0">
+    <div className="relative w-32 h-32 shrink-0">
       <svg viewBox="-1 -1 2 2" className="transform -rotate-90 w-full h-full">
         {segments.map((s, i) => {
           if (s.value === 0) return null;
@@ -32,50 +32,65 @@ const DonutChart = ({ segments, total, onSegmentClick }) => {
         <circle r="0.75" fill="white" />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-        <span className="text-xl font-black text-gray-800 leading-none">{total.toLocaleString('id-ID')}</span>
-        <span className="text-[8px] font-black text-gray-400 uppercase mt-1">Total</span>
+        <span className="text-lg font-black text-gray-800 leading-none">{total.toLocaleString('id-ID')}</span>
+        <span className="text-[7px] font-black text-gray-400 uppercase mt-0.5">Total</span>
       </div>
     </div>
   );
 };
 
-// --- KOMPONEN KARTU SIDE-BY-SIDE ---
-const InfoCard = ({ title, icon: Icon, segments, total, onClick, onSegmentClick, colorClass }) => (
-  <div 
-    onClick={onClick}
-    className={`bg-white p-6 rounded-[2.5rem] shadow-lg border-2 border-transparent ${onClick ? 'hover:border-blue-500 cursor-pointer active:scale-[0.98]' : ''} transition-all flex flex-col gap-4 overflow-hidden relative group`}
-  >
-    {/* Judul & Ikon */}
-    <div className="flex items-center gap-3 shrink-0">
-      <div className={`${colorClass} p-2 rounded-xl text-white`}><Icon size={18} /></div>
-      <h4 className="text-xs font-black text-gray-800 uppercase tracking-tight">{title}</h4>
-      {onClick && <MousePointer2 size={14} className="ml-auto text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />}
-    </div>
+// --- KOMPONEN KARTU TRIPLE COLUMN (Diagram > Kategori A > Kategori B) ---
+const InfoCard = ({ title, icon: Icon, segments, total, onClick, onSegmentClick, colorClass }) => {
+  // Pecah segments menjadi 2 grup (maksimal 3 item per grup agar tidak sesak)
+  const group1 = segments.slice(0, 3);
+  const group2 = segments.slice(3);
 
-    {/* Content Area: Split Kiri-Kanan */}
-    <div className="flex items-center justify-between gap-6 flex-1 min-h-0">
-      {/* Kiri: Donut */}
-      <DonutChart segments={segments} total={total} onSegmentClick={onSegmentClick} />
+  return (
+    <div 
+      onClick={onClick}
+      className={`bg-white p-5 rounded-[2.5rem] shadow-lg border-2 border-transparent ${onClick ? 'hover:border-blue-500 cursor-pointer active:scale-[0.98]' : ''} transition-all flex flex-col gap-3 overflow-hidden relative group`}
+    >
+      <div className="flex items-center gap-3 shrink-0">
+        <div className={`${colorClass} p-1.5 rounded-lg text-white`}><Icon size={16} /></div>
+        <h4 className="text-[10px] font-black text-gray-800 uppercase tracking-tight">{title}</h4>
+        {onClick && <MousePointer2 size={12} className="ml-auto text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />}
+      </div>
 
-      {/* Kanan: Legend (Padding di dalam Padding) */}
-      <div className="flex-1 flex flex-col gap-2 overflow-y-auto max-h-40 pr-1">
-        {segments.map((s, i) => (
-          <div 
-            key={i} 
-            className="bg-gray-50 p-3 rounded-2xl border border-gray-100 flex items-center justify-between group/item hover:bg-gray-100 transition-colors"
-            onClick={(e) => { if(onSegmentClick) { e.stopPropagation(); onSegmentClick(s.name); }}}
-          >
-            <div className="flex items-center gap-2">
-              <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }}></div>
-              <span className="text-[10px] font-bold text-gray-500 uppercase">{s.name}</span>
+      <div className="flex items-center justify-between gap-4 flex-1 min-h-0">
+        {/* BAGIAN 1: DIAGRAM (Kiri) */}
+        <DonutChart segments={segments} total={total} onSegmentClick={onSegmentClick} />
+
+        {/* BAGIAN 2: KATEGORI GRUP A (Tengah) */}
+        <div className="flex-1 flex flex-col gap-1.5">
+          {group1.map((s, i) => (
+            <div key={i} className="bg-gray-50 p-2.5 rounded-xl border border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: s.color }}></div>
+                <span className="text-[9px] font-bold text-gray-500 uppercase leading-none">{s.name}</span>
+              </div>
+              <span className="text-sm font-black text-gray-800">{s.value.toLocaleString('id-ID')}</span>
             </div>
-            <span className="text-lg font-black text-gray-800">{s.value.toLocaleString('id-ID')}</span>
-          </div>
-        ))}
+          ))}
+        </div>
+
+        {/* BAGIAN 3: KATEGORI GRUP B (Kanan) */}
+        <div className="flex-1 flex flex-col gap-1.5">
+          {group2.map((s, i) => (
+            <div key={i} className="bg-gray-50 p-2.5 rounded-xl border border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: s.color }}></div>
+                <span className="text-[9px] font-bold text-gray-500 uppercase leading-none">{s.name}</span>
+              </div>
+              <span className="text-sm font-black text-gray-800">{s.value.toLocaleString('id-ID')}</span>
+            </div>
+          ))}
+          {/* Filler jika grup 2 kosong atau lebih sedikit agar layout tetap simetris */}
+          {group2.length < group1.length && group2.length > 0 && <div className="flex-1"></div>}
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
   const [selectedSubView, setSelectedSubView] = useState('charts');
@@ -92,9 +107,8 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
     data.forEach(ptk => {
       const qual = String(ptk['Kualifikasi'] || '').toUpperCase();
       if (qual.includes('> S1')) res.kualifikasi.s1Atas++; else res.kualifikasi.s1Bawah++;
-
       if (String(ptk['Sertifikasi'] || '').includes('Sudah')) res.sertifikasi.sudah++; else res.sertifikasi.belum++;
-
+      
       const sp = String(ptk['Status Kepegawaian'] || '').toUpperCase();
       if (sp.includes('PNS')) res.pegawai.pns++;
       else if (sp.includes('PPPK')) res.pegawai.pppk++;
@@ -123,25 +137,21 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
 
   return (
     <div className="h-full flex flex-col overflow-hidden p-4 bg-gray-100">
-      {/* HEADER SLIM */}
-      <div className="flex items-center justify-between mb-6 bg-white px-8 py-4 rounded-[2.5rem] shadow-sm shrink-0">
+      <div className="flex items-center justify-between mb-4 bg-white px-8 py-3 rounded-[2.5rem] shadow-sm shrink-0">
         <div className="flex items-center gap-4">
-          <button onClick={onBack} className="p-2.5 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 active:scale-90 transition-all">
-            <ArrowLeft size={22} />
-          </button>
+          <button onClick={onBack} className="p-2 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 active:scale-90 transition-all"><ArrowLeft size={20} /></button>
           <div className="text-left">
-            <h2 className="text-xl font-black text-gray-800 uppercase tracking-tighter leading-none">Rincian Data PTK</h2>
-            <p className="text-xs font-bold text-gray-400 uppercase mt-1">{title} • {selectedYear}</p>
+            <h2 className="text-lg font-black text-gray-800 uppercase tracking-tighter leading-none">Rincian Data PTK</h2>
+            <p className="text-[9px] font-bold text-gray-400 uppercase mt-0.5">{title} • {selectedYear}</p>
           </div>
         </div>
-        <div className="bg-blue-600 px-6 py-2.5 rounded-2xl text-white shadow-lg flex items-center gap-3">
-          <Users size={18} />
-          <span className="text-lg font-black">{data.length.toLocaleString('id-ID')}</span>
+        <div className="bg-blue-600 px-5 py-2 rounded-2xl text-white shadow-lg flex items-center gap-2">
+          <Users size={16} />
+          <span className="text-base font-black">{data.length.toLocaleString('id-ID')}</span>
         </div>
       </div>
 
-      {/* GRID 2x2 ONE-SCREEN */}
-      <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-6 min-h-0">
+      <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-4 min-h-0 pb-2">
         <InfoCard 
           title="Kualifikasi Akademik" icon={GraduationCap} colorClass="bg-blue-600"
           total={data.length} onClick={() => { setActiveKualifikasi('SEMUA'); setSelectedSubView('table'); }}

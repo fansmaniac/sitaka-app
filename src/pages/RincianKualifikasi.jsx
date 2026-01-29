@@ -3,21 +3,20 @@ import { ArrowLeft, ChevronLeft, ChevronRight, Search, FileSpreadsheet, MapPin, 
 
 export default function RincianKualifikasi({ data, qualificationLabel, onBack, title }) {
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedKab, setSelectedKab] = useState('SEMUA'); // State baru untuk filter wilayah
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [selectedKab, setSelectedKab] = useState('SEMUA'); 
+  const [rowsPerPage, setRowsPerPage] = useState(20);
   const [currentPage, setCurrentPage] = useState(1);
 
-  // 1. Dapatkan daftar unik Kabupaten dari data yang ada untuk Dropdown
+  // Unik Kabupaten dengan Sanitasi
   const listKabupaten = useMemo(() => {
-    const unik = [...new Set(data.map(item => item['Kabupaten/Kota'] || item['Kab/Kota']))];
-    return unik.sort(); // Urutkan nama kabupaten A-Z
+    const unik = [...new Set(data.map(item => String(item['Kabupaten/Kota'] || item['Kab/Kota'] || '').trim()))];
+    return unik.filter(k => k !== '').sort();
   }, [data]);
 
-  // 2. LOGIKA UTAMA: Filter Search -> Filter Wilayah -> Urut Wilayah
+  // Logika Filter & Sort (Audit Mode)
   const processedData = useMemo(() => {
     let result = [...data];
 
-    // Filter berdasarkan Search (Nama atau NIK)
     if (searchTerm) {
       result = result.filter(item => 
         String(item['Nama PTK'] || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -25,103 +24,64 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
       );
     }
 
-    // Filter berdasarkan Kabupaten (Dropdown)
     if (selectedKab !== 'SEMUA') {
       result = result.filter(item => 
-        (item['Kabupaten/Kota'] || item['Kab/Kota']) === selectedKab
+        String(item['Kabupaten/Kota'] || item['Kab/Kota'] || '').trim().toUpperCase() === selectedKab.toUpperCase()
       );
     }
 
-    // URUTKAN OTOMATIS: Berdasarkan Wilayah (Kabupaten/Kota)
+    // Urut otomatis berdasarkan Kabupaten (A-Z)
     return result.sort((a, b) => {
       const kabA = String(a['Kabupaten/Kota'] || a['Kab/Kota'] || '').toUpperCase();
       const kabB = String(b['Kabupaten/Kota'] || b['Kab/Kota'] || '').toUpperCase();
-      if (kabA < kabB) return -1;
-      if (kabA > kabB) return 1;
-      return 0;
+      return kabA.localeCompare(kabB);
     });
   }, [data, searchTerm, selectedKab]);
 
-  // 3. Logika Paginasi
   const totalPages = Math.ceil(processedData.length / rowsPerPage);
-  const startIndex = (currentPage - 1) * rowsPerPage;
-  const currentRows = processedData.slice(startIndex, startIndex + rowsPerPage);
-
-  const goToPage = (page) => {
-    if (page >= 1 && page <= totalPages) setCurrentPage(page);
-  };
+  const currentRows = processedData.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
 
   return (
-    <div className="flex flex-col h-full bg-white rounded-[2rem] shadow-xl overflow-hidden animate-in fade-in duration-500">
-      {/* HEADER TABEL */}
+    <div className="flex flex-col h-full bg-white rounded-[2rem] shadow-xl overflow-hidden animate-in slide-in-from-right duration-500">
       <div className="bg-blue-700 p-6 text-white flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <button onClick={onBack} className="p-2 bg-white/20 rounded-xl hover:bg-white/30 transition-all">
-              <ArrowLeft size={20} />
-            </button>
+            <button onClick={onBack} className="p-2 bg-white/20 rounded-xl hover:bg-white/30 transition-all"><ArrowLeft size={20} /></button>
             <div>
-              <h3 className="text-xl font-black uppercase tracking-tight">Audit Individu Guru</h3>
+              <h3 className="text-xl font-black uppercase tracking-tight">Tabel Audit Guru</h3>
               <p className="text-xs opacity-80 font-bold uppercase">Kualifikasi: {qualificationLabel} | {title}</p>
             </div>
           </div>
           <div className="bg-white/10 px-4 py-2 rounded-2xl border border-white/20 flex flex-col items-end">
             <span className="text-2xl font-black">{processedData.length.toLocaleString('id-ID')}</span>
-            <span className="text-[9px] uppercase opacity-70 font-black">Data Lolos Filter</span>
+            <span className="text-[9px] uppercase font-black">Data Lolos Filter</span>
           </div>
         </div>
 
-        {/* BARIS FILTER & SEARCH */}
         <div className="flex flex-wrap gap-4 items-center">
-          {/* SEARCH BOX */}
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-300" size={18} />
             <input 
-              type="text" 
-              placeholder="Cari Nama atau NIK..." 
-              value={searchTerm}
+              type="text" placeholder="Cari Nama / NIK..." value={searchTerm}
               onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-              className="w-full bg-white/10 border border-white/20 rounded-xl py-2.5 pl-12 pr-4 text-white placeholder:text-blue-300 focus:outline-none focus:bg-white/20 transition-all font-bold"
+              className="w-full bg-white/10 border border-white/20 rounded-xl py-2.5 pl-12 pr-4 text-white placeholder:text-blue-300 outline-none"
             />
           </div>
-
-          {/* DROPDOWN WILAYAH */}
           <div className="flex items-center gap-2 bg-black/20 p-1.5 rounded-xl border border-white/10">
             <MapPin size={16} className="text-blue-300 ml-2" />
-            <select 
-              value={selectedKab}
-              onChange={(e) => { setSelectedKab(e.target.value); setCurrentPage(1); }}
-              className="bg-transparent text-xs font-black uppercase outline-none cursor-pointer pr-4"
-            >
+            <select value={selectedKab} onChange={(e) => { setSelectedKab(e.target.value); setCurrentPage(1); }} className="bg-transparent text-xs font-black uppercase outline-none cursor-pointer pr-4">
               <option value="SEMUA" className="text-gray-800">Semua Wilayah</option>
-              {listKabupaten.map(kab => (
-                <option key={kab} value={kab} className="text-gray-800">{kab}</option>
-              ))}
+              {listKabupaten.map(kab => <option key={kab} value={kab} className="text-gray-800">{kab}</option>)}
             </select>
-          </div>
-          
-          {/* ROWS PER PAGE */}
-          <div className="flex items-center gap-2 bg-black/20 p-1.5 rounded-xl border border-white/10">
-            <Filter size={16} className="text-blue-300 ml-2" />
-            {[10, 20, 50, 100].map(num => (
-              <button 
-                key={num} 
-                onClick={() => { setRowsPerPage(num); setCurrentPage(1); }}
-                className={`px-3 py-1 rounded-lg text-[10px] font-black transition-all ${rowsPerPage === num ? 'bg-white text-blue-700 shadow-lg' : 'hover:bg-white/10'}`}
-              >
-                {num}
-              </button>
-            ))}
           </div>
         </div>
       </div>
 
-      {/* BODY TABEL (URUT WILAYAH) */}
       <div className="flex-1 overflow-auto p-4">
-        <table className="w-full text-left border-separate border-spacing-y-2">
+        <table className="w-full text-left border-separate border-spacing-y-2 text-center">
           <thead className="sticky top-0 bg-white z-10">
-            <tr className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
-              <th className="px-6 py-2">Wilayah (A-Z)</th>
+            <tr className="text-[10px] font-black uppercase text-gray-400">
+              <th className="px-6 py-2">Wilayah</th>
               <th className="px-6 py-2">NIK</th>
               <th className="px-6 py-2">Nama PTK</th>
               <th className="px-6 py-2">Jenjang</th>
@@ -131,74 +91,17 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
           </thead>
           <tbody>
             {currentRows.map((row, idx) => (
-              <tr key={idx} className="bg-gray-50 hover:bg-blue-50 transition-colors group">
-                <td className="px-6 py-4 rounded-l-2xl">
-                  <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-[9px] font-black uppercase whitespace-nowrap">
-                    {row['Kabupaten/Kota'] || row['Kab/Kota']}
-                  </span>
-                </td>
+              <tr key={idx} className="bg-gray-50 hover:bg-blue-50 transition-colors">
+                <td className="px-6 py-4 rounded-l-2xl text-[9px] font-black uppercase text-blue-800">{row['Kabupaten/Kota'] || row['Kab/Kota']}</td>
                 <td className="px-6 py-4 font-mono text-xs text-gray-400">{row.NIK || '-'}</td>
                 <td className="px-6 py-4 font-black text-gray-800 text-sm uppercase">{row['Nama PTK']}</td>
-                <td className="px-6 py-4 text-xs font-bold text-gray-500 uppercase">{row['Bentuk Pendidikan']}</td>
-                <td className="px-6 py-4">
-                  <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase ${row['Status Sekolah'] === 'NEGERI' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'}`}>
-                    {row['Status Sekolah']}
-                  </span>
-                </td>
-                <td className="px-6 py-4 rounded-r-2xl text-xs font-black text-blue-800 italic">{row['Kualifikasi']}</td>
+                <td className="px-6 py-4 text-xs font-bold text-gray-500">{row['Bentuk Pendidikan']}</td>
+                <td className="px-6 py-4 text-[10px] font-black uppercase">{row['Status Sekolah']}</td>
+                <td className="px-6 py-4 rounded-r-2xl text-xs font-black text-blue-800">{row['Kualifikasi']}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        
-        {processedData.length === 0 && (
-          <div className="py-20 flex flex-col items-center opacity-20">
-            <FileSpreadsheet size={64} />
-            <p className="font-black uppercase tracking-widest mt-4 text-xl">Data Tidak Ditemukan</p>
-          </div>
-        )}
-      </div>
-
-      {/* FOOTER PAGINASI */}
-      <div className="p-4 border-t bg-gray-50 flex items-center justify-between">
-        <p className="text-[10px] font-black uppercase text-gray-400">
-          Menampilkan {startIndex + 1} - {Math.min(startIndex + rowsPerPage, processedData.length)} dari {processedData.length} data
-        </p>
-        
-        <div className="flex items-center gap-2">
-          <button 
-            disabled={currentPage === 1}
-            onClick={() => goToPage(currentPage - 1)}
-            className="p-2 rounded-xl bg-white border shadow-sm hover:bg-gray-100 disabled:opacity-30 transition-all"
-          >
-            <ChevronLeft size={20} />
-          </button>
-          
-          <div className="flex gap-1">
-            {[...Array(totalPages)].map((_, i) => i + 1)
-              .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
-              .map((p, i, arr) => (
-                <React.Fragment key={p}>
-                  {i > 0 && arr[i-1] !== p-1 && <span className="px-2 opacity-30">...</span>}
-                  <button 
-                    onClick={() => goToPage(p)}
-                    className={`w-8 h-8 rounded-lg text-xs font-black transition-all ${currentPage === p ? 'bg-blue-700 text-white shadow-lg' : 'bg-white border hover:bg-gray-100'}`}
-                  >
-                    {p}
-                  </button>
-                </React.Fragment>
-              ))
-            }
-          </div>
-
-          <button 
-            disabled={currentPage === totalPages}
-            onClick={() => goToPage(currentPage + 1)}
-            className="p-2 rounded-xl bg-white border shadow-sm hover:bg-gray-100 disabled:opacity-30 transition-all"
-          >
-            <ChevronRight size={20} />
-          </button>
-        </div>
       </div>
     </div>
   );

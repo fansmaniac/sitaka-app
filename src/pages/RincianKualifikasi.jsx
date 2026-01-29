@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { 
   ArrowLeft, ChevronLeft, ChevronRight, Search, 
-  FileSpreadsheet, MapPin, Filter 
+  FileSpreadsheet, MapPin, Filter, Download 
 } from 'lucide-react';
+import ExcelJS from 'exceljs'; // Pastikan library ini terpasang
 
 export default function RincianKualifikasi({ data, qualificationLabel, onBack, title }) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -10,17 +11,16 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const [currentPage, setCurrentPage] = useState(1);
 
-  // 1. Dapatkan daftar unik Kabupaten dari data untuk Dropdown
+  // 1. Dapatkan daftar unik Kabupaten
   const listKabupaten = useMemo(() => {
     const unik = [...new Set(data.map(item => String(item['Kabupaten/Kota'] || item['Kab/Kota'] || '').trim()))];
     return unik.filter(k => k !== '').sort();
   }, [data]);
 
-  // 2. LOGIKA UTAMA: Filter Search -> Filter Wilayah -> Urut Wilayah A-Z
+  // 2. LOGIKA PROSES DATA (Search, Filter, Sort)
   const processedData = useMemo(() => {
     let result = [...data];
 
-    // Filter Search (Nama atau NIK)
     if (searchTerm) {
       result = result.filter(item => 
         String(item['Nama PTK'] || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -28,14 +28,12 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
       );
     }
 
-    // Filter Dropdown Wilayah
     if (selectedKab !== 'SEMUA') {
       result = result.filter(item => 
         String(item['Kabupaten/Kota'] || item['Kab/Kota'] || '').trim().toUpperCase() === selectedKab.toUpperCase()
       );
     }
 
-    // URUTKAN OTOMATIS: Wilayah A-Z
     return result.sort((a, b) => {
       const kabA = String(a['Kabupaten/Kota'] || a['Kab/Kota'] || '').toUpperCase();
       const kabB = String(b['Kabupaten/Kota'] || b['Kab/Kota'] || '').toUpperCase();
@@ -43,7 +41,52 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
     });
   }, [data, searchTerm, selectedKab]);
 
-  // 3. Logika Paginasi
+  // 3. FUNGSI UNDUH EXCEL (.xlsx)
+  const downloadExcel = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Data Audit Guru');
+
+    // Definisi Header
+    worksheet.columns = [
+      { header: 'NIK', key: 'nik', width: 25 },
+      { header: 'Nama PTK', key: 'nama', width: 35 },
+      { header: 'Bentuk Pendidikan', key: 'jenjang', width: 20 },
+      { header: 'Kabupaten/Kota', key: 'wilayah', width: 25 },
+      { header: 'Status Sekolah', key: 'status', width: 15 },
+      { header: 'Kualifikasi', key: 'kualifikasi', width: 20 },
+    ];
+
+    // Masukkan Data
+    processedData.forEach(item => {
+      worksheet.addRow({
+        nik: item.NIK || '-',
+        nama: item['Nama PTK'],
+        jenjang: item['Bentuk Pendidikan'],
+        wilayah: item['Kabupaten/Kota'] || item['Kab/Kota'],
+        status: item['Status Sekolah'],
+        kualifikasi: item['Kualifikasi']
+      });
+    });
+
+    // Styling Header
+    worksheet.getRow(1).font = { bold: true };
+    worksheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF2563EB' } // Warna Biru SITAKA
+    };
+    worksheet.getRow(1).font = { color: { argb: 'FFFFFFFF' }, bold: true };
+
+    // Generate & Download
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Audit_Guru_${qualificationLabel}_${selectedKab}_${new Date().getTime()}.xlsx`;
+    link.click();
+  };
+
+  // 4. Logika Paginasi
   const totalPages = Math.ceil(processedData.length / rowsPerPage);
   const startIndex = (currentPage - 1) * rowsPerPage;
   const currentRows = processedData.slice(startIndex, startIndex + rowsPerPage);
@@ -68,14 +111,24 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
               </p>
             </div>
           </div>
-          <div className="bg-white/10 px-4 py-2 rounded-2xl border border-white/20 flex flex-col items-end">
-            <span className="text-2xl font-black">{processedData.length.toLocaleString('id-ID')}</span>
-            <span className="text-[9px] uppercase font-black opacity-70">Data Lolos Filter</span>
+          
+          <div className="flex items-center gap-3">
+            {/* TOMBOL UNDUH DATA */}
+            <button 
+              onClick={downloadExcel}
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-2xl font-black uppercase text-[10px] shadow-lg transition-all active:scale-95 border-b-4 border-emerald-800"
+            >
+              <Download size={16} /> Unduh (.xlsx)
+            </button>
+            
+            <div className="bg-white/10 px-4 py-2 rounded-2xl border border-white/20 flex flex-col items-end">
+              <span className="text-2xl font-black">{processedData.length.toLocaleString('id-ID')}</span>
+              <span className="text-[9px] uppercase font-black opacity-70">Data Lolos Filter</span>
+            </div>
           </div>
         </div>
 
         <div className="flex flex-wrap gap-4 items-center">
-          {/* SEARCH BOX */}
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-300" size={18} />
             <input 
@@ -87,7 +140,6 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
             />
           </div>
 
-          {/* DROPDOWN WILAYAH */}
           <div className="flex items-center gap-2 bg-black/20 p-1.5 rounded-xl border border-white/10">
             <MapPin size={16} className="text-blue-300 ml-2" />
             <select 
@@ -102,7 +154,6 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
             </select>
           </div>
 
-          {/* ROWS PER PAGE */}
           <div className="flex items-center gap-2 bg-black/20 p-1.5 rounded-xl border border-white/10">
             <Filter size={16} className="text-blue-300 ml-2" />
             {[10, 20, 50, 100].map(num => (

@@ -40,15 +40,14 @@ export default function AdminDashboard({ Header }) {
 
   useEffect(() => { if (adminView === 'input') checkDatabaseStatus(); }, [adminView]);
 
-  // --- 2. LOGIKA HAPUS DATA PER TAHUN (OPTIMIZED) ---
+  // --- 2. LOGIKA HAPUS DATA PER TAHUN (OPTIMIZED CHUNK) ---
   const handleDeleteData = async (target) => {
     const confirmDelete = window.confirm(`PERINGATAN KERAS!\n\nYakin Menghapus Database ${target.label} Tahun ${target.year}?\nData yang dihapus tidak bisa dikembalikan.`);
     if (!confirmDelete) return;
 
     setUploading(true);
     setUploadProgress(0);
-    console.log(`Memulai proses penghapusan data ${target.collection} tahun ${target.year}...`);
-
+    
     try {
       const q = query(collection(db, target.collection), where("tahun_data", "==", target.year));
       const snapshot = await getDocs(q);
@@ -61,48 +60,39 @@ export default function AdminDashboard({ Header }) {
 
       const allDocs = snapshot.docs;
       const totalDocs = allDocs.length;
-      console.log(`Ditemukan ${totalDocs} dokumen. Memulai penghapusan massal...`);
 
-      // Batas Firestore Batch adalah 500. Kita bagi per 500 data.
       const chunkSize = 500;
       for (let i = 0; i < totalDocs; i += chunkSize) {
         const batch = writeBatch(db);
         const chunk = allDocs.slice(i, i + chunkSize);
-
-        chunk.forEach((docSnap) => {
-          batch.delete(docSnap.ref);
-        });
-
+        chunk.forEach((docSnap) => batch.delete(docSnap.ref));
         await batch.commit();
-        
-        // Update Progress agar admin tidak bingung
-        const progress = Math.round(((i + chunk.length) / totalDocs) * 100);
-        setUploadProgress(progress);
-        console.log(`Berhasil menghapus ${i + chunk.length} dari ${totalDocs} data...`);
+        setUploadProgress(Math.round(((i + chunk.length) / totalDocs) * 100));
       }
 
-      alert(`BERHASIL! Total ${totalDocs} data ${target.label} Tahun ${target.year} telah dibersihkan.`);
+      alert(`BERHASIL! Data ${target.label} Tahun ${target.year} telah dibersihkan.`);
       checkDatabaseStatus();
     } catch (error) {
-      console.error("Delete error detail:", error);
-      alert("Gagal menghapus data. Detail error ada di console browser.");
+      alert("Gagal menghapus data.");
     } finally {
       setUploading(false);
       setUploadProgress(0);
     }
   };
 
-  // --- 3. LOGIKA SMART SYNC & UPLOAD ---
+  // --- 3. LOGIKA SMART SYNC & UPLOAD (FIXED POSITION) ---
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
     setUploading(true);
     setUploadProgress(0);
+
     try {
       const jsonData = await readExcel(file);
       const collectionName = activeTarget.collection;
-      const totalData = jsonData.length;
       
+      // Ambil data lama untuk Smart Sync
       const existingDocs = {};
       const q = query(collection(db, collectionName), where("tahun_data", "==", activeTarget.year));
       const querySnapshot = await getDocs(q);
@@ -110,12 +100,22 @@ export default function AdminDashboard({ Header }) {
 
       const toUpdate = [];
       jsonData.forEach((newData) => {
-        const docId = newData.NPSN ? `${newData.NPSN}_${activeTarget.year}` : null;
+        let docId = null;
+
+        // Logika ID Unik: NIK untuk individu, NPSN untuk sekolah
+        if (collectionName === 'dapodik_ptk' || collectionName === 'dapodik_kepsek') {
+          docId = newData.NIK ? `${newData.NIK}_${activeTarget.year}` : null;
+        } else {
+          docId = newData.NPSN ? `${newData.NPSN}_${activeTarget.year}` : null;
+        }
+
         if (!docId) return;
+
         const oldData = existingDocs[docId];
         const isChanged = !oldData || Object.keys(newData).some(key => 
           String(newData[key] || '').trim() !== String(oldData[key] || '').trim()
         );
+
         if (isChanged) toUpdate.push({ id: docId, data: newData });
       });
 
@@ -131,12 +131,17 @@ export default function AdminDashboard({ Header }) {
         const chunk = toUpdate.slice(i, i + chunkSize);
         chunk.forEach((item) => {
           const docRef = doc(db, collectionName, item.id);
-          batch.set(docRef, { ...item.data, tahun_data: activeTarget.year, updatedAt: new Date().toISOString() });
+          batch.set(docRef, { 
+            ...item.data, 
+            tahun_data: activeTarget.year, 
+            updatedAt: new Date().toISOString() 
+          });
         });
         await batch.commit();
         setUploadProgress(Math.round(((i + chunk.length) / toUpdate.length) * 100));
       }
-      alert("Sinkronisasi Berhasil!");
+
+      alert("SINKRONISASI BERHASIL!");
       checkDatabaseStatus();
     } catch (error) {
       alert("Error saat sinkronisasi.");
@@ -151,33 +156,23 @@ export default function AdminDashboard({ Header }) {
     fileInputRef.current.click();
   };
 
-    const downloadFormat = async (category) => {
+  const downloadFormat = async (category) => {
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Format Import');
     
-    // Definisi Header sesuai permintaan baru Sobat
     const headers = {
       'dapodik_sekolah': ['NPSN', 'Nama Satuan Pendidikan', 'Bentuk Pendidikan', 'Status Sekolah', 'Kabupaten/Kota', 'PD_Total', 'Jumlah Rombel'],
       'dapodik_ptk': [
-        'NPSN', 
-        'Nama PTK', 
-        'Jenis PTK', 
-        'Bentuk Pendidikan', 
-        'Kabupaten/Kota', 
-        'Status Sekolah', 
-        'Kualifikasi',        // Isian: < S1 atau > S1
-        'Sertifikasi',        // Isian: Sudah Sertifikasi atau Belum Sertifikasi
-        'Tanggal Lahir',      // Isian: YYYY-MM-DD
-        'Status Kepegawaian'  // Isian: PNS, PPPK, GTY, Honor Sekolah, Honor Daerah
+        'NIK', 'NPSN', 'Nama PTK', 'Jenis PTK', 'Bentuk Pendidikan', 
+        'Kabupaten/Kota', 'Status Sekolah', 'Kualifikasi', 
+        'Sertifikasi', 'Tanggal Lahir', 'Status Kepegawaian'
       ],
-      'dapodik_kepsek': ['NPSN', 'Nama Kepala Sekolah', 'Bentuk Pendidikan', 'Kabupaten/Kota', 'Status Sekolah'],
+      'dapodik_kepsek': ['NIK', 'NPSN', 'Nama Kepala Sekolah', 'Bentuk Pendidikan', 'Kabupaten/Kota', 'Status Sekolah'],
       'rapor_pendidikan': ['NPSN', 'Kabupaten/Kota', 'Bentuk Pendidikan', 'Indeks Literasi', 'Indeks Numerasi'],
       'data_ats': ['Kabupaten/Kota', 'Jenjang', 'Jumlah ATS']
     };
 
     sheet.addRow(headers[category]);
-
-    // Memberikan style tebal pada header agar rapi
     sheet.getRow(1).font = { bold: true };
     
     const buffer = await workbook.xlsx.writeBuffer();
@@ -246,10 +241,8 @@ export default function AdminDashboard({ Header }) {
         </div>
       )}
 
-      {/* Kontainer Utama dengan Logika Penjajaran (Scrollable) */}
       <div className={`flex-1 flex flex-col items-center p-12 overflow-y-auto ${adminView === 'main' ? 'justify-center' : 'justify-start pt-10'}`}>
         
-        {/* VIEW 1: MAIN MENU */}
         {adminView === 'main' && (
           <div className="w-full flex flex-col items-center animate-in fade-in zoom-in duration-300">
             <div className="bg-blue-600 text-white w-20 h-20 rounded-3xl flex items-center justify-center mb-8 shadow-lg"><Database size={40} /></div>
@@ -267,12 +260,10 @@ export default function AdminDashboard({ Header }) {
           </div>
         )}
 
-        {/* VIEW 2: INPUT DATA */}
         {adminView === 'input' && (
           <div className="flex flex-col items-center w-full max-w-6xl animate-in slide-in-from-top-4 duration-500">
             <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".xlsx, .xls" />
             
-            {/* TOMBOL KEMBALI */}
             <div className="w-full flex justify-start mb-8">
               <button 
                 onClick={() => setAdminView('main')} 
@@ -292,10 +283,8 @@ export default function AdminDashboard({ Header }) {
           </div>
         )}
 
-        {/* VIEW 3: SETTINGS */}
         {adminView === 'settings' && (
           <div className="flex flex-col items-center w-full max-w-2xl animate-in slide-in-from-top-4 duration-500">
-            {/* TOMBOL KEMBALI */}
             <div className="w-full flex justify-start mb-8">
               <button 
                 onClick={() => setAdminView('main')} 

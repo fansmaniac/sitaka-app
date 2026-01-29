@@ -79,7 +79,7 @@ export default function AdminDashboard({ Header }) {
     }
   };
 
-  // --- 3. LOGIKA SMART SYNC & UPLOAD (DENGAN SANITASI DATA SITAKA) ---
+  // --- 3. LOGIKA SMART SYNC & UPLOAD (DENGAN COUNTER & SANITASI) ---
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -89,6 +89,7 @@ export default function AdminDashboard({ Header }) {
 
     try {
       const jsonData = await readExcel(file);
+      const totalRowsInExcel = jsonData.length; // COUNTER 1: Total baris di Excel
       const collectionName = activeTarget.collection;
       const cleanTahun = String(activeTarget.year);
       
@@ -101,13 +102,12 @@ export default function AdminDashboard({ Header }) {
       const toUpdate = [];
       jsonData.forEach((newData) => {
         // --- PROSES SANITASI DATA (ANTI KARAKTER GAIB) ---
-        // \D menghapus semua karakter yang bukan angka (termasuk \u200c)
+        // Menghapus \u200c dan karakter non-angka pada NIK
         const cleanNIK = String(newData['NIK'] || '').replace(/\D/g, ''); 
         const cleanNPSN = String(newData['NPSN'] || '').trim();
         const cleanJenisPTK = String(newData['Jenis PTK'] || '').trim();
         
         let docId = null;
-
         if (collectionName === 'dapodik_ptk' || collectionName === 'dapodik_kepsek') {
           docId = cleanNIK ? `${cleanNIK}_${cleanTahun}` : null;
         } else {
@@ -136,18 +136,18 @@ export default function AdminDashboard({ Header }) {
       });
 
       if (toUpdate.length === 0) {
-        alert("Data sudah mutakhir!");
+        alert(`Data sudah mutakhir! Seluruh ${totalRowsInExcel.toLocaleString('id-ID')} data di file sudah sesuai dengan database.`);
         setUploading(false);
         return;
       }
 
+      // Proses Upload dalam Batch (Maks 500 per batch Firestore)
       const chunkSize = 500;
       for (let i = 0; i < toUpdate.length; i += chunkSize) {
         const batch = writeBatch(db);
         const chunk = toUpdate.slice(i, i + chunkSize);
         chunk.forEach((item) => {
           const docRef = doc(db, collectionName, item.id);
-          // Menggunakan item.data yang sudah disanitasi di atas
           batch.set(docRef, { 
             ...item.data, 
             updatedAt: new Date().toISOString() 
@@ -157,11 +157,17 @@ export default function AdminDashboard({ Header }) {
         setUploadProgress(Math.round(((i + chunk.length) / toUpdate.length) * 100));
       }
 
-      alert("SINKRONISASI BERHASIL!");
+      // --- LAPORAN FINAL DENGAN COUNTER ---
+      alert(
+        `SINKRONISASI BERHASIL!\n\n` +
+        `Total data di file: ${totalRowsInExcel.toLocaleString('id-ID')} baris\n` +
+        `Data baru/berubah: ${toUpdate.length.toLocaleString('id-ID')} baris berhasil disimpan.`
+      );
+
       checkDatabaseStatus();
     } catch (error) {
       console.error("Upload error:", error);
-      alert("Error saat sinkronisasi.");
+      alert("Error saat sinkronisasi. Pastikan kolom NIK dan NPSN sudah sesuai format.");
     } finally {
       setUploading(false);
       e.target.value = null; 
@@ -258,6 +264,7 @@ export default function AdminDashboard({ Header }) {
       )}
 
       <div className={`flex-1 flex flex-col items-center p-12 overflow-y-auto ${adminView === 'main' ? 'justify-center' : 'justify-start pt-10'}`}>
+        
         {adminView === 'main' && (
           <div className="w-full flex flex-col items-center animate-in fade-in zoom-in duration-300">
             <div className="bg-blue-600 text-white w-20 h-20 rounded-3xl flex items-center justify-center mb-8 shadow-lg"><Database size={40} /></div>
@@ -278,11 +285,16 @@ export default function AdminDashboard({ Header }) {
         {adminView === 'input' && (
           <div className="flex flex-col items-center w-full max-w-6xl animate-in slide-in-from-top-4 duration-500">
             <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".xlsx, .xls" />
+            
             <div className="w-full flex justify-start mb-8">
-              <button onClick={() => setAdminView('main')} className="flex items-center gap-2 text-blue-700 font-black uppercase hover:bg-blue-100 px-6 py-3 rounded-2xl transition-all active:scale-90">
+              <button 
+                onClick={() => setAdminView('main')} 
+                className="flex items-center gap-2 text-blue-700 font-black uppercase hover:bg-blue-100 px-6 py-3 rounded-2xl transition-all active:scale-90"
+              >
                 <ArrowLeft size={24} /> Kembali ke Menu Utama
               </button>
             </div>
+            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full pb-20">
               <YearUploadGroup label="Satuan Pendidikan" collection="dapodik_sekolah" icon={School} colorClass="bg-blue-600" />
               <YearUploadGroup label="Database PTK" collection="dapodik_ptk" icon={Users} colorClass="bg-blue-500" />
@@ -296,10 +308,14 @@ export default function AdminDashboard({ Header }) {
         {adminView === 'settings' && (
           <div className="flex flex-col items-center w-full max-w-2xl animate-in slide-in-from-top-4 duration-500">
             <div className="w-full flex justify-start mb-8">
-              <button onClick={() => setAdminView('main')} className="flex items-center gap-2 text-gray-700 font-black uppercase hover:bg-gray-200 px-6 py-3 rounded-2xl transition-all active:scale-90">
+              <button 
+                onClick={() => setAdminView('main')} 
+                className="flex items-center gap-2 text-gray-700 font-black uppercase hover:bg-gray-200 px-6 py-3 rounded-2xl transition-all active:scale-90"
+              >
                 <ArrowLeft size={24} /> Kembali ke Menu Utama
               </button>
             </div>
+            
             <div className="bg-white w-full p-12 rounded-[3.5rem] shadow-2xl border border-gray-100">
               <div className="flex flex-col gap-8">
                 <div className="space-y-3 text-left">

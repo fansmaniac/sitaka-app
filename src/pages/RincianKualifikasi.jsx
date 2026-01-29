@@ -138,7 +138,7 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
                   {row['Kabupaten/Kota'] || row['Kab/Kota']}
                 </td>
                 <td className="px-6 py-4 font-mono text-xs text-gray-400">{row.NIK || '-'}</td>
-                <td className="px-6 py-4 font-black text-gray-800 text-sm uppercase">{row['Nama PTK']}</td>
+                <td className="px-6 py-4 font-black text-gray-800 text-sm uppercase text-left">{row['Nama PTK']}</td>
                 <td className="px-6 py-4 text-xs font-bold text-gray-500">{row['Bentuk Pendidikan']}</td>
                 <td className="px-6 py-4">
                    <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase ${row['Status Sekolah'] === 'NEGERI' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'}`}>

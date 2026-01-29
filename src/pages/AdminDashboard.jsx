@@ -80,7 +80,7 @@ export default function AdminDashboard({ Header }) {
     }
   };
 
-  // --- 3. LOGIKA SMART SYNC & UPLOAD (FIXED POSITION) ---
+  // --- 3. LOGIKA SMART SYNC & UPLOAD (DENGAN SANITASI DATA) ---
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -91,32 +91,51 @@ export default function AdminDashboard({ Header }) {
     try {
       const jsonData = await readExcel(file);
       const collectionName = activeTarget.collection;
+      const cleanTahun = String(activeTarget.year); // Pastikan tahun adalah String
       
       // Ambil data lama untuk Smart Sync
       const existingDocs = {};
-      const q = query(collection(db, collectionName), where("tahun_data", "==", activeTarget.year));
+      const q = query(collection(db, collectionName), where("tahun_data", "==", cleanTahun));
       const querySnapshot = await getDocs(q);
       querySnapshot.forEach(doc => { existingDocs[doc.id] = doc.data(); });
 
       const toUpdate = [];
       jsonData.forEach((newData) => {
+        // SANITASI DATA: Bersihkan spasi dan pastikan tipe data String
+        const cleanNIK = String(newData['NIK'] || '').trim();
+        const cleanNPSN = String(newData['NPSN'] || '').trim();
+        const cleanJenisPTK = String(newData['Jenis PTK'] || '').trim();
+        
         let docId = null;
 
         // Logika ID Unik: NIK untuk individu, NPSN untuk sekolah
         if (collectionName === 'dapodik_ptk' || collectionName === 'dapodik_kepsek') {
-          docId = newData.NIK ? `${newData.NIK}_${activeTarget.year}` : null;
+          docId = cleanNIK ? `${cleanNIK}_${cleanTahun}` : null;
         } else {
-          docId = newData.NPSN ? `${newData.NPSN}_${activeTarget.year}` : null;
+          docId = cleanNPSN ? `${cleanNPSN}_${cleanTahun}` : null;
         }
 
         if (!docId) return;
 
         const oldData = existingDocs[docId];
+        
+        // Cek apakah ada perubahan data (termasuk trim)
         const isChanged = !oldData || Object.keys(newData).some(key => 
           String(newData[key] || '').trim() !== String(oldData[key] || '').trim()
         );
 
-        if (isChanged) toUpdate.push({ id: docId, data: newData });
+        if (isChanged) {
+          toUpdate.push({ 
+            id: docId, 
+            data: {
+              ...newData,
+              NIK: cleanNIK,           // Simpan hasil sanitasi
+              NPSN: cleanNPSN,         // Simpan hasil sanitasi
+              'Jenis PTK': cleanJenisPTK, // Simpan hasil sanitasi
+              tahun_data: cleanTahun   // Simpan sebagai String untuk filter query
+            } 
+          });
+        }
       });
 
       if (toUpdate.length === 0) {
@@ -133,7 +152,6 @@ export default function AdminDashboard({ Header }) {
           const docRef = doc(db, collectionName, item.id);
           batch.set(docRef, { 
             ...item.data, 
-            tahun_data: activeTarget.year, 
             updatedAt: new Date().toISOString() 
           });
         });
@@ -144,7 +162,8 @@ export default function AdminDashboard({ Header }) {
       alert("SINKRONISASI BERHASIL!");
       checkDatabaseStatus();
     } catch (error) {
-      alert("Error saat sinkronisasi.");
+      console.error("Upload error:", error);
+      alert("Error saat sinkronisasi. Periksa format file Anda.");
     } finally {
       setUploading(false);
       e.target.value = null; 

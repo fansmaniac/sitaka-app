@@ -6,13 +6,16 @@ import {
   Home, 
   School, 
   LogIn, 
-  UserCheck 
+  UserCheck,
+  Building2 
 } from 'lucide-react';
+
 import DapodikPage from './pages/DapodikPage';
 import RaporPendidikanPage from './pages/RaporPendidikanPage';
 import DataATSPage from './pages/DataATSPage';
 import LoginPage from './pages/LoginPage';
 import AdminDashboard from './pages/AdminDashboard';
+import DataSarprasPage from './pages/DataSarprasPage';
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState('home');
@@ -20,7 +23,7 @@ export default function App() {
 
   const navigateTo = (page) => setCurrentPage(page);
 
-  // --- KOMPONEN HEADER (KODE ASLI TERKUNCI) ---
+  // --- KOMPONEN HEADER ---
   const Header = () => (
     <header className="h-16 bg-blue-700 text-white px-6 flex justify-between items-center shadow-lg shrink-0 relative overflow-hidden">
       <div className="flex items-center gap-3 cursor-pointer active:scale-95 transition-transform z-10 bg-blue-700 pr-4" onClick={() => navigateTo('home')}>
@@ -41,7 +44,6 @@ export default function App() {
           <div className="flex items-center gap-3 bg-blue-800 px-4 py-2 rounded-xl text-sm border border-blue-400">
             <UserCheck size={18} />
             <span className="font-bold">ADMIN MODE</span>
-             {/* Logika Logout: Hapus Status & Kembali ke Home */}
             <button 
               onClick={() => { 
                 setIsLoggedIn(false); 
@@ -65,7 +67,7 @@ export default function App() {
     </header>
   );
 
-  // --- HALAMAN UTAMA (KODE ASLI TERKUNCI) ---
+  // --- HALAMAN UTAMA ---
   const HomePage = () => (
     <div className="h-screen flex flex-col bg-gray-100 overflow-hidden">
       <Header />
@@ -81,20 +83,25 @@ export default function App() {
           <p className="text-gray-500 text-lg mt-6 max-w-xl mx-auto font-medium italic">Sistem Informasi Terpadu Kalimantan Barat. <br></br> Silakan pilih menu untuk memulai monitoring data.</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 w-full max-w-6xl px-4 text-center">
-          <button onClick={() => navigateTo('dapodik')} className="group bg-white p-10 rounded-[2.5rem] shadow-xl border-4 border-transparent hover:border-blue-500 transition-all active:scale-95 h-72 flex flex-col justify-between text-left">
-            <div className="bg-blue-600 text-white p-5 rounded-3xl w-fit shadow-lg"><Database size={48} /></div>
-            <div><h3 className="text-3xl font-black text-gray-800 mb-2 uppercase">Dapodik</h3><p className="text-gray-500 font-bold uppercase tracking-wider text-xs">Data Pokok Pendidikan</p></div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 w-full max-w-7xl px-4 text-center">
+          <button onClick={() => navigateTo('dapodik')} className="group bg-white p-8 rounded-[2.5rem] shadow-xl border-4 border-transparent hover:border-blue-500 transition-all active:scale-95 h-72 flex flex-col justify-between text-left">
+            <div className="bg-blue-600 text-white p-5 rounded-3xl w-fit shadow-lg group-hover:scale-110 transition-transform"><Database size={40} /></div>
+            <div><h3 className="text-2xl font-black text-gray-800 mb-1 uppercase">Dapodik</h3><p className="text-gray-400 font-bold uppercase tracking-wider text-[10px]">Data Pokok Pendidikan</p></div>
           </button>
           
-          <button onClick={() => navigateTo('rapor-pendidikan')} className="group bg-white p-10 rounded-[2.5rem] shadow-xl border-4 border-transparent hover:border-emerald-500 transition-all active:scale-95 h-72 flex flex-col justify-between text-left">
-            <div className="bg-emerald-600 text-white p-5 rounded-3xl w-fit shadow-lg"><FileText size={48} /></div>
-            <div><h3 className="text-3xl font-black text-gray-800 mb-2 uppercase">Rapor Pendidikan</h3><p className="text-gray-500 font-bold uppercase tracking-wider text-xs">Evaluasi Mutu Pendidikan</p></div>
+          <button onClick={() => navigateTo('rapor-pendidikan')} className="group bg-white p-8 rounded-[2.5rem] shadow-xl border-4 border-transparent hover:border-emerald-500 transition-all active:scale-95 h-72 flex flex-col justify-between text-left">
+            <div className="bg-emerald-600 text-white p-5 rounded-3xl w-fit shadow-lg group-hover:scale-110 transition-transform"><FileText size={40} /></div>
+            <div><h3 className="text-2xl font-black text-gray-800 mb-1 uppercase">Rapor Pendidikan</h3><p className="text-gray-400 font-bold uppercase tracking-wider text-[10px]">Evaluasi Mutu Pendidikan</p></div>
           </button>
 
-          <button onClick={() => navigateTo('data-ats')} className="group bg-white p-10 rounded-[2.5rem] shadow-xl border-4 border-transparent hover:border-orange-500 transition-all active:scale-95 h-72 flex flex-col justify-between text-left">
-            <div className="bg-orange-600 text-white p-5 rounded-3xl w-fit shadow-lg"><Layers size={48} /></div>
-            <div><h3 className="text-3xl font-black text-gray-800 mb-2 uppercase">Data ATS</h3><p className="text-gray-500 font-bold uppercase tracking-wider text-xs">Anak Tidak Sekolah</p></div>
+          <button onClick={() => navigateTo('data-ats')} className="group bg-white p-8 rounded-[2.5rem] shadow-xl border-4 border-transparent hover:border-orange-500 transition-all active:scale-95 h-72 flex flex-col justify-between text-left">
+            <div className="bg-orange-600 text-white p-5 rounded-3xl w-fit shadow-lg group-hover:scale-110 transition-transform"><Layers size={40} /></div>
+            <div><h3 className="text-2xl font-black text-gray-800 mb-1 uppercase">Data ATS</h3><p className="text-gray-400 font-bold uppercase tracking-wider text-[10px]">Anak Tidak Sekolah</p></div>
+          </button>
+
+          <button onClick={() => navigateTo('data-sarpras')} className="group bg-white p-8 rounded-[2.5rem] shadow-xl border-4 border-transparent hover:border-purple-500 transition-all active:scale-95 h-72 flex flex-col justify-between text-left">
+            <div className="bg-purple-600 text-white p-5 rounded-3xl w-fit shadow-lg group-hover:scale-110 transition-transform"><Building2 size={40} /></div>
+            <div><h3 className="text-2xl font-black text-gray-800 mb-1 uppercase">Data Sarpras</h3><p className="text-gray-400 font-bold uppercase tracking-wider text-[10px]">Sarana Prasarana Sekolah</p></div>
           </button>
         </div>
       </main>
@@ -102,13 +109,15 @@ export default function App() {
   );
 
   // --- LOGIKA NAVIGASI (ROUTING) ---
-   switch (currentPage) {
+  switch (currentPage) {
     case 'dapodik': 
       return <DapodikPage onBack={() => navigateTo('home')} Header={Header} />;
     case 'rapor-pendidikan': 
       return <RaporPendidikanPage onBack={() => navigateTo('home')} Header={Header} />;
     case 'data-ats': 
       return <DataATSPage onBack={() => navigateTo('home')} Header={Header} />;
+    case 'data-sarpras': 
+      return <DataSarprasPage onBack={() => navigateTo('home')} Header={Header} />;
     case 'login': 
       return (
         <LoginPage 

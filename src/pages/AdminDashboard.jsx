@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   Database, UploadCloud, Settings, ArrowLeft, User, Lock, 
   Eye, EyeOff, Save, School, Users, UserCheck, Loader2, 
-  FileText, Layers, CheckCircle, Download, Trash2 
+  FileText, Layers, CheckCircle, Download, Trash2, Building2 
 } from 'lucide-react';
 import { db } from '../firebase/config';
 import { collection, writeBatch, doc, query, where, getDocs, limit } from 'firebase/firestore';
@@ -24,7 +24,8 @@ export default function AdminDashboard({ Header }) {
   const checkDatabaseStatus = async () => {
     const categories = [
       { id: 'dapodik_sekolah' }, { id: 'dapodik_ptk' }, 
-      { id: 'dapodik_kepsek' }, { id: 'rapor_pendidikan' }, { id: 'data_ats' }
+      { id: 'dapodik_kepsek' }, { id: 'rapor_pendidikan' }, 
+      { id: 'data_ats' }, { id: 'data_sarpras' } // Tambah kategori sarpras
     ];
     const years = ['2024', '2025', '2026'];
     let newStatus = {};
@@ -79,7 +80,7 @@ export default function AdminDashboard({ Header }) {
     }
   };
 
-  // --- 3. LOGIKA SMART SYNC & UPLOAD (DENGAN COUNTER & SANITASI) ---
+  // --- 3. LOGIKA SMART SYNC & UPLOAD ---
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -89,11 +90,10 @@ export default function AdminDashboard({ Header }) {
 
     try {
       const jsonData = await readExcel(file);
-      const totalRowsInExcel = jsonData.length; // COUNTER 1: Total baris di Excel
+      const totalRowsInExcel = jsonData.length;
       const collectionName = activeTarget.collection;
       const cleanTahun = String(activeTarget.year);
       
-      // Ambil data lama untuk Smart Sync
       const existingDocs = {};
       const q = query(collection(db, collectionName), where("tahun_data", "==", cleanTahun));
       const querySnapshot = await getDocs(q);
@@ -101,22 +101,32 @@ export default function AdminDashboard({ Header }) {
 
       const toUpdate = [];
       jsonData.forEach((newData) => {
-        // --- PROSES SANITASI DATA (ANTI KARAKTER GAIB) ---
-        // Menghapus \u200c dan karakter non-angka pada NIK
-        const cleanNIK = String(newData['NIK'] || '').replace(/\D/g, ''); 
-        const cleanNPSN = String(newData['NPSN'] || '').trim();
-        const cleanJenisPTK = String(newData['Jenis PTK'] || '').trim();
+        // --- PERBAIKAN BACA KOLOM CASE-INSENSITIVE ---
+        // Mencari nilai dari property yang namanya 'nik' atau 'npsn' mengabaikan huruf besar/kecil
+        const getVal = (keyName) => {
+          const key = Object.keys(newData).find(k => k.toLowerCase() === keyName.toLowerCase());
+          return key ? newData[key] : '';
+        };
+
+        const rawNIK = getVal('NIK');
+        const rawNPSN = getVal('NPSN');
+
+        const cleanNIK = String(rawNIK || '').replace(/\D/g, ''); 
+        const cleanNPSN = String(rawNPSN || '').trim();
         
         let docId = null;
+        
         if (collectionName === 'dapodik_ptk' || collectionName === 'dapodik_kepsek') {
           docId = cleanNIK ? `${cleanNIK}_${cleanTahun}` : null;
         } else {
+          // Untuk Sekolah, ATS, Rapor, dan Sarpras pakai NPSN
           docId = cleanNPSN ? `${cleanNPSN}_${cleanTahun}` : null;
         }
 
         if (!docId) return;
 
         const oldData = existingDocs[docId];
+        // Bandingkan apakah ada data yang berubah (atau data baru)
         const isChanged = !oldData || Object.keys(newData).some(key => 
           String(newData[key] || '').trim() !== String(oldData[key] || '').trim()
         );
@@ -126,9 +136,10 @@ export default function AdminDashboard({ Header }) {
             id: docId, 
             data: {
               ...newData,
+              // Pastikan field NIK/NPSN standar tersimpan, siapa tahu dari excelnya huruf kecil ('npsn')
               NIK: cleanNIK,
-              NPSN: cleanNPSN,
-              'Jenis PTK': cleanJenisPTK,
+              npsn: cleanNPSN, // Menyimpan dengan huruf kecil sesuai file Sarpras kamu
+              NPSN: cleanNPSN, // Simpan juga versi besar buat jaga-jaga
               tahun_data: cleanTahun
             } 
           });
@@ -136,28 +147,23 @@ export default function AdminDashboard({ Header }) {
       });
 
       if (toUpdate.length === 0) {
-        alert(`Data sudah mutakhir! Seluruh ${totalRowsInExcel.toLocaleString('id-ID')} data di file sudah sesuai dengan database.`);
+        alert(`Data sudah mutakhir! Seluruh ${totalRowsInExcel.toLocaleString('id-ID')} baris data di file sudah sesuai dengan isi database.`);
         setUploading(false);
         return;
       }
 
-      // Proses Upload dalam Batch (Maks 500 per batch Firestore)
       const chunkSize = 500;
       for (let i = 0; i < toUpdate.length; i += chunkSize) {
         const batch = writeBatch(db);
         const chunk = toUpdate.slice(i, i + chunkSize);
         chunk.forEach((item) => {
           const docRef = doc(db, collectionName, item.id);
-          batch.set(docRef, { 
-            ...item.data, 
-            updatedAt: new Date().toISOString() 
-          });
+          batch.set(docRef, { ...item.data, updatedAt: new Date().toISOString() });
         });
         await batch.commit();
         setUploadProgress(Math.round(((i + chunk.length) / toUpdate.length) * 100));
       }
 
-      // --- LAPORAN FINAL DENGAN COUNTER ---
       alert(
         `SINKRONISASI BERHASIL!\n\n` +
         `Total data di file: ${totalRowsInExcel.toLocaleString('id-ID')} baris\n` +
@@ -167,7 +173,7 @@ export default function AdminDashboard({ Header }) {
       checkDatabaseStatus();
     } catch (error) {
       console.error("Upload error:", error);
-      alert("Error saat sinkronisasi. Pastikan kolom NIK dan NPSN sudah sesuai format.");
+      alert("Error saat sinkronisasi. Coba periksa file Excel kamu.");
     } finally {
       setUploading(false);
       e.target.value = null; 
@@ -192,7 +198,9 @@ export default function AdminDashboard({ Header }) {
       ],
       'dapodik_kepsek': ['NIK', 'NPSN', 'Nama Kepala Sekolah', 'Bentuk Pendidikan', 'Kabupaten/Kota', 'Status Sekolah'],
       'rapor_pendidikan': ['NPSN', 'Kabupaten/Kota', 'Bentuk Pendidikan', 'Indeks Literasi', 'Indeks Numerasi'],
-      'data_ats': ['Kabupaten/Kota', 'Jenjang', 'Jumlah ATS']
+      'data_ats': ['Kabupaten/Kota', 'Jenjang', 'Jumlah ATS'],
+      // Update format sarpras agar sesuai dengan contoh yang kamu kasih (huruf kecil semua)
+      'data_sarpras': ['npsn', 'nama_sekolah', 'jenjang', 'kecamatan', 'kabupaten', 'ruang_kelas_baik', 'ruang_kelas_rusak_ringan', 'ruang_kelas_rusak_sedang', 'ruang_kelas_rusak_berat', 'ruang_kelas_tidak_bisa_dipakai']
     };
 
     sheet.addRow(headers[category]);
@@ -284,13 +292,10 @@ export default function AdminDashboard({ Header }) {
 
         {adminView === 'input' && (
           <div className="flex flex-col items-center w-full max-w-6xl animate-in slide-in-from-top-4 duration-500">
-            <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".xlsx, .xls" />
+            <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".xlsx, .xls, .csv" />
             
             <div className="w-full flex justify-start mb-8">
-              <button 
-                onClick={() => setAdminView('main')} 
-                className="flex items-center gap-2 text-blue-700 font-black uppercase hover:bg-blue-100 px-6 py-3 rounded-2xl transition-all active:scale-90"
-              >
+              <button onClick={() => setAdminView('main')} className="flex items-center gap-2 text-blue-700 font-black uppercase hover:bg-blue-100 px-6 py-3 rounded-2xl transition-all active:scale-90">
                 <ArrowLeft size={24} /> Kembali ke Menu Utama
               </button>
             </div>
@@ -301,6 +306,7 @@ export default function AdminDashboard({ Header }) {
               <YearUploadGroup label="Database Kepsek" collection="dapodik_kepsek" icon={UserCheck} colorClass="bg-blue-400" />
               <YearUploadGroup label="Rapor Pendidikan" collection="rapor_pendidikan" icon={FileText} colorClass="bg-emerald-600" />
               <YearUploadGroup label="Database ATS" collection="data_ats" icon={Layers} colorClass="bg-orange-600" />
+              <YearUploadGroup label="Data Sarpras" collection="data_sarpras" icon={Building2} colorClass="bg-purple-600" />
             </div>
           </div>
         )}
@@ -308,14 +314,10 @@ export default function AdminDashboard({ Header }) {
         {adminView === 'settings' && (
           <div className="flex flex-col items-center w-full max-w-2xl animate-in slide-in-from-top-4 duration-500">
             <div className="w-full flex justify-start mb-8">
-              <button 
-                onClick={() => setAdminView('main')} 
-                className="flex items-center gap-2 text-gray-700 font-black uppercase hover:bg-gray-200 px-6 py-3 rounded-2xl transition-all active:scale-90"
-              >
+              <button onClick={() => setAdminView('main')} className="flex items-center gap-2 text-gray-700 font-black uppercase hover:bg-gray-200 px-6 py-3 rounded-2xl transition-all active:scale-90">
                 <ArrowLeft size={24} /> Kembali ke Menu Utama
               </button>
             </div>
-            
             <div className="bg-white w-full p-12 rounded-[3.5rem] shadow-2xl border border-gray-100">
               <div className="flex flex-col gap-8">
                 <div className="space-y-3 text-left">

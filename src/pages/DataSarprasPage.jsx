@@ -8,6 +8,12 @@ import { KABUPATEN_LIST } from '../constants/listData';
 import { db } from '../firebase/config';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import ExcelJS from 'exceljs';
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+// --- SETUP GEMINI AI API ---
+// Pastikan VITE_GEMINI_API_KEY sudah ada di file .env kamu
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY; 
+const genAI = new GoogleGenerativeAI(apiKey);
 
 // --- DICTIONARY NAMA RUANG & KONDISI ---
 const ROOM_LABELS = {
@@ -49,7 +55,7 @@ export default function DataSarprasPage({ onBack, Header }) {
   const [aiInput, setAiInput] = useState('');
   const [isAiTyping, setIsAiTyping] = useState(false);
   const [chatHistory, setChatHistory] = useState([
-    { role: 'ai', text: 'Halo Sob! Saya AI Asisten SITAKA. Ada yang ingin saya analisis dari data Sarpras tahun ini?' }
+    { role: 'ai', text: 'Halo Sob! Saya Asisten AI SITAKA. Ada yang ingin saya analisis dari data Sarpras di layar saat ini?' }
   ]);
 
   // --- STATE UNTUK TOUR GUIDE AI ---
@@ -91,14 +97,12 @@ export default function DataSarprasPage({ onBack, Header }) {
     };
     fetchData();
 
-    // Cek status Tour Guide di LocalStorage
     const isTourHidden = localStorage.getItem('hideSitakaAiTour');
     if (!isTourHidden) {
-      setTimeout(() => setShowTour(true), 1500); // Munculkan setelah 1.5 detik
+      setTimeout(() => setShowTour(true), 1500); 
     }
   }, [selectedYear]);
 
-  // Fungsi tutup tour guide
   const closeTourGuide = () => {
     if (dontShowAgain) {
       localStorage.setItem('hideSitakaAiTour', 'true');
@@ -202,7 +206,7 @@ export default function DataSarprasPage({ onBack, Header }) {
     }, { lengkap: 0, cukup: 0, kurang: 0, sangatKurang: 0, total: 0 });
   }, [summaryTable]);
 
-  // --- FUNGSI AI ASSISTANT ---
+  // --- FUNGSI AI ASSISTANT (INTEGRASI GEMINI API) ---
   const handleSendAiMessage = async () => {
     if (!aiInput.trim()) return;
 
@@ -211,23 +215,57 @@ export default function DataSarprasPage({ onBack, Header }) {
     setAiInput('');
     setIsAiTyping(true);
 
-    // Simulasi respon AI
-    setTimeout(() => {
-      let aiResponse = "";
-      const lowerInput = userMessage.text.toLowerCase();
+    try {
+      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
-      if (lowerInput.includes('terbanyak') || lowerInput.includes('parah') || lowerInput.includes('sangat kurang')) {
-        aiResponse = `Berdasarkan data tahun ${selectedYear} di kategori ini, terdapat **${tableTotals.sangatKurang.toLocaleString()}** sekolah dengan kondisi sarpras Sangat Kurang (<50%). Sebaiknya jadikan ini prioritas intervensi DAK tahun depan, Sob!`;
-      } else if (lowerInput.includes('bagus') || lowerInput.includes('lengkap')) {
-        const pct = tableTotals.total > 0 ? ((tableTotals.lengkap / tableTotals.total) * 100).toFixed(1) : 0;
-        aiResponse = `Kabar baik! Ada **${tableTotals.lengkap.toLocaleString()}** sekolah yang sarprasnya sudah berstatus Lengkap (90-100% baik). Angka ini menyumbang sekitar ${pct}% dari total keseluruhan.`;
-      } else {
-        aiResponse = `Tentu, saya sedang menganalisis data ${activeTab} tahun ${selectedYear}. Total ada ${tableTotals.total.toLocaleString()} entitas. Ada hal spesifik yang ingin saya rincikan, seperti persentase kerusakannya?`;
-      }
+      const dataContext = `
+        Konteks Aplikasi: SITAKA (Sistem Informasi Terpadu Kalimantan Barat)
+        Tahun Data yang dianalisis: ${selectedYear}
+        Tab yang sedang dibuka user: ${activeTab}
+        
+        Rekapitulasi Angka Saat Ini:
+        - Total Sekolah: ${tableTotals.total.toLocaleString()}
+        - Sarpras Lengkap: ${tableTotals.lengkap.toLocaleString()}
+        - Sarpras Cukup: ${tableTotals.cukup.toLocaleString()}
+        - Sarpras Kurang: ${tableTotals.kurang.toLocaleString()}
+        - Sangat Kurang: ${tableTotals.sangatKurang.toLocaleString()}
 
-      setChatHistory(prev => [...prev, { role: 'ai', text: aiResponse }]);
+        Aturan Penilaian Kelayakan:
+        1. Kategori "Lengkap": Jika 90% - 100% ruangan wajib berkondisi BAIK.
+        2. Kategori "Cukup": Jika 80% - 89% ruangan wajib berkondisi BAIK.
+        3. Kategori "Kurang": Jika 50% - 79% ruangan wajib berkondisi BAIK.
+        4. Kategori "Sangat Kurang": Jika < 50% ruangan wajib berkondisi BAIK, ATAU tidak memiliki lebih dari 5 ruangan wajib.
+
+        Daftar Ruangan Wajib Berdasarkan Jenjang:
+        - PAUD / Inklusif / Non Formal: Kelas, Perpus, Kepsek, Guru, TU, WC Siswa, WC Guru.
+        - SD: Sama seperti di atas + Lab Komputer.
+        - SMP: Sama seperti SD + Lab IPA.
+        - SMA/SMK: Sama seperti SMP + Lab Fisika, Lab Biologi, Lab Bahasa.
+      `;
+
+      const prompt = `
+        Kamu adalah Asisten Data SITAKA. Jawab pertanyaan user berdasarkan data berikut:
+        ${dataContext}
+        
+        Pertanyaan User: "${userMessage.text}"
+        
+        Instruksi untuk AI:
+        - Jawab dengan bahasa Indonesia yang asik, ramah, dan ringkas. Gunakan sapaan "Sob".
+        - Gunakan format markdown (*bold*, list) agar rapi.
+        - Jika user bertanya darimana asal usul angka "Lengkap" atau cara hitungnya, jelaskan aturan penilaiannya.
+        - Jika pertanyaan tidak relevan dengan data di atas, jawab dengan sopan bahwa kamu hanya bisa menganalisis data sarpras yang sedang aktif.
+      `;
+
+      const result = await model.generateContent(prompt);
+      const responseText = result.response.text();
+
+      setChatHistory(prev => [...prev, { role: 'ai', text: responseText }]);
+    } catch (error) {
+      console.error("Error AI:", error);
+      setChatHistory(prev => [...prev, { role: 'ai', text: "Maaf Sob, saat ini koneksi ke server AI sedang terganggu. Coba tanyakan lagi nanti ya." }]);
+    } finally {
       setIsAiTyping(false);
-    }, 1500);
+    }
   };
 
   const downloadDetailExcel = async (title, schoolList) => {
@@ -499,7 +537,7 @@ export default function DataSarprasPage({ onBack, Header }) {
                   <div className={`p-3 max-w-[85%] rounded-2xl text-sm shadow-sm ${
                     chat.role === 'user' 
                       ? 'bg-purple-600 text-white rounded-tr-none' 
-                      : 'bg-white border border-gray-100 text-gray-700 rounded-tl-none font-medium'
+                      : 'bg-white border border-gray-100 text-gray-700 rounded-tl-none font-medium whitespace-pre-wrap'
                   }`}>
                     {chat.text}
                   </div>

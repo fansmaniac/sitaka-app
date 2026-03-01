@@ -66,13 +66,13 @@ export default function DataSarprasPage({ onBack, Header }) {
   const [showTour, setShowTour] = useState(false);
   const [dontShowAgain, setDontShowAgain] = useState(false);
 
-  // --- PENGELOMPOKAN JENJANG BARU ---
+  // --- PENGELOMPOKAN JENJANG (SKB SUDAH DIMASUKKAN) ---
   const JENJANG_GROUPS = [
     { id: 'PAUD', label: 'Jenjang PAUD', types: ['TK', 'KB'] },
-    { id: 'DASAR', label: 'Jenjang Dasar', types: ['SD', 'SMP'] },
-    { id: 'MENENGAH', label: 'Jenjang Menengah', types: ['SMA', 'SMK'] },
+    { id: 'DASAR', label: 'Jenjang Dasar', types: ['SD', 'SMP'] }, 
+    { id: 'MENENGAH', label: 'Jenjang Menengah', types: ['SMA', 'SMK'] }, 
     { id: 'INKLUSIF', label: 'Jenjang Inklusif', types: ['SLB'] },
-    { id: 'NON_FORMAL', label: 'Jenjang Non Formal', types: ['PKBM', 'SPS', 'TPA'] },
+    { id: 'NON_FORMAL', label: 'Jenjang Non Formal', types: ['PKBM', 'SPS', 'TPA', 'SKB'] }, // Update: SKB masuk ke sini
   ];
 
   const TABS = [{ id: 'SEMUA', label: 'Semua Jenjang' }, ...JENJANG_GROUPS];
@@ -244,7 +244,7 @@ export default function DataSarprasPage({ onBack, Header }) {
         - Menengah: SMA dan SMK
         - PAUD: TK dan KB
         - Inklusif: SLB
-        - Non Formal: PKBM, SPS, TPA
+        - Non Formal: PKBM, SPS, TPA, SKB
 
         Daftar Ruangan Wajib Berdasarkan Jenjang:
         - PAUD / Inklusif / Non Formal: Kelas, Perpus, Kepsek, Guru, TU, WC Siswa, WC Guru.

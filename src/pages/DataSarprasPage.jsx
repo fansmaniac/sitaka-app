@@ -11,9 +11,16 @@ import ExcelJS from 'exceljs';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // --- SETUP GEMINI AI API ---
-// Pastikan VITE_GEMINI_API_KEY sudah ada di file .env kamu
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY; 
-const genAI = new GoogleGenerativeAI(apiKey);
+// Mengambil kunci dari env dengan aman
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+
+// Menambahkan proteksi agar aplikasi tidak crash saat API Key kosong
+let genAI = null;
+if (apiKey && apiKey.trim() !== "") {
+  genAI = new GoogleGenerativeAI(apiKey);
+} else {
+  console.error("Gawat Sob! API Key Gemini tidak terdeteksi oleh Vite.");
+}
 
 // --- DICTIONARY NAMA RUANG & KONDISI ---
 const ROOM_LABELS = {
@@ -206,7 +213,7 @@ export default function DataSarprasPage({ onBack, Header }) {
     }, { lengkap: 0, cukup: 0, kurang: 0, sangatKurang: 0, total: 0 });
   }, [summaryTable]);
 
-  // --- FUNGSI AI ASSISTANT (INTEGRASI GEMINI API) ---
+  // --- FUNGSI AI ASSISTANT (INTEGRASI GEMINI API DENGAN PROTEKSI KETAT) ---
   const handleSendAiMessage = async () => {
     if (!aiInput.trim()) return;
 
@@ -216,6 +223,11 @@ export default function DataSarprasPage({ onBack, Header }) {
     setIsAiTyping(true);
 
     try {
+      // Proteksi khusus jika API Key gagal dimuat oleh Vite
+      if (!genAI) {
+        throw new Error("API_KEY_MISSING");
+      }
+
       const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
       const dataContext = `
@@ -262,7 +274,13 @@ export default function DataSarprasPage({ onBack, Header }) {
       setChatHistory(prev => [...prev, { role: 'ai', text: responseText }]);
     } catch (error) {
       console.error("Error AI:", error);
-      setChatHistory(prev => [...prev, { role: 'ai', text: "Maaf Sob, saat ini koneksi ke server AI sedang terganggu. Coba tanyakan lagi nanti ya." }]);
+      
+      // Memberikan feedback yang lebih jelas ke user jika error terjadi
+      if (error.message === "API_KEY_MISSING" || error.message.includes("API_KEY_INVALID")) {
+        setChatHistory(prev => [...prev, { role: 'ai', text: "Maaf Sob, Kunci API Gemini belum terpasang dengan benar di sistem server. Silakan hubungi admin IT (Pastikan penamaan variabel di Netlify adalah VITE_GEMINI_API_KEY)." }]);
+      } else {
+        setChatHistory(prev => [...prev, { role: 'ai', text: "Maaf Sob, saat ini koneksi ke server AI sedang terganggu atau memakan waktu terlalu lama. Silakan coba tanyakan lagi nanti ya." }]);
+      }
     } finally {
       setIsAiTyping(false);
     }

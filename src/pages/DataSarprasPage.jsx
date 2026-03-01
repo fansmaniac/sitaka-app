@@ -69,8 +69,8 @@ export default function DataSarprasPage({ onBack, Header }) {
   // --- PENGELOMPOKAN JENJANG BARU ---
   const JENJANG_GROUPS = [
     { id: 'PAUD', label: 'Jenjang PAUD', types: ['TK', 'KB'] },
-    { id: 'DASAR', label: 'Jenjang Dasar', types: ['SD', 'SMP'] }, // Update: Dasar = SD & SMP
-    { id: 'MENENGAH', label: 'Jenjang Menengah', types: ['SMA', 'SMK'] }, // Update: Menengah = SMA & SMK
+    { id: 'DASAR', label: 'Jenjang Dasar', types: ['SD', 'SMP'] }, 
+    { id: 'MENENGAH', label: 'Jenjang Menengah', types: ['SMA', 'SMK'] }, 
     { id: 'INKLUSIF', label: 'Jenjang Inklusif', types: ['SLB'] },
     { id: 'NON_FORMAL', label: 'Jenjang Non Formal', types: ['PKBM', 'SPS', 'TPA'] },
   ];
@@ -505,13 +505,14 @@ export default function DataSarprasPage({ onBack, Header }) {
         </div>
 
         {/* ========================================================= */}
-        {/* TOUR GUIDE & AI ASSISTANT WIDGET */}
+        {/* TOUR GUIDE & AI ASSISTANT WIDGET (POSISI DI KIRI BAWAH) */}
         {/* ========================================================= */}
         
         {/* TOUR GUIDE POPUP */}
         {showTour && !isAiOpen && (
-          <div className="fixed bottom-28 right-8 w-[22rem] bg-white rounded-[2rem] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.4)] border-2 border-purple-100 p-6 z-50 animate-in slide-in-from-bottom-8 fade-in duration-500">
-            <div className="absolute -bottom-3 right-10 w-5 h-5 bg-white border-b-2 border-r-2 border-purple-100 transform rotate-45"></div>
+          <div className="fixed bottom-28 left-8 w-[22rem] bg-white rounded-[2rem] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.4)] border-2 border-purple-100 p-6 z-50 animate-in slide-in-from-bottom-8 fade-in duration-500">
+            {/* Segitiga Penunjuk (Pointer) disesuaikan ke kiri */}
+            <div className="absolute -bottom-3 left-10 w-5 h-5 bg-white border-b-2 border-r-2 border-purple-100 transform rotate-45"></div>
             
             <div className="relative z-10 flex flex-col gap-3">
               <div className="flex items-center gap-2 text-purple-600">
@@ -544,18 +545,18 @@ export default function DataSarprasPage({ onBack, Header }) {
           </div>
         )}
 
-        {/* TOMBOL AI */}
+        {/* TOMBOL AI (Dipindah ke left-8) */}
         <button 
           onClick={() => { setIsAiOpen(true); setShowTour(false); }}
-          className={`fixed bottom-8 right-8 px-6 py-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-[2rem] shadow-2xl hover:scale-105 active:scale-95 transition-all z-40 flex items-center gap-3 group ${isAiOpen ? 'hidden' : 'flex'}`}
+          className={`fixed bottom-8 left-8 px-6 py-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-[2rem] shadow-2xl hover:scale-105 active:scale-95 transition-all z-40 flex items-center gap-3 group ${isAiOpen ? 'hidden' : 'flex'}`}
         >
           <Sparkles size={24} className="group-hover:animate-spin" />
           <span className="font-black uppercase tracking-wider text-sm">Tanya Asisten AI</span>
         </button>
 
-        {/* PANEL CHAT AI */}
+        {/* PANEL CHAT AI (Dipindah ke left-6) */}
         {isAiOpen && (
-          <div className="fixed bottom-6 right-6 w-[24rem] h-[32rem] bg-white rounded-[2rem] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5)] border border-gray-200 flex flex-col overflow-hidden z-50 animate-in slide-in-from-bottom-10 fade-in duration-300">
+          <div className="fixed bottom-6 left-6 w-[24rem] h-[32rem] bg-white rounded-[2rem] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5)] border border-gray-200 flex flex-col overflow-hidden z-50 animate-in slide-in-from-bottom-10 fade-in duration-300">
             <div className="bg-gradient-to-r from-purple-700 to-indigo-700 p-4 text-white flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-white/20 rounded-xl"><Bot size={20} /></div>

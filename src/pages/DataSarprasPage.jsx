@@ -228,7 +228,8 @@ export default function DataSarprasPage({ onBack, Header }) {
         throw new Error("API_KEY_MISSING");
       }
 
-      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+      // V2: Menggunakan model terbaru "gemini-1.5-flash"
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
       const dataContext = `
         Konteks Aplikasi: SITAKA (Sistem Informasi Terpadu Kalimantan Barat)
@@ -276,7 +277,7 @@ export default function DataSarprasPage({ onBack, Header }) {
       console.error("Error AI:", error);
       
       // Memberikan feedback yang lebih jelas ke user jika error terjadi
-      if (error.message === "API_KEY_MISSING" || error.message.includes("API_KEY_INVALID")) {
+      if (error.message === "API_KEY_MISSING" || (error.message && error.message.includes("API_KEY_INVALID"))) {
         setChatHistory(prev => [...prev, { role: 'ai', text: "Maaf Sob, Kunci API Gemini belum terpasang dengan benar di sistem server. Silakan hubungi admin IT (Pastikan penamaan variabel di Netlify adalah VITE_GEMINI_API_KEY)." }]);
       } else {
         setChatHistory(prev => [...prev, { role: 'ai', text: "Maaf Sob, saat ini koneksi ke server AI sedang terganggu atau memakan waktu terlalu lama. Silakan coba tanyakan lagi nanti ya." }]);

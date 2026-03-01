@@ -91,7 +91,6 @@ export default function DataSarprasPage({ onBack, Header }) {
     return base;
   };
 
-  // --- INIT FETCH & CHECK TOUR GUIDE ---
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
@@ -117,7 +116,6 @@ export default function DataSarprasPage({ onBack, Header }) {
     setShowTour(false);
   };
 
-  // --- LOGIKA KALKULASI SARPRAS ---
   const auditSarpras = (school) => {
     const jenjang = String(school.jenjang || '').toUpperCase();
     const reqRooms = getRequiredRooms(jenjang);
@@ -213,7 +211,7 @@ export default function DataSarprasPage({ onBack, Header }) {
     }, { lengkap: 0, cukup: 0, kurang: 0, sangatKurang: 0, total: 0 });
   }, [summaryTable]);
 
-  // --- FUNGSI AI ASSISTANT (INTEGRASI GEMINI API DENGAN PROTEKSI KETAT) ---
+  // --- FUNGSI AI ASSISTANT (DENGAN AUTO-FALLBACK MODEL) ---
   const handleSendAiMessage = async () => {
     if (!aiInput.trim()) return;
 
@@ -223,13 +221,9 @@ export default function DataSarprasPage({ onBack, Header }) {
     setIsAiTyping(true);
 
     try {
-      // Proteksi khusus jika API Key gagal dimuat oleh Vite
       if (!genAI) {
         throw new Error("API_KEY_MISSING");
       }
-
-      // V2: Menggunakan model terbaru "gemini-1.5-flash"
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
       const dataContext = `
         Konteks Aplikasi: SITAKA (Sistem Informasi Terpadu Kalimantan Barat)
@@ -269,18 +263,48 @@ export default function DataSarprasPage({ onBack, Header }) {
         - Jika pertanyaan tidak relevan dengan data di atas, jawab dengan sopan bahwa kamu hanya bisa menganalisis data sarpras yang sedang aktif.
       `;
 
-      const result = await model.generateContent(prompt);
-      const responseText = result.response.text();
+      let responseText = "";
+      let success = false;
+      let lastError = null;
+
+      // KUNCI ANTI-ERROR 404: Coba semua model dari versi terbaru ke terlama
+      const modelsToTry = [
+        "gemini-2.5-flash", 
+        "gemini-2.0-flash", 
+        "gemini-1.5-flash-latest", 
+        "gemini-1.5-pro"
+      ];
+
+      for (const modelName of modelsToTry) {
+        try {
+          const model = genAI.getGenerativeModel({ model: modelName });
+          const result = await model.generateContent(prompt);
+          responseText = result.response.text();
+          success = true;
+          break; // Jika berhasil, keluar dari loop (berhenti mencoba)
+        } catch (err) {
+          lastError = err;
+          // Jika errornya adalah 400 (API Key salah) atau 403 (Diblokir), hentikan loop segera
+          if (err.message && (err.message.includes("API_KEY") || err.message.includes("403") || err.message.includes("400"))) {
+            break; 
+          }
+          // Jika 404 (Not Found), lanjut coba nama model berikutnya secara senyap
+        }
+      }
+
+      if (!success) {
+        throw lastError || new Error("Semua model gagal diakses.");
+      }
 
       setChatHistory(prev => [...prev, { role: 'ai', text: responseText }]);
     } catch (error) {
       console.error("Error AI:", error);
       
-      // Memberikan feedback yang lebih jelas ke user jika error terjadi
-      if (error.message === "API_KEY_MISSING" || (error.message && error.message.includes("API_KEY_INVALID"))) {
-        setChatHistory(prev => [...prev, { role: 'ai', text: "Maaf Sob, Kunci API Gemini belum terpasang dengan benar di sistem server. Silakan hubungi admin IT (Pastikan penamaan variabel di Netlify adalah VITE_GEMINI_API_KEY)." }]);
+      // Feedback spesifik jika masalah ada di settingan API Key atau referrers
+      if (error.message === "API_KEY_MISSING" || (error.message && error.message.includes("API_KEY"))) {
+        setChatHistory(prev => [...prev, { role: 'ai', text: "Maaf Sob, sepertinya Kunci API belum valid atau terblokir. Jika kamu baru mengatur 'HTTP referrers' di Google Cloud Console, coba kembalikan ke 'None' dulu untuk memastikan kuncinya bekerja." }]);
       } else {
-        setChatHistory(prev => [...prev, { role: 'ai', text: "Maaf Sob, saat ini koneksi ke server AI sedang terganggu atau memakan waktu terlalu lama. Silakan coba tanyakan lagi nanti ya." }]);
+        setChatHistory(prev => [...prev, { role: 'ai', text: "Maaf Sob, saat ini koneksi ke server AI sedang terganggu. Coba tanyakan lagi nanti ya." }]);
       }
     } finally {
       setIsAiTyping(false);

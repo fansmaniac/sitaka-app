@@ -11,10 +11,8 @@ import ExcelJS from 'exceljs';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // --- SETUP GEMINI AI API ---
-// Mengambil kunci dari env dengan aman
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
 
-// Menambahkan proteksi agar aplikasi tidak crash saat API Key kosong
 let genAI = null;
 if (apiKey && apiKey.trim() !== "") {
   genAI = new GoogleGenerativeAI(apiKey);
@@ -65,14 +63,14 @@ export default function DataSarprasPage({ onBack, Header }) {
     { role: 'ai', text: 'Halo Sob! Saya Asisten AI SITAKA. Ada yang ingin saya analisis dari data Sarpras di layar saat ini?' }
   ]);
 
-  // --- STATE UNTUK TOUR GUIDE AI ---
   const [showTour, setShowTour] = useState(false);
   const [dontShowAgain, setDontShowAgain] = useState(false);
 
+  // --- PENGELOMPOKAN JENJANG BARU ---
   const JENJANG_GROUPS = [
     { id: 'PAUD', label: 'Jenjang PAUD', types: ['TK', 'KB'] },
-    { id: 'DASAR', label: 'Jenjang Dasar', types: ['SD'] },
-    { id: 'MENENGAH', label: 'Jenjang Menengah', types: ['SMP', 'SMA', 'SMK'] },
+    { id: 'DASAR', label: 'Jenjang Dasar', types: ['SD', 'SMP'] }, // Update: Dasar = SD & SMP
+    { id: 'MENENGAH', label: 'Jenjang Menengah', types: ['SMA', 'SMK'] }, // Update: Menengah = SMA & SMK
     { id: 'INKLUSIF', label: 'Jenjang Inklusif', types: ['SLB'] },
     { id: 'NON_FORMAL', label: 'Jenjang Non Formal', types: ['PKBM', 'SPS', 'TPA'] },
   ];
@@ -211,7 +209,7 @@ export default function DataSarprasPage({ onBack, Header }) {
     }, { lengkap: 0, cukup: 0, kurang: 0, sangatKurang: 0, total: 0 });
   }, [summaryTable]);
 
-  // --- FUNGSI AI ASSISTANT (DENGAN AUTO-FALLBACK MODEL) ---
+  // --- FUNGSI AI ASSISTANT ---
   const handleSendAiMessage = async () => {
     if (!aiInput.trim()) return;
 
@@ -221,9 +219,7 @@ export default function DataSarprasPage({ onBack, Header }) {
     setIsAiTyping(true);
 
     try {
-      if (!genAI) {
-        throw new Error("API_KEY_MISSING");
-      }
+      if (!genAI) throw new Error("API_KEY_MISSING");
 
       const dataContext = `
         Konteks Aplikasi: SITAKA (Sistem Informasi Terpadu Kalimantan Barat)
@@ -242,6 +238,13 @@ export default function DataSarprasPage({ onBack, Header }) {
         2. Kategori "Cukup": Jika 80% - 89% ruangan wajib berkondisi BAIK.
         3. Kategori "Kurang": Jika 50% - 79% ruangan wajib berkondisi BAIK.
         4. Kategori "Sangat Kurang": Jika < 50% ruangan wajib berkondisi BAIK, ATAU tidak memiliki lebih dari 5 ruangan wajib.
+
+        Pengelompokan Jenjang:
+        - Dasar: SD dan SMP
+        - Menengah: SMA dan SMK
+        - PAUD: TK dan KB
+        - Inklusif: SLB
+        - Non Formal: PKBM, SPS, TPA
 
         Daftar Ruangan Wajib Berdasarkan Jenjang:
         - PAUD / Inklusif / Non Formal: Kelas, Perpus, Kepsek, Guru, TU, WC Siswa, WC Guru.
@@ -267,7 +270,6 @@ export default function DataSarprasPage({ onBack, Header }) {
       let success = false;
       let lastError = null;
 
-      // KUNCI ANTI-ERROR 404: Coba semua model dari versi terbaru ke terlama
       const modelsToTry = [
         "gemini-2.5-flash", 
         "gemini-2.0-flash", 
@@ -281,26 +283,20 @@ export default function DataSarprasPage({ onBack, Header }) {
           const result = await model.generateContent(prompt);
           responseText = result.response.text();
           success = true;
-          break; // Jika berhasil, keluar dari loop (berhenti mencoba)
+          break; 
         } catch (err) {
           lastError = err;
-          // Jika errornya adalah 400 (API Key salah) atau 403 (Diblokir), hentikan loop segera
           if (err.message && (err.message.includes("API_KEY") || err.message.includes("403") || err.message.includes("400"))) {
             break; 
           }
-          // Jika 404 (Not Found), lanjut coba nama model berikutnya secara senyap
         }
       }
 
-      if (!success) {
-        throw lastError || new Error("Semua model gagal diakses.");
-      }
+      if (!success) throw lastError || new Error("Semua model gagal diakses.");
 
       setChatHistory(prev => [...prev, { role: 'ai', text: responseText }]);
     } catch (error) {
       console.error("Error AI:", error);
-      
-      // Feedback spesifik jika masalah ada di settingan API Key atau referrers
       if (error.message === "API_KEY_MISSING" || (error.message && error.message.includes("API_KEY"))) {
         setChatHistory(prev => [...prev, { role: 'ai', text: "Maaf Sob, sepertinya Kunci API belum valid atau terblokir. Jika kamu baru mengatur 'HTTP referrers' di Google Cloud Console, coba kembalikan ke 'None' dulu untuk memastikan kuncinya bekerja." }]);
       } else {
@@ -515,7 +511,6 @@ export default function DataSarprasPage({ onBack, Header }) {
         {/* TOUR GUIDE POPUP */}
         {showTour && !isAiOpen && (
           <div className="fixed bottom-28 right-8 w-[22rem] bg-white rounded-[2rem] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.4)] border-2 border-purple-100 p-6 z-50 animate-in slide-in-from-bottom-8 fade-in duration-500">
-            {/* Segitiga Penunjuk (Pointer) */}
             <div className="absolute -bottom-3 right-10 w-5 h-5 bg-white border-b-2 border-r-2 border-purple-100 transform rotate-45"></div>
             
             <div className="relative z-10 flex flex-col gap-3">
@@ -549,7 +544,7 @@ export default function DataSarprasPage({ onBack, Header }) {
           </div>
         )}
 
-        {/* TOMBOL AI (PILL SHAPE DENGAN TEKS) */}
+        {/* TOMBOL AI */}
         <button 
           onClick={() => { setIsAiOpen(true); setShowTour(false); }}
           className={`fixed bottom-8 right-8 px-6 py-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-[2rem] shadow-2xl hover:scale-105 active:scale-95 transition-all z-40 flex items-center gap-3 group ${isAiOpen ? 'hidden' : 'flex'}`}

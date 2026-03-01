@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { MapPin, ArrowLeft, Layers, Loader2, ChevronDown, RefreshCw } from 'lucide-react';
+import { MapPin, Layers, Loader2, ChevronDown, RefreshCw } from 'lucide-react';
 import { KABUPATEN_LIST, JENJANG_LIST } from '../constants/listData';
 import { StatusDoughnut } from '../components/StatusDoughnut';
 import { db } from '../firebase/config';
@@ -250,9 +250,6 @@ export default function DapodikPage({ onBack, Header }) {
             {/* Baris Pertama */}
             <div className="flex items-center justify-between w-full">
               <div className="flex items-center gap-2 md:gap-4">
-                <button onClick={onBack} className="p-2.5 md:p-3 bg-gray-100 rounded-xl md:rounded-2xl active:scale-90 shadow-sm hover:bg-gray-200">
-                  <ArrowLeft className="w-5 h-5 md:w-6 md:h-6" />
-                </button>
                 
                 <div className="flex gap-1.5 md:gap-2">
                   {["2024", "2025", "2026"].map(y => (

@@ -69,8 +69,8 @@ export default function DataSarprasPage({ onBack, Header }) {
   // --- PENGELOMPOKAN JENJANG BARU ---
   const JENJANG_GROUPS = [
     { id: 'PAUD', label: 'Jenjang PAUD', types: ['TK', 'KB'] },
-    { id: 'DASAR', label: 'Jenjang Dasar', types: ['SD', 'SMP'] }, 
-    { id: 'MENENGAH', label: 'Jenjang Menengah', types: ['SMA', 'SMK'] }, 
+    { id: 'DASAR', label: 'Jenjang Dasar', types: ['SD', 'SMP'] },
+    { id: 'MENENGAH', label: 'Jenjang Menengah', types: ['SMA', 'SMK'] },
     { id: 'INKLUSIF', label: 'Jenjang Inklusif', types: ['SLB'] },
     { id: 'NON_FORMAL', label: 'Jenjang Non Formal', types: ['PKBM', 'SPS', 'TPA'] },
   ];
@@ -227,7 +227,7 @@ export default function DataSarprasPage({ onBack, Header }) {
         Tab yang sedang dibuka user: ${activeTab}
         
         Rekapitulasi Angka Saat Ini:
-        - Total Sekolah: ${tableTotals.total.toLocaleString()}
+        - Total Sekolah Keseluruhan: ${tableTotals.total.toLocaleString()}
         - Sarpras Lengkap: ${tableTotals.lengkap.toLocaleString()}
         - Sarpras Cukup: ${tableTotals.cukup.toLocaleString()}
         - Sarpras Kurang: ${tableTotals.kurang.toLocaleString()}
@@ -467,6 +467,7 @@ export default function DataSarprasPage({ onBack, Header }) {
                     <th className="px-4 py-4 text-blue-600">Sarpras Cukup</th>
                     <th className="px-4 py-4 text-orange-600">Sarpras Kurang</th>
                     <th className="px-4 py-4 text-red-600">Sgt. Kurang</th>
+                    <th className="px-4 py-4 text-purple-700">Total Sekolah</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -486,7 +487,14 @@ export default function DataSarprasPage({ onBack, Header }) {
                       <td className="px-4 py-4">{renderCellWithPct(row.lengkap, row.totalRow, 'text-emerald-600')}</td>
                       <td className="px-4 py-4">{renderCellWithPct(row.cukup, row.totalRow, 'text-blue-600')}</td>
                       <td className="px-4 py-4">{renderCellWithPct(row.kurang, row.totalRow, 'text-orange-600')}</td>
-                      <td className="px-4 py-4 rounded-r-2xl">{renderCellWithPct(row.sangatKurang, row.totalRow, 'text-red-600')}</td>
+                      <td className="px-4 py-4">{renderCellWithPct(row.sangatKurang, row.totalRow, 'text-red-600')}</td>
+                      <td className="px-4 py-4 rounded-r-2xl">
+                        <div className="flex items-center justify-center">
+                          <span className="bg-purple-100 text-purple-700 font-black text-sm px-3 py-1.5 rounded-xl border border-purple-200">
+                            {row.totalRow.toLocaleString()}
+                          </span>
+                        </div>
+                      </td>
                     </tr>
                   ))}
 
@@ -496,7 +504,14 @@ export default function DataSarprasPage({ onBack, Header }) {
                     <td className="px-4 py-5">{renderCellWithPct(tableTotals.lengkap, tableTotals.total, 'text-emerald-700')}</td>
                     <td className="px-4 py-5">{renderCellWithPct(tableTotals.cukup, tableTotals.total, 'text-blue-700')}</td>
                     <td className="px-4 py-5">{renderCellWithPct(tableTotals.kurang, tableTotals.total, 'text-orange-700')}</td>
-                    <td className="px-4 py-5 rounded-r-2xl">{renderCellWithPct(tableTotals.sangatKurang, tableTotals.total, 'text-red-700')}</td>
+                    <td className="px-4 py-5">{renderCellWithPct(tableTotals.sangatKurang, tableTotals.total, 'text-red-700')}</td>
+                    <td className="px-4 py-5 rounded-r-2xl">
+                      <div className="flex items-center justify-center">
+                        <span className="bg-purple-200 text-purple-800 font-black text-base px-4 py-2 rounded-xl border border-purple-300 shadow-sm">
+                          {tableTotals.total.toLocaleString()}
+                        </span>
+                      </div>
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -511,7 +526,6 @@ export default function DataSarprasPage({ onBack, Header }) {
         {/* TOUR GUIDE POPUP */}
         {showTour && !isAiOpen && (
           <div className="fixed bottom-28 left-8 w-[22rem] bg-white rounded-[2rem] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.4)] border-2 border-purple-100 p-6 z-50 animate-in slide-in-from-bottom-8 fade-in duration-500">
-            {/* Segitiga Penunjuk (Pointer) disesuaikan ke kiri */}
             <div className="absolute -bottom-3 left-10 w-5 h-5 bg-white border-b-2 border-r-2 border-purple-100 transform rotate-45"></div>
             
             <div className="relative z-10 flex flex-col gap-3">
@@ -545,7 +559,7 @@ export default function DataSarprasPage({ onBack, Header }) {
           </div>
         )}
 
-        {/* TOMBOL AI (Dipindah ke left-8) */}
+        {/* TOMBOL AI */}
         <button 
           onClick={() => { setIsAiOpen(true); setShowTour(false); }}
           className={`fixed bottom-8 left-8 px-6 py-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-[2rem] shadow-2xl hover:scale-105 active:scale-95 transition-all z-40 flex items-center gap-3 group ${isAiOpen ? 'hidden' : 'flex'}`}
@@ -554,7 +568,7 @@ export default function DataSarprasPage({ onBack, Header }) {
           <span className="font-black uppercase tracking-wider text-sm">Tanya Asisten AI</span>
         </button>
 
-        {/* PANEL CHAT AI (Dipindah ke left-6) */}
+        {/* PANEL CHAT AI */}
         {isAiOpen && (
           <div className="fixed bottom-6 left-6 w-[24rem] h-[32rem] bg-white rounded-[2rem] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5)] border border-gray-200 flex flex-col overflow-hidden z-50 animate-in slide-in-from-bottom-10 fade-in duration-300">
             <div className="bg-gradient-to-r from-purple-700 to-indigo-700 p-4 text-white flex items-center justify-between shrink-0">

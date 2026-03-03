@@ -5,7 +5,7 @@ import {
   FileText, Layers, CheckCircle, Download, Trash2, Building2 
 } from 'lucide-react';
 import { db } from '../firebase/config';
-import { collection, writeBatch, doc, query, where, getDocs, limit } from 'firebase/firestore';
+import { collection, writeBatch, doc, query, where, getDocs, limit, setDoc } from 'firebase/firestore';
 import { readExcel } from '../utils/excelHelper';
 import ExcelJS from 'exceljs';
 
@@ -25,13 +25,13 @@ export default function AdminDashboard({ Header }) {
     const categories = [
       { id: 'dapodik_sekolah' }, { id: 'dapodik_ptk' }, 
       { id: 'dapodik_kepsek' }, { id: 'rapor_pendidikan' }, 
-      { id: 'data_ats' }, { id: 'data_sarpras' } // Tambah kategori sarpras
+      { id: 'data_ats' }, { id: 'data_sarpras' } 
     ];
     const years = ['2024', '2025', '2026'];
     let newStatus = {};
     for (const cat of categories) {
       for (const year of years) {
-        const q = query(collection(db, cat.id), where("tahun_data", "==", year), limit(1));
+        const q = query(collection(db, `${cat.id}_chunks`), where("tahun_data", "==", year), limit(1));
         const snapshot = await getDocs(q);
         newStatus[`${cat.id}_${year}`] = !snapshot.empty;
       }
@@ -50,7 +50,8 @@ export default function AdminDashboard({ Header }) {
     setUploadProgress(0);
     
     try {
-      const q = query(collection(db, target.collection), where("tahun_data", "==", target.year));
+      const collectionName = `${target.collection}_chunks`;
+      const q = query(collection(db, collectionName), where("tahun_data", "==", target.year));
       const snapshot = await getDocs(q);
       
       if (snapshot.empty) {
@@ -80,7 +81,7 @@ export default function AdminDashboard({ Header }) {
     }
   };
 
-  // --- 3. LOGIKA SMART SYNC & UPLOAD ---
+  // --- 3. LOGIKA SMART SYNC & UPLOAD (SUPER CHUNKING ANTI-CRASH) ---
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -91,89 +92,68 @@ export default function AdminDashboard({ Header }) {
     try {
       const jsonData = await readExcel(file);
       const totalRowsInExcel = jsonData.length;
-      const collectionName = activeTarget.collection;
+      
+      const collectionName = `${activeTarget.collection}_chunks`; 
       const cleanTahun = String(activeTarget.year);
       
-      const existingDocs = {};
+      // 1. WIPE DATA LAMA TAHUN INI AGAR BERSIH SEBELUM DITIMPA
       const q = query(collection(db, collectionName), where("tahun_data", "==", cleanTahun));
-      const querySnapshot = await getDocs(q);
-      querySnapshot.forEach(doc => { existingDocs[doc.id] = doc.data(); });
-
-      const toUpdate = [];
-      jsonData.forEach((newData) => {
-        // --- PERBAIKAN BACA KOLOM CASE-INSENSITIVE ---
-        // Mencari nilai dari property yang namanya 'nik' atau 'npsn' mengabaikan huruf besar/kecil
-        const getVal = (keyName) => {
-          const key = Object.keys(newData).find(k => k.toLowerCase() === keyName.toLowerCase());
-          return key ? newData[key] : '';
-        };
-
-        const rawNIK = getVal('NIK');
-        const rawNPSN = getVal('NPSN');
-
-        const cleanNIK = String(rawNIK || '').replace(/\D/g, ''); 
-        const cleanNPSN = String(rawNPSN || '').trim();
-        
-        let docId = null;
-        
-        if (collectionName === 'dapodik_ptk' || collectionName === 'dapodik_kepsek') {
-          docId = cleanNIK ? `${cleanNIK}_${cleanTahun}` : null;
-        } else {
-          // Untuk Sekolah, ATS, Rapor, dan Sarpras pakai NPSN
-          docId = cleanNPSN ? `${cleanNPSN}_${cleanTahun}` : null;
-        }
-
-        if (!docId) return;
-
-        const oldData = existingDocs[docId];
-        // Bandingkan apakah ada data yang berubah (atau data baru)
-        const isChanged = !oldData || Object.keys(newData).some(key => 
-          String(newData[key] || '').trim() !== String(oldData[key] || '').trim()
-        );
-
-        if (isChanged) {
-          toUpdate.push({ 
-            id: docId, 
-            data: {
-              ...newData,
-              // Pastikan field NIK/NPSN standar tersimpan, siapa tahu dari excelnya huruf kecil ('npsn')
-              NIK: cleanNIK,
-              npsn: cleanNPSN, // Menyimpan dengan huruf kecil sesuai file Sarpras kamu
-              NPSN: cleanNPSN, // Simpan juga versi besar buat jaga-jaga
-              tahun_data: cleanTahun
-            } 
-          });
-        }
-      });
-
-      if (toUpdate.length === 0) {
-        alert(`Data sudah mutakhir! Seluruh ${totalRowsInExcel.toLocaleString('id-ID')} baris data di file sudah sesuai dengan isi database.`);
-        setUploading(false);
-        return;
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        const deleteBatch = writeBatch(db);
+        snapshot.docs.forEach((docSnap) => deleteBatch.delete(docSnap.ref));
+        await deleteBatch.commit();
       }
 
-      const chunkSize = 500;
-      for (let i = 0; i < toUpdate.length; i += chunkSize) {
-        const batch = writeBatch(db);
-        const chunk = toUpdate.slice(i, i + chunkSize);
-        chunk.forEach((item) => {
-          const docRef = doc(db, collectionName, item.id);
-          batch.set(docRef, { ...item.data, updatedAt: new Date().toISOString() });
+      // 2. CHUNKING PROCESS (Batas Firestore adalah 1MB per dokumen. Kita pakai 150 baris agar 100% aman)
+      const CHUNK_SIZE = 150; 
+      const totalChunks = Math.ceil(totalRowsInExcel / CHUNK_SIZE);
+
+      for (let i = 0; i < totalChunks; i++) {
+        const chunkData = jsonData.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE).map(item => {
+          
+          // Firebase akan menolak data bertipe 'undefined' atau Objek Date murni yang tidak di-parse
+          const sanitizedItem = {};
+          for (const key in item) {
+             let val = item[key];
+             if (val === undefined) {
+                 sanitizedItem[key] = '';
+             } else if (val instanceof Date) {
+                 sanitizedItem[key] = val.toISOString().split('T')[0];
+             } else {
+                 sanitizedItem[key] = val;
+             }
+          }
+
+          const keys = Object.keys(sanitizedItem);
+          const nikKey = keys.find(k => k.toLowerCase() === 'nik');
+          const npsnKey = keys.find(k => k.toLowerCase() === 'npsn');
+          
+          return {
+             ...sanitizedItem,
+             NIK: nikKey ? String(sanitizedItem[nikKey]).replace(/\D/g, '') : '',
+             npsn: npsnKey ? String(sanitizedItem[npsnKey]).trim() : ''
+          };
         });
-        await batch.commit();
-        setUploadProgress(Math.round(((i + chunk.length) / toUpdate.length) * 100));
+
+        const docRef = doc(collection(db, collectionName));
+        await setDoc(docRef, {
+          tahun_data: cleanTahun,
+          data: chunkData
+        });
+
+        setUploadProgress(Math.round(((i + 1) / totalChunks) * 100));
       }
 
       alert(
         `SINKRONISASI BERHASIL!\n\n` +
-        `Total data di file: ${totalRowsInExcel.toLocaleString('id-ID')} baris\n` +
-        `Data baru/berubah: ${toUpdate.length.toLocaleString('id-ID')} baris berhasil disimpan.`
+        `Total ${totalRowsInExcel.toLocaleString('id-ID')} baris data telah di-compress menjadi ${totalChunks} dokumen yang super ringan.`
       );
 
       checkDatabaseStatus();
     } catch (error) {
       console.error("Upload error:", error);
-      alert("Error saat sinkronisasi. Coba periksa file Excel kamu.");
+      alert("Error saat memproses. Pastikan format file sesuai.");
     } finally {
       setUploading(false);
       e.target.value = null; 
@@ -185,21 +165,58 @@ export default function AdminDashboard({ Header }) {
     fileInputRef.current.click();
   };
 
+  // --- 4. DOWNLOAD FORMAT ---
   const downloadFormat = async (category) => {
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Format Import');
     
     const headers = {
-      'dapodik_sekolah': ['NPSN', 'Nama Satuan Pendidikan', 'Bentuk Pendidikan', 'Status Sekolah', 'Kabupaten/Kota', 'PD_Total', 'Jumlah Rombel'],
+      'dapodik_sekolah': [
+        'npsn', 'nama_satuan_pendidikan', 'status_sekolah', 'bentuk_pendidikan', 'alamat', 'desa', 'kecamatan', 'kabupaten', 
+        'lintang', 'bujur', 'npwp', 'nama_kepala_sekolah', 'nomor_hp_kepsek', 'tmt_akreditasi', 'akreditasi', 
+        'nama_operator', 'nomor_hp_operator', 'rombel_t1', 'rombel_ t2', 'rombel_ t3', 'rombel_ t4', 'rombel_ t5', 
+        'rombel_ t6', 'rombel_ t7', 'rombel_ t8', 'rombel_ t9', 'rombel_ t10', 'rombel_ t11', 'rombel_ t12', 
+        'rombel_ t13', 'rombel_ tka', 'rombel_ tkb', 'rombel_ pkta', 'rombel_ pktb', 'rombel_ pktc', 'tka_l', 
+        'tka_p', 'tkb_l', 'tkb_p', 't1_l', 't1_p', 't2_l', 't2_p', 't3_l', 't3_p', 't4_l', 't4_p', 't5_l', 
+        't5_p', 't6_l', 't6_p', 't7_l', 't7_p', 't8_l', 't8_p', 't9_l', 't9_p', 't10_l', 't10_p', 't11_l', 
+        't11_p', 't12_l', 't12_p', 't13_l', 't13_p', 'paket_a_l', 'paket_a_p', 'paket_b_l', 'paket_b_p', 
+        'paket_c_l', 'paket_c_p', 'l_Islam', 'p_Islam', 'l_Kristen', 'p_Kristen', 'l_Katholik', 'p_Katholik', 
+        'l_Hindu', 'p_Hindu', 'l_Budha', 'p_Budha', 'l_Konghucu', 'p_Konghucu', 'l_Kepercayaan', 'p_Kepercayaan', 
+        'l_agama_lainnya', 'p_agama_lainnya', 'tendik', 'pd_l', 'pd_p', 'pd_total'
+      ],
       'dapodik_ptk': [
-        'NIK', 'NPSN', 'Nama PTK', 'Jenis PTK', 'Bentuk Pendidikan', 
-        'Kabupaten/Kota', 'Status Sekolah', 'Kualifikasi', 
-        'Sertifikasi', 'Tanggal Lahir', 'Status Kepegawaian'
+        'nik', 'nama', 'nip', 'jenis_kelamin', 'tempat_lahir', 'tanggal_lahir', 'no_kk', 'niy_nigk', 'nuptk', 
+        'nuks', 'status_kepegawaian', 'jenis_ptk', 'pengawas_bidang_studi', 'agama', 'kewarganegaraan', 'alamat_jalan', 
+        'rt', 'rw', 'nama_dusun', 'kode_desa_kelurahan', 'desa_kelurahan', 'kode_kecamatan', 'kecamatan', 
+        'kode_kabupaten', 'kabupaten', 'kode_provinsi', 'provinsi', 'kode_pos', 'lintang', 'bujur', 'no_telepon_rumah', 
+        'email', 'status_keaktifan', 'sk_cpns', 'tgl_cpns', 'sk_pengangkatan', 'tmt_pengangkatan', 'lembaga_pengangkat', 
+        'pangkat_golongan', 'keahlian_laboratorium', 'sumber_gaji', 'nama_ibu_kandung', 'status_perkawinan', 
+        'nama_suami_istri', 'nip_suami_istri', 'pekerjaan_suami_istri', 'tmt_pns', 'sudah_lisensi_kepala_sekolah', 
+        'jumlah_sekolah_binaan', 'pernah_diklat_kepengawasan', 'nm_wp', 'status_data', 'karpeg', 'karpas', 
+        'mampu_handle_kk', 'keahlian_braille', 'keahlian_bhs_isyarat', 'npwp', 'bank', 'rekening_bank', 
+        'rekening_atas_nama', 'tahun_ajaran', 'nomor_surat_tugas', 'tanggal_surat_tugas', 'tmt_tugas', 'ptk_induk', 
+        'jenis_keluar', 'tgl_ptk_keluar', 'riwayat_kepangkatan_pangkat_golongan', 'riwayat_kepangkatan_nomor_sk', 
+        'riwayat_kepangkatan_tanggal_sk', 'riwayat_kepangkatan_tmt_pangkat', 'riwayat_kepangkatan_masa_kerja_gol_tahun', 
+        'riwayat_kepangkatan_masa_kerja_gol_bulan', 'riwayat_gaji_berkala_pangkat_golongan', 'riwayat_gaji_berkala_nomor_sk', 
+        'riwayat_gaji_berkala_tanggal_sk', 'riwayat_gaji_berkala_tmt_kgb', 'riwayat_gaji_berkala_masa_kerja_tahun', 
+        'riwayat_gaji_berkala_masa_kerja_bulan', 'riwayat_gaji_berkala_gaji_pokok', 'inpassing_pangkat_golongan', 
+        'inpassing_no_sk_inpassing', 'inpassing_tgl_sk_inpassing', 'inpassing_tmt_inpassing', 'inpassing_angka_kredit', 
+        'inpassing_masa_kerja_tahun', 'inpassing_masa_kerja_bulan', 'riwayat_sertifikasi_bidang_studi', 
+        'riwayat_sertifikasi_jenis_sertifikasi', 'riwayat_sertifikasi_tahun_sertifikasi', 'riwayat_sertifikasi_nomor_sertifikat', 
+        'riwayat_sertifikasi_nrg', 'riwayat_sertifikasi_nomor_peserta', 'riwayat_pendidikan_formal_bidang_studi', 
+        'riwayat_pendidikan_formal_jenjang_pendidikan', 'riwayat_pendidikan_formal_gelar_akademik', 
+        'riwayat_pendidikan_formal_satuan_pendidikan_formal', 'riwayat_pendidikan_formal_fakultas', 
+        'riwayat_pendidikan_formal_kependidikan', 'riwayat_pendidikan_formal_tahun_masuk', 
+        'riwayat_pendidikan_formal_tahun_lulus', 'riwayat_pendidikan_formal_nim', 'riwayat_pendidikan_formal_status_kuliah', 
+        'riwayat_pendidikan_formal_semester', 'riwayat_pendidikan_formal_ipk', 'jumlah_anak', 'tugas_tambahan_jabatan_ptk', 
+        'tugas_tambahan_sekolah', 'tugas_tambahan_jumlah_jam', 'tugas_tambahan_nomor_sk', 'tugas_tambahan_tmt_tambahan', 
+        'tugas_tambahan_tst_tambahan', 'riwayat_struktural_jabatan_ptk', 'riwayat_struktural_sk_struktural', 
+        'riwayat_struktural_tmt_jabatan', 'riwayat_fungsional_jabatan_fungsional', 'riwayat_fungsional_sk_jabfung', 
+        'riwayat_fungsional_tmt_jabatan', 'jabatan_ptk', 'npsn', 'sekolah', 'jenjang', 'status_sekolah'
       ],
       'dapodik_kepsek': ['NIK', 'NPSN', 'Nama Kepala Sekolah', 'Bentuk Pendidikan', 'Kabupaten/Kota', 'Status Sekolah'],
       'rapor_pendidikan': ['NPSN', 'Kabupaten/Kota', 'Bentuk Pendidikan', 'Indeks Literasi', 'Indeks Numerasi'],
       'data_ats': ['Kabupaten/Kota', 'Jenjang', 'Jumlah ATS'],
-      // Update format sarpras agar sesuai dengan contoh yang kamu kasih (huruf kecil semua)
       'data_sarpras': ['npsn', 'nama_sekolah', 'jenjang', 'kecamatan', 'kabupaten', 'ruang_kelas_baik', 'ruang_kelas_rusak_ringan', 'ruang_kelas_rusak_sedang', 'ruang_kelas_rusak_berat', 'ruang_kelas_tidak_bisa_dipakai']
     };
 
@@ -232,7 +249,7 @@ export default function AdminDashboard({ Header }) {
               <button 
                 onClick={() => triggerUpload({ label, collection, year })}
                 className={`w-full py-4 rounded-2xl font-black text-xl transition-all active:scale-95 border-2 flex flex-col items-center gap-1
-                  ${hasData ? 'bg-blue-600 text-white border-blue-600 shadow-lg' : 'bg-gray-50 text-gray-300 border-gray-100 hover:border-blue-300'}`}
+                  ${hasData ? `${colorClass} text-white border-transparent shadow-lg` : 'bg-gray-50 text-gray-300 border-gray-100 hover:border-blue-300'}`}
               >
                 <div className="flex items-center gap-2">{hasData ? <CheckCircle size={18} /> : <UploadCloud size={18} />}{year}</div>
                 <span className="text-[9px] uppercase opacity-70">{hasData ? 'Data Terisi' : 'Kosong'}</span>

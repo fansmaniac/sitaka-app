@@ -3,7 +3,7 @@ import {
   ArrowLeft, ChevronLeft, ChevronRight, Search, 
   FileSpreadsheet, MapPin, Filter, Download 
 } from 'lucide-react';
-import ExcelJS from 'exceljs'; // Pastikan library ini terpasang
+import ExcelJS from 'exceljs';
 
 export default function RincianKualifikasi({ data, qualificationLabel, onBack, title }) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -13,58 +13,55 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
 
   // 1. Dapatkan daftar unik Kabupaten
   const listKabupaten = useMemo(() => {
-    const unik = [...new Set(data.map(item => String(item['Kabupaten/Kota'] || item['Kab/Kota'] || '').trim()))];
+    const unik = [...new Set(data.map(item => String(item['kabupaten'] || item['Kabupaten/Kota'] || item['Kab/Kota'] || '').trim()))];
     return unik.filter(k => k !== '').sort();
   }, [data]);
 
-  // 2. LOGIKA PROSES DATA (Search, Filter, Sort)
+  // 2. LOGIKA PROSES DATA (Search, Filter, Sort) - NIK DIHAPUS DARI PENCARIAN
   const processedData = useMemo(() => {
     let result = [...data];
 
     if (searchTerm) {
       result = result.filter(item => 
-        String(item['Nama PTK'] || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        String(item['NIK'] || '').includes(searchTerm)
+        String(item['nama'] || item['Nama PTK'] || '').toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
     if (selectedKab !== 'SEMUA') {
       result = result.filter(item => 
-        String(item['Kabupaten/Kota'] || item['Kab/Kota'] || '').trim().toUpperCase() === selectedKab.toUpperCase()
+        String(item['kabupaten'] || item['Kabupaten/Kota'] || item['Kab/Kota'] || '').trim().toUpperCase() === selectedKab.toUpperCase()
       );
     }
 
     return result.sort((a, b) => {
-      const kabA = String(a['Kabupaten/Kota'] || a['Kab/Kota'] || '').toUpperCase();
-      const kabB = String(b['Kabupaten/Kota'] || b['Kab/Kota'] || '').toUpperCase();
+      const kabA = String(a['kabupaten'] || a['Kabupaten/Kota'] || a['Kab/Kota'] || '').toUpperCase();
+      const kabB = String(b['kabupaten'] || b['Kabupaten/Kota'] || b['Kab/Kota'] || '').toUpperCase();
       return kabA.localeCompare(kabB);
     });
   }, [data, searchTerm, selectedKab]);
 
-  // 3. FUNGSI UNDUH EXCEL (.xlsx)
+  // 3. FUNGSI UNDUH EXCEL (.xlsx) - KOLOM NIK DIHAPUS
   const downloadExcel = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Data Audit Guru');
 
-    // Definisi Header
+    // Definisi Header Tanpa NIK
     worksheet.columns = [
-      { header: 'NIK', key: 'nik', width: 25 },
       { header: 'Nama PTK', key: 'nama', width: 35 },
-      { header: 'Bentuk Pendidikan', key: 'jenjang', width: 20 },
+      { header: 'Jenjang/Bentuk Pendidikan', key: 'jenjang', width: 25 },
       { header: 'Kabupaten/Kota', key: 'wilayah', width: 25 },
-      { header: 'Status Sekolah', key: 'status', width: 15 },
+      { header: 'Status Pegawai', key: 'status', width: 20 },
       { header: 'Kualifikasi', key: 'kualifikasi', width: 20 },
     ];
 
-    // Masukkan Data
+    // Masukkan Data Tanpa NIK (Menggunakan kolom baru termasuk 'jenjang')
     processedData.forEach(item => {
       worksheet.addRow({
-        nik: item.NIK || '-',
-        nama: item['Nama PTK'],
-        jenjang: item['Bentuk Pendidikan'],
-        wilayah: item['Kabupaten/Kota'] || item['Kab/Kota'],
-        status: item['Status Sekolah'],
-        kualifikasi: item['Kualifikasi']
+        nama: item['nama'] || item['Nama PTK'] || '-',
+        jenjang: item['jenjang'] || item['bentuk_pendidikan'] || item['Bentuk Pendidikan'] || '-',
+        wilayah: item['kabupaten'] || item['Kabupaten/Kota'] || item['Kab/Kota'] || '-',
+        status: item['status_kepegawaian'] || item['Status Sekolah'] || '-',
+        kualifikasi: item['riwayat_pendidikan_formal_gelar_akademik'] || item['Kualifikasi'] || '-'
       });
     });
 
@@ -133,7 +130,7 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-300" size={18} />
             <input 
               type="text" 
-              placeholder="Cari Nama / NIK..." 
+              placeholder="Cari Nama PTK..." 
               value={searchTerm}
               onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
               className="w-full bg-white/10 border border-white/20 rounded-xl py-2.5 pl-12 pr-4 text-white placeholder:text-blue-300 outline-none font-bold"
@@ -175,30 +172,46 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
           <thead className="sticky top-0 bg-white z-10">
             <tr className="text-[10px] font-black uppercase text-gray-400 text-center">
               <th className="px-6 py-2">Wilayah</th>
-              <th className="px-6 py-2">NIK</th>
               <th className="px-6 py-2">Nama PTK</th>
               <th className="px-6 py-2">Jenjang</th>
-              <th className="px-6 py-2">Status</th>
-              <th className="px-6 py-2">Kualifikasi</th>
+              <th className="px-6 py-2">Status Pegawai</th>
+              <th className="px-6 py-2">Gelar / Kualifikasi</th>
             </tr>
           </thead>
           <tbody>
-            {currentRows.map((row, idx) => (
-              <tr key={idx} className="bg-gray-50 hover:bg-blue-50 transition-colors text-center">
-                <td className="px-6 py-4 rounded-l-2xl text-[9px] font-black uppercase text-blue-800">
-                  {row['Kabupaten/Kota'] || row['Kab/Kota']}
-                </td>
-                <td className="px-6 py-4 font-mono text-xs text-gray-400">{row.NIK || '-'}</td>
-                <td className="px-6 py-4 font-black text-gray-800 text-sm uppercase text-left">{row['Nama PTK']}</td>
-                <td className="px-6 py-4 text-xs font-bold text-gray-500">{row['Bentuk Pendidikan']}</td>
-                <td className="px-6 py-4">
-                   <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase ${row['Status Sekolah'] === 'NEGERI' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'}`}>
-                    {row['Status Sekolah']}
-                  </span>
-                </td>
-                <td className="px-6 py-4 rounded-r-2xl text-xs font-black text-blue-800 italic">{row['Kualifikasi']}</td>
-              </tr>
-            ))}
+            {currentRows.map((row, idx) => {
+              const statusPegawai = row['status_kepegawaian'] || row['Status Sekolah'] || '-';
+              
+              // Helper untuk menentukan warna status pegawai
+              const getStatusColor = (status) => {
+                 const s = status.toUpperCase();
+                 if (s.includes('PNS') || s.includes('PPPK')) return 'bg-blue-600 text-white';
+                 return 'bg-gray-200 text-gray-600';
+              };
+
+              return (
+                <tr key={idx} className="bg-gray-50 hover:bg-blue-50 transition-colors text-center">
+                  <td className="px-6 py-4 rounded-l-2xl text-[9px] font-black uppercase text-blue-800">
+                    {row['kabupaten'] || row['Kabupaten/Kota'] || row['Kab/Kota'] || '-'}
+                  </td>
+                  <td className="px-6 py-4 font-black text-gray-800 text-sm uppercase text-left">
+                    {row['nama'] || row['Nama PTK'] || '-'}
+                  </td>
+                  <td className="px-6 py-4 text-xs font-bold text-gray-500">
+                    {/* Prioritas membaca field jenjang */}
+                    {row['jenjang'] || row['bentuk_pendidikan'] || row['Bentuk Pendidikan'] || '-'}
+                  </td>
+                  <td className="px-6 py-4">
+                     <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase ${getStatusColor(statusPegawai)}`}>
+                      {statusPegawai}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 rounded-r-2xl text-xs font-black text-blue-800 italic">
+                    {row['riwayat_pendidikan_formal_gelar_akademik'] || row['Kualifikasi'] || '-'}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
 

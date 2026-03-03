@@ -12,7 +12,7 @@ const DonutChart = ({ segments, total, onSegmentClick }) => {
   };
 
   return (
-    <div className="relative w-40 h-40 shrink-0"> {/* Ukuran Donut Diperbesar */}
+    <div className="relative w-40 h-40 shrink-0">
       <svg viewBox="-1 -1 2 2" className="transform -rotate-90 w-full h-full">
         {segments.map((s, i) => {
           if (s.value === 0) return null;
@@ -33,14 +33,13 @@ const DonutChart = ({ segments, total, onSegmentClick }) => {
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
         <span className="text-2xl font-black text-gray-800 leading-none">{total.toLocaleString('id-ID')}</span>
-        {/* Tulisan TOTAL diperbesar agar seimbang */}
-        <span className="text-sm font-blackk text-gray-400 uppercase tracking-widest mt-1">Total</span>
+        <span className="text-sm font-black text-gray-400 uppercase tracking-widest mt-1">Total</span>
       </div>
     </div>
   );
 };
 
-// --- KOMPONEN KARTU (Diagram Dominan + Rincian Ramping) ---
+// --- KOMPONEN KARTU ---
 const InfoCard = ({ title, icon: Icon, segments, total, onClick, onSegmentClick, colorClass }) => {
   const group1 = segments.slice(0, 3);
   const group2 = segments.slice(3);
@@ -50,7 +49,6 @@ const InfoCard = ({ title, icon: Icon, segments, total, onClick, onSegmentClick,
       onClick={onClick}
       className={`bg-white p-6 rounded-[3rem] shadow-xl border-2 border-transparent ${onClick ? 'hover:border-blue-500 cursor-pointer active:scale-[0.98]' : ''} transition-all flex flex-col gap-4 overflow-hidden relative group`}
     >
-      {/* JUDUL RINCIAN DIPERBESAR */}
       <div className="flex items-center gap-3 shrink-0">
         <div className={`${colorClass} p-2 rounded-xl text-white shadow-md`}><Icon size={20} /></div>
         <h4 className="text-base font-black text-gray-800 uppercase tracking-tighter">{title}</h4>
@@ -58,12 +56,9 @@ const InfoCard = ({ title, icon: Icon, segments, total, onClick, onSegmentClick,
       </div>
 
       <div className="flex items-center justify-start gap-8 flex-1 min-h-0">
-        {/* BAGIAN 1: DIAGRAM (Paling Dominan) */}
         <DonutChart segments={segments} total={total} onSegmentClick={onSegmentClick} />
 
-        {/* BAGIAN RINCIAN (Ramping & Rapat) */}
         <div className="flex flex-wrap gap-x-8 gap-y-2 flex-1 items-start">
-          {/* Kolom 1 */}
           <div className="flex flex-col gap-2">
             {group1.map((s, i) => (
               <div key={i} className="flex items-center gap-2 whitespace-nowrap">
@@ -76,7 +71,6 @@ const InfoCard = ({ title, icon: Icon, segments, total, onClick, onSegmentClick,
             ))}
           </div>
 
-          {/* Kolom 2 */}
           {group2.length > 0 && (
             <div className="flex flex-col gap-2">
               {group2.map((s, i) => (
@@ -100,7 +94,9 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
   const [selectedSubView, setSelectedSubView] = useState('charts');
   const [activeKualifikasi, setActiveKualifikasi] = useState('SEMUA');
 
-  const stats = useMemo(() => {
+  // --- MEGA OPTIMASI: 1 KALI LOOP UNTUK FILTER UNIK & HITUNG STATISTIK ---
+  const { validData, stats } = useMemo(() => {
+    const uniqueMap = new Map();
     const res = {
       kualifikasi: { s1Atas: 0, s1Bawah: 0 },
       sertifikasi: { sudah: 0, belum: 0 },
@@ -108,33 +104,75 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
       pensiun: { u56: 0, u57: 0, u58: 0, u59: 0, u60: 0 }
     };
 
-    data.forEach(ptk => {
-      const qual = String(ptk['Kualifikasi'] || '').toUpperCase();
-      if (qual.includes('> S1')) res.kualifikasi.s1Atas++; else res.kualifikasi.s1Bawah++;
-      if (String(ptk['Sertifikasi'] || '').includes('Sudah')) res.sertifikasi.sudah++; else res.sertifikasi.belum++;
+    // Kita gunakan for-loop tradisional karena jauh lebih kencang dibanding forEach untuk puluhan ribu data
+    for (let i = 0; i < data.length; i++) {
+      const ptk = data[i];
+
+      // DIRECT ACCESS (Sangat Cepat - O(1))
+      // 1. Filter PTK Induk = 1
+      const isInduk = String(ptk.ptk_induk || ptk['PTK Induk'] || '').trim();
+      if (isInduk !== '1') continue; // Lewati jika bukan guru induk
+
+      // 2. Anti-Duplikasi NIK
+      const nik = String(ptk.nik || ptk.NIK || '').trim();
+      const docId = nik ? nik : Math.random().toString();
+      if (uniqueMap.has(docId)) continue; // Lewati jika NIK sudah pernah diproses
       
-      const sp = String(ptk['Status Kepegawaian'] || '').toUpperCase();
+      // Jika lolos, masukkan ke validData
+      uniqueMap.set(docId, ptk);
+
+      // --- HITUNG STATISTIK LANGSUNG ---
+      
+      // 1. Kualifikasi
+      const qual = String(ptk.riwayat_pendidikan_formal_gelar_akademik || ptk.Kualifikasi || '').toUpperCase();
+      if (qual.includes('S.1') || qual.includes('S1') || qual.includes('S.2') || qual.includes('S2') || qual.includes('S.3') || qual.includes('S3') || qual.includes('> S1') || qual.includes('D.IV') || qual.includes('D4')) {
+        res.kualifikasi.s1Atas++;
+      } else {
+        res.kualifikasi.s1Bawah++;
+      }
+
+      // 2. Sertifikasi
+      const cert = String(ptk.riwayat_sertifikasi_jenis_sertifikasi || ptk.Sertifikasi || '');
+      if (cert.trim() !== '' && !cert.toUpperCase().includes('BELUM') && cert.trim() !== '-') {
+        res.sertifikasi.sudah++;
+      } else {
+        res.sertifikasi.belum++;
+      }
+      
+      // 3. Pegawai
+      const sp = String(ptk.status_kepegawaian || ptk['Status Kepegawaian'] || '').toUpperCase();
       if (sp.includes('PNS')) res.pegawai.pns++;
       else if (sp.includes('PPPK')) res.pegawai.pppk++;
-      else if (sp.includes('GTY')) res.pegawai.gty++;
-      else if (sp.includes('SEKOLAH')) res.pegawai.honorS++;
-      else if (sp.includes('DAERAH')) res.pegawai.honorD++;
+      else if (sp.includes('GTY') || sp.includes('PTY') || sp.includes('YAYASAN')) res.pegawai.gty++;
+      else if (sp.includes('SEKOLAH') || sp.includes('HONORER SEKOLAH')) res.pegawai.honorS++;
+      else if (sp.includes('DAERAH') || sp.includes('HONORER DAERAH') || sp.includes('KAB') || sp.includes('PROV')) res.pegawai.honorD++;
 
-      if (ptk['Tanggal Lahir']) {
-        const birthYear = new Date(ptk['Tanggal Lahir']).getFullYear();
-        if (!isNaN(birthYear)) {
+      // 4. Pensiun (Ekstraktor Tahun Super Pintar)
+      const tglLahir = ptk.tanggal_lahir || ptk['Tanggal Lahir'];
+      if (tglLahir) {
+        const tglStr = String(tglLahir).trim();
+        // REGEX: Cari pola 4 digit angka yang diawali 19 atau 20 (Contoh: 1969, 1998, 2001)
+        const yearMatch = tglStr.match(/(19|20)\d{2}/);
+        
+        if (yearMatch) {
+          const birthYear = parseInt(yearMatch[0], 10);
           const age = parseInt(selectedYear) - birthYear;
-          if (age >= 56 && age <= 60) res.pensiun[`u${age}`]++;
+          if (age >= 56 && age <= 60) {
+            res.pensiun[`u${age}`]++;
+          }
         }
       }
-    });
-    return res;
+    }
+    
+    return { validData: Array.from(uniqueMap.values()), stats: res };
   }, [data, selectedYear]);
 
+  // Mode View Rincian Tabel
   if (selectedSubView === 'table') {
-    const dataFiltered = activeKualifikasi === 'SEMUA' ? data : data.filter(d => {
-        const q = String(d['Kualifikasi'] || '').toUpperCase();
-        return activeKualifikasi === '> S1' ? q.includes('> S1') : !q.includes('> S1');
+    const dataFiltered = activeKualifikasi === 'SEMUA' ? validData : validData.filter(d => {
+        const q = String(d.riwayat_pendidikan_formal_gelar_akademik || d.Kualifikasi || '').toUpperCase();
+        const isS1Atas = q.includes('S.1') || q.includes('S1') || q.includes('S.2') || q.includes('S2') || q.includes('S.3') || q.includes('S3') || q.includes('> S1') || q.includes('D.IV') || q.includes('D4');
+        return activeKualifikasi === '> S1' ? isS1Atas : !isS1Atas;
     });
     return <RincianKualifikasi data={dataFiltered} qualificationLabel={activeKualifikasi} onBack={() => { setSelectedSubView('charts'); setActiveKualifikasi('SEMUA'); }} title={`${title} ${selectedYear}`} />;
   }
@@ -152,7 +190,8 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
         </div>
         <div className="bg-blue-600 px-6 py-3 rounded-2xl text-white shadow-lg flex items-center gap-3">
           <Users size={20} />
-          <span className="text-xl font-black">{data.length.toLocaleString('id-ID')}</span>
+          {/* JUMLAH AKAN OTOMATIS BERKURANG KARENA HANYA INDUK & TIDAK DUPLIKAT */}
+          <span className="text-xl font-black">{validData.length.toLocaleString('id-ID')}</span>
         </div>
       </div>
 
@@ -160,14 +199,14 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
       <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-10 min-h-0 pb-4">
         <InfoCard 
           title="Kualifikasi Pendidikan" icon={GraduationCap} colorClass="bg-blue-600"
-          total={data.length} onClick={() => { setActiveKualifikasi('SEMUA'); setSelectedSubView('table'); }}
+          total={validData.length} onClick={() => { setActiveKualifikasi('SEMUA'); setSelectedSubView('table'); }}
           onSegmentClick={(label) => { setActiveKualifikasi(label); setSelectedSubView('table'); }}
           segments={[{ name: '> S1', value: stats.kualifikasi.s1Atas, color: '#2563eb' }, { name: '< S1', value: stats.kualifikasi.s1Bawah, color: '#1e3a8a' }]}
         />
 
         <InfoCard 
           title="Sertifikasi Guru" icon={Award} colorClass="bg-emerald-600"
-          total={data.length}
+          total={validData.length}
           segments={[{ name: 'Sudah Sergur', value: stats.sertifikasi.sudah, color: '#10b981' }, { name: 'Belum Sergur', value: stats.sertifikasi.belum, color: '#064e3b' }]}
         />
 
@@ -183,7 +222,7 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
 
         <InfoCard 
           title="Status Kepegawaian" icon={Briefcase} colorClass="bg-purple-600"
-          total={data.length}
+          total={validData.length}
           segments={[
             { name: 'PNS', value: stats.pegawai.pns, color: '#9333ea' }, { name: 'PPPK', value: stats.pegawai.pppk, color: '#7e22ce' },
             { name: 'GTY', value: stats.pegawai.gty, color: '#6b21a8' }, { name: 'Hon. S', value: stats.pegawai.honorS, color: '#581c87' },

@@ -1,19 +1,17 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { MapPin, Layers, Loader2, ChevronDown, RefreshCw } from 'lucide-react';
-import { KABUPATEN_LIST, JENJANG_LIST } from '../constants/listData';
+import { MapPin, Layers, Loader2, ChevronDown, RefreshCw, School } from 'lucide-react';
+import { KABUPATEN_LIST } from '../constants/listData';
 import { StatusDoughnut } from '../components/StatusDoughnut';
 import { db } from '../firebase/config';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import DetailGuruPage from './DetailGuruPage';
 
 // =====================================================================
-// UTILITY: INDEXED-DB CACHING (BRANKAS LOKAL BROWSER)
-// Berfungsi menyimpan jutaan baris data di browser agar tidak perlu
-// download ulang dari Firebase setiap kali halaman di-refresh.
+// UTILITY: INDEXED-DB CACHING (BRANKAS LOKAL)
 // =====================================================================
 const DB_NAME = "SitakaCacheDB";
 const STORE_NAME = "dapodikData";
-const CACHE_EXPIRY_HOURS = 12; // Cache kedaluwarsa setelah 12 jam
+const CACHE_EXPIRY_HOURS = 12;
 
 const initDB = () => {
   return new Promise((resolve, reject) => {
@@ -48,17 +46,32 @@ const getFromCache = async (key) => {
           const hoursOld = (Date.now() - result.timestamp) / (1000 * 60 * 60);
           if (hoursOld < CACHE_EXPIRY_HOURS) return resolve(result.data);
         }
-        resolve(null); // Cache tidak ada atau sudah kedaluwarsa
+        resolve(null);
       };
       req.onerror = () => resolve(null);
     });
   } catch (err) { return null; }
 };
-// =====================================================================
 
-export default function DapodikPage({ onBack, Header }) {
+// =====================================================================
+// UTILITY: AMAN & CEPAT AKSES KOLOM
+// =====================================================================
+const getSafeVal = (obj, ...possibleKeys) => {
+  if (!obj) return '';
+  for (let key of possibleKeys) {
+    if (obj[key] !== undefined && obj[key] !== null) {
+      return String(obj[key]).trim();
+    }
+  }
+  return '';
+};
+
+// DAFTAR JENJANG SESUAI DATABASE DAPODIK
+const FILTER_JENJANG = ['TK', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'PKBM', 'TPA', 'SPS', 'SKB', 'KB'];
+
+export default function DapodikPage({ Header }) {
   // --- 1. STATE ---
-  const [selectedJenjang, setSelectedJenjang] = useState(JENJANG_LIST);
+  const [selectedJenjang, setSelectedJenjang] = useState(FILTER_JENJANG);
   const [selectedKabupaten, setSelectedKabupaten] = useState(KABUPATEN_LIST);
   const [selectedYear, setSelectedYear] = useState('2026'); 
   const [sekolahData, setSekolahData] = useState([]);
@@ -66,12 +79,11 @@ export default function DapodikPage({ onBack, Header }) {
   const [kepsekData, setKepsekData] = useState([]);
   
   const [loading, setLoading] = useState(true);
-  const [isSyncing, setIsSyncing] = useState(false); // State untuk animasi tombol sync
+  const [isSyncing, setIsSyncing] = useState(false); 
   const [viewMode, setViewMode] = useState('main'); 
-  
   const [showMobileKabupaten, setShowMobileKabupaten] = useState(false);
 
-  // --- 2. FETCH DATA DENGAN LOGIKA CACHE ---
+  // --- 2. FETCH DATA: BATCHED CHUNK LOADING (ANTI-CRASH) ---
   const loadData = async (forceSync = false) => {
     setLoading(true);
     if (forceSync) setIsSyncing(true);
@@ -79,71 +91,86 @@ export default function DapodikPage({ onBack, Header }) {
     const cacheKey = `dapodik_all_${selectedYear}`;
 
     try {
-      // 1. Cek Brankas Lokal dulu (kecuali user menekan tombol Force Sync)
       if (!forceSync) {
         const cachedData = await getFromCache(cacheKey);
-        if (cachedData) {
+        if (cachedData && cachedData.sekolah && cachedData.ptk) {
           setSekolahData(cachedData.sekolah);
           setPtkData(cachedData.ptk);
-          setKepsekData(cachedData.kepsek);
+          setKepsekData(cachedData.kepsek || []);
           setLoading(false);
-          return; // Langsung tampilkan tanpa hit ke Firebase
+          return; 
         }
       }
 
-      // 2. Jika tidak ada di cache atau Force Sync, Download dari Firebase
-      const qPtk = query(collection(db, 'dapodik_ptk'), where("tahun_data", "==", selectedYear));
-      const qSekolah = query(collection(db, 'dapodik_sekolah'), where("tahun_data", "==", selectedYear));
-      const qKepsek = query(collection(db, 'dapodik_kepsek'), where("tahun_data", "==", selectedYear));
-
-      const [sekolahSnap, ptkSnap, kepsekSnap] = await Promise.all([
-        getDocs(qSekolah), getDocs(qPtk), getDocs(qKepsek)
-      ]);
-
-      const freshData = {
-        sekolah: sekolahSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })),
-        ptk: ptkSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })),
-        kepsek: kepsekSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+      // Fungsi helper untuk mengambil dan menggabungkan isi dokumen chunks dengan aman
+      const fetchCollectionChunks = async (collectionName) => {
+        const q = query(collection(db, collectionName), where("tahun_data", "==", selectedYear));
+        const snapshot = await getDocs(q);
+        let allData = [];
+        snapshot.forEach(doc => {
+           const docData = doc.data();
+           if (docData.data && Array.isArray(docData.data)) {
+               // Menggabungkan bungkusan 500 data ke array utama secara efisien
+               allData = allData.concat(docData.data);
+           }
+        });
+        return allData;
       };
 
-      // 3. Simpan ke State
-      setSekolahData(freshData.sekolah);
-      setPtkData(freshData.ptk);
-      setKepsekData(freshData.kepsek);
+      // Tarik data dari target koleksi berakhiran _chunks
+      const [sekolah, ptk, kepsek] = await Promise.all([
+        fetchCollectionChunks('dapodik_sekolah_chunks'),
+        fetchCollectionChunks('dapodik_ptk_chunks'),
+        fetchCollectionChunks('dapodik_kepsek_chunks')
+      ]);
 
-      // 4. Simpan ke Brankas Lokal (IndexedDB)
+      const freshData = { sekolah, ptk, kepsek };
+
+      setSekolahData(sekolah);
+      setPtkData(ptk);
+      setKepsekData(kepsek);
+
       await saveToCache(cacheKey, freshData);
 
     } catch (error) {
       console.error("Error mengambil data SITAKA:", error);
+      alert("Gagal melakukan Sinkronisasi. Terjadi masalah jaringan atau format database.");
     } finally {
       setLoading(false);
       setIsSyncing(false);
     }
   };
 
-  // Otomatis load data saat komponen dirender atau tahun berubah
   useEffect(() => {
     loadData(false);
   }, [selectedYear]);
 
-  // --- 3. FILTER LOGIC ---
+  // --- 3. FILTER LOGIC (SUPER FAST LOOP MENGGUNAKAN SET) ---
   const filtered = useMemo(() => {
-    const filterFn = (d) => {
-      const matchJenjang = selectedJenjang.some(j => 
-        j.trim().toUpperCase() === String(d['Bentuk Pendidikan'] || '').trim().toUpperCase()
-      );
-      const matchKab = selectedKabupaten.some(k => 
-        k.trim().toUpperCase() === String(d['Kabupaten/Kota'] || d['Kab/Kota'] || '').trim().toUpperCase()
-      );
-      return matchJenjang && matchKab;
+    const isSemuaJenjang = selectedJenjang.length === FILTER_JENJANG.length;
+    const isSemuaKab = selectedKabupaten.length === KABUPATEN_LIST.length;
+    
+    const jenjangSet = new Set(selectedJenjang.map(j => j.toUpperCase()));
+    const kabSet = new Set(selectedKabupaten.map(k => k.replace(/^(Kab\.|Kota)\s+/i, '').trim().toUpperCase()));
+
+    const filterItem = (d) => {
+      if (isSemuaJenjang && isSemuaKab) return true;
+
+      const jenjangDb = getSafeVal(d, 'bentuk_pendidikan', 'Bentuk Pendidikan', 'jenjang').toUpperCase() || 'TIDAK DIKETAHUI';
+      if (!isSemuaJenjang && !jenjangSet.has(jenjangDb)) return false;
+
+      const kabDb = getSafeVal(d, 'kabupaten', 'Kabupaten/Kota', 'Kab/Kota').replace(/^(Kab\.|Kota)\s+/i, '').toUpperCase();
+      if (!isSemuaKab && !kabSet.has(kabDb)) return false;
+
+      return true;
     };
+
     return {
-      sekolah: sekolahData.filter(filterFn),
-      ptk: ptkData.filter(filterFn),
-      kepsek: kepsekData.filter(filterFn)
+      sekolah: sekolahData.filter(filterItem),
+      ptk: ptkData.filter(filterItem),
+      kepsek: kepsekData.filter(filterItem)
     };
-  }, [sekolahData, ptkData, kepsekData, selectedJenjang, selectedKabupaten, selectedYear]);
+  }, [sekolahData, ptkData, kepsekData, selectedJenjang, selectedKabupaten]);
 
   const displayTitle = useMemo(() => {
     if (selectedKabupaten.length === KABUPATEN_LIST.length) return `PROVINSI KALIMANTAN BARAT`;
@@ -151,63 +178,74 @@ export default function DapodikPage({ onBack, Header }) {
     return "WILAYAH TERPILIH";
   }, [selectedKabupaten]);
 
-  // --- 4. HELPER PERHITUNGAN ---
-  const getStat = (source, field, isStatusNegeri = null) => {
-    return filtered[source]
-      .filter(d => {
-        if (isStatusNegeri === null) return true;
-        const status = String(d['Status Sekolah'] || '').trim().toUpperCase();
-        return isStatusNegeri ? status === 'NEGERI' : status === 'SWASTA';
-      })
-      .reduce((sum, item) => {
-        let val = String(item[field] || '0').replace(/[^0-9.-]+/g, "");
-        return sum + (parseFloat(val) || 0);
-      }, 0);
+  // --- 4. HELPER PERHITUNGAN BARU (O(N) MURNI, 1 KALI PUTARAN SAJA) ---
+  const getPtkStatus = (item) => {
+    const sp = getSafeVal(item, 'status_kepegawaian', 'Status Kepegawaian').toUpperCase();
+    if (sp.includes('PNS') || sp.includes('PPPK') || sp.includes('DAERAH') || sp.includes('PROV') || sp.includes('KAB')) return 'NEGERI';
+    if (sp.includes('GTY') || sp.includes('PTY') || sp.includes('YAYASAN') || sp.includes('SEKOLAH')) return 'SWASTA';
+    return 'UNKNOWN';
   };
 
-  const countGuru = (isStatusNegeri = null) => {
-    return filtered.ptk.filter(d => {
-      const jenis = String(d['Jenis PTK'] || '').trim().toUpperCase();
-      const isGuru = jenis.includes("GURU"); 
-      
-      if (!isGuru) return false;
-      if (isStatusNegeri === null) return true;
-      
-      const status = String(d['Status Sekolah'] || '').trim().toUpperCase();
-      return isStatusNegeri ? status === 'NEGERI' : status === 'SWASTA';
-    }).length;
-  };
+  // Kalkulasi Sekolah (Hanya 1x putaran untuk semua infografis terkait sekolah)
+  const sekolahStats = useMemo(() => {
+    const res = { sekolah: { total: 0, negeri: 0 }, pdTotal: { total: 0, negeri: 0 }, rombel: { total: 0, negeri: 0 }, tendik: { total: 0, negeri: 0 }, unitPerJenjang: {} };
+    FILTER_JENJANG.forEach(j => res.unitPerJenjang[j] = 0);
 
-  const countTendik = (isStatusNegeri = null) => {
-    return filtered.ptk.filter(d => {
-      const jenis = String(d['Jenis PTK'] || '').trim().toUpperCase();
-      const isTendik = jenis === "TENAGA KEPENDIDIKAN";
+    for (let i = 0; i < filtered.sekolah.length; i++) {
+      const s = filtered.sekolah[i];
+      const status = getSafeVal(s, 'status_sekolah', 'Status Sekolah').toUpperCase();
+      const isNegeri = status === 'NEGERI';
       
-      if (!isTendik) return false;
-      if (isStatusNegeri === null) return true;
-      
-      const status = String(d['Status Sekolah'] || '').trim().toUpperCase();
-      return isStatusNegeri ? status === 'NEGERI' : status === 'SWASTA';
-    }).length;
-  };
+      res.sekolah.total++; 
+      if (isNegeri) res.sekolah.negeri++;
 
-  const countGeneric = (source, isStatusNegeri = null) => {
-    return filtered[source].filter(d => {
-      if (isStatusNegeri === null) return true;
-      const status = String(d['Status Sekolah'] || '').trim().toUpperCase();
-      return isStatusNegeri ? status === 'NEGERI' : status === 'SWASTA';
-    }).length;
-  };
+      const pd = parseFloat(getSafeVal(s, 'pd_total').replace(/[^0-9.-]+/g, "")) || 0;
+      res.pdTotal.total += pd; 
+      if (isNegeri) res.pdTotal.negeri += pd;
 
-  const jenjangTotals = useMemo(() => { 
-    const counts = {}; 
-    JENJANG_LIST.forEach(j => { 
-      counts[j] = filtered.sekolah.filter(d => 
-        String(d['Bentuk Pendidikan'] || '').trim().toUpperCase() === j.trim().toUpperCase()
-      ).length; 
-    }); 
-    return counts; 
+      const tdk = parseFloat(getSafeVal(s, 'tendik').replace(/[^0-9.-]+/g, "")) || 0;
+      res.tendik.total += tdk; 
+      if (isNegeri) res.tendik.negeri += tdk;
+
+      let rmbl = 0;
+      for (const key in s) {
+        if (key.toLowerCase().includes('rombel_')) rmbl += parseFloat(String(s[key]).replace(/[^0-9.-]+/g, "")) || 0;
+      }
+      res.rombel.total += rmbl; 
+      if (isNegeri) res.rombel.negeri += rmbl;
+
+      const jenjangDb = getSafeVal(s, 'bentuk_pendidikan', 'Bentuk Pendidikan', 'jenjang').toUpperCase();
+      if (res.unitPerJenjang[jenjangDb] !== undefined) res.unitPerJenjang[jenjangDb]++;
+    }
+    return res;
   }, [filtered.sekolah]);
+
+  // Kalkulasi PTK & Kepsek (Hanya 1x putaran)
+  const ptkStats = useMemo(() => {
+    const res = { guru: { total: 0, negeri: 0 }, kepsek: { total: 0, negeri: 0 } };
+
+    for (let i = 0; i < filtered.ptk.length; i++) {
+      const p = filtered.ptk[i];
+      // Pastikan hanya memproses PTK Induk
+      if (getSafeVal(p, 'ptk_induk', 'PTK Induk') !== '1') continue;
+
+      const jenis = getSafeVal(p, 'jenis_ptk', 'Jenis PTK').toUpperCase();
+      const statusNegeri = getPtkStatus(p) === 'NEGERI';
+
+      if (jenis.includes("GURU")) {
+        res.guru.total++;
+        if (statusNegeri) res.guru.negeri++;
+      }
+    }
+
+    for (let i = 0; i < filtered.kepsek.length; i++) {
+      const k = filtered.kepsek[i];
+      const statusNegeri = getPtkStatus(k) === 'NEGERI';
+      res.kepsek.total++;
+      if (statusNegeri) res.kepsek.negeri++;
+    }
+    return res;
+  }, [filtered.ptk, filtered.kepsek]);
 
   if (loading && !isSyncing) return (
     <div className="h-screen flex flex-col items-center justify-center bg-gray-100 italic font-black uppercase tracking-widest text-gray-400">
@@ -221,143 +259,117 @@ export default function DapodikPage({ onBack, Header }) {
       <Header />
       <div className="flex-1 flex overflow-hidden">
         
-        {/* SIDEBAR (HANYA MUNCUL DI TABLET & DESKTOP) */}
-        <aside className="hidden md:flex w-60 bg-blue-50 border-r border-blue-100 flex-col shrink-0">
-          <div className="p-4 border-b border-blue-200 flex justify-between items-center bg-blue-100/50">
-            <div className="flex items-center gap-2">
-              <MapPin size={20} className="text-blue-700" />
-              <h3 className="font-black text-blue-800 uppercase text-sm tracking-wider">Wilayah</h3>
+        {/* ===================================================================== */}
+        {/* SIDEBAR WILAYAH */}
+        {/* ===================================================================== */}
+        <aside className="hidden md:flex w-64 lg:w-72 bg-blue-50/40 border-r border-blue-100 flex-col shrink-0 z-20 shadow-[2px_0_15px_-3px_rgba(0,0,0,0.05)]">
+          <div className="px-5 py-4 border-b border-blue-200 flex justify-between items-center bg-blue-100/60 shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="bg-blue-600 p-1.5 rounded-lg text-white shadow-sm"><MapPin size={18} /></div>
+              <h3 className="font-black text-blue-900 uppercase text-sm tracking-wider">Wilayah</h3>
             </div>
-            <button onClick={() => setSelectedKabupaten(KABUPATEN_LIST)} className={`text-[10px] font-black px-3 py-1.5 rounded-lg ${selectedKabupaten.length === KABUPATEN_LIST.length ? 'bg-blue-700 text-white' : 'bg-white text-blue-600'}`}>Semua</button>
+            <button onClick={() => setSelectedKabupaten(KABUPATEN_LIST)} className={`text-[10px] font-black px-3 py-1.5 rounded-lg transition-all ${selectedKabupaten.length === KABUPATEN_LIST.length ? 'bg-blue-700 text-white shadow-md' : 'bg-white text-blue-700 border border-blue-200 hover:bg-blue-100 active:scale-95'}`}>RESET</button>
           </div>
-          <div className="flex-1 overflow-y-auto p-2 space-y-1.5 text-left">
+          
+          <div className="flex-1 overflow-y-auto p-4 space-y-2.5 text-left scrollbar-hide">
             {KABUPATEN_LIST.map(kab => {
               const active = selectedKabupaten.length === 1 && selectedKabupaten[0] === kab;
               return (
-                <button key={kab} onClick={() => setSelectedKabupaten([kab])} className={`w-full text-left px-4 py-4 rounded-xl text-sm font-black border-2 transition-all ${active ? 'bg-blue-600 text-white border-blue-600 shadow-lg translate-x-1' : 'bg-white text-gray-600 border-white hover:border-blue-200 shadow-sm'}`}>
-                  {kab}
-                </button>
+                <button key={kab} onClick={() => setSelectedKabupaten([kab])} className={`w-full text-left px-5 py-3.5 rounded-2xl text-sm font-black border-2 transition-all duration-200 active:scale-[0.98] ${active ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-transparent shadow-lg shadow-blue-500/30 translate-x-1' : 'bg-white text-slate-600 border-white hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 shadow-sm'}`}>{kab}</button>
               );
             })}
           </div>
         </aside>
 
+        {/* AREA KONTEN UTAMA */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           
-          {/* HEADER DASHBOARD */}
-          <div className="bg-white border-b px-4 md:px-6 py-4 flex flex-col gap-4 shrink-0 shadow-sm relative z-20">
-            
-            {/* Baris Pertama */}
+          {/* CONTROL BAR ATAS */}
+          <div className="bg-white border-b px-4 md:px-6 py-3 flex flex-col gap-3 shrink-0 shadow-sm relative z-20">
             <div className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-2 md:gap-4">
-                
+              <div className="flex items-center gap-2 md:gap-3">
                 <div className="flex gap-1.5 md:gap-2">
                   {["2024", "2025", "2026"].map(y => (
-                    <button key={y} onClick={() => setSelectedYear(y)} className={`px-4 md:px-6 py-2 md:py-3 rounded-xl md:rounded-2xl font-black text-sm md:text-base transition-all ${selectedYear === y ? 'bg-blue-700 text-white shadow-xl' : 'bg-gray-100 text-gray-500'}`}>
-                      {y}
-                    </button>
+                    <button key={y} onClick={() => setSelectedYear(y)} className={`px-4 py-1.5 md:py-2 rounded-xl font-black text-xs md:text-sm transition-all ${selectedYear === y ? 'bg-blue-700 text-white shadow-md' : 'bg-gray-100 text-gray-500'}`}>{y}</button>
                   ))}
                 </div>
-
-                {/* Tombol Sinkronisasi Paksa (Force Update Cache) */}
-                <button 
-                  onClick={() => loadData(true)} 
-                  disabled={isSyncing}
-                  className={`flex items-center gap-2 px-3 py-2 md:py-3 ml-2 md:ml-4 rounded-xl md:rounded-2xl text-xs md:text-sm font-black border-2 transition-all ${isSyncing ? 'bg-orange-100 text-orange-600 border-orange-200' : 'bg-white text-blue-600 border-blue-100 hover:bg-blue-50 active:scale-95'}`}
-                  title="Tarik data terbaru dari server (Abaikan Cache)"
-                >
-                  <RefreshCw size={16} className={isSyncing ? "animate-spin" : ""} />
-                  <span className="hidden sm:inline">{isSyncing ? 'Menyinkronkan...' : 'Sinkron Ulang'}</span>
+                <button onClick={() => loadData(true)} disabled={isSyncing} className={`flex items-center gap-2 px-3 py-1.5 md:py-2 ml-1 md:ml-2 rounded-xl text-[10px] md:text-xs font-black border-2 transition-all ${isSyncing ? 'bg-orange-100 text-orange-600 border-orange-200' : 'bg-white text-blue-600 border-blue-100 hover:bg-blue-50 active:scale-95'}`}>
+                  <RefreshCw size={14} className={isSyncing ? "animate-spin" : ""} /><span className="hidden sm:inline">{isSyncing ? 'Syncing...' : 'Sync Data'}</span>
                 </button>
+
+                <div className="md:hidden relative ml-1">
+                  <button onClick={() => setShowMobileKabupaten(!showMobileKabupaten)} className="flex items-center gap-1.5 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl border border-blue-200 font-black text-[10px] uppercase">
+                    <MapPin size={12} /><span className="max-w-[70px] truncate">{selectedKabupaten.length === KABUPATEN_LIST.length ? 'Semua' : selectedKabupaten[0]}</span><ChevronDown size={12} className={`transition-transform ${showMobileKabupaten ? 'rotate-180' : ''}`} />
+                  </button>
+                  {showMobileKabupaten && (
+                    <div className="absolute left-0 top-full mt-2 w-48 max-h-64 overflow-y-auto bg-white rounded-2xl shadow-2xl border border-blue-100 z-50 flex flex-col p-2 animate-in fade-in zoom-in-95">
+                      <button onClick={() => { setSelectedKabupaten(KABUPATEN_LIST); setShowMobileKabupaten(false); }} className={`text-left px-3 py-2.5 rounded-xl text-xs font-black mb-1 ${selectedKabupaten.length === KABUPATEN_LIST.length ? 'bg-blue-600 text-white' : 'bg-gray-50 text-blue-600'}`}>SEMUA WILAYAH</button>
+                      {KABUPATEN_LIST.map(kab => (
+                        <button key={kab} onClick={() => { setSelectedKabupaten([kab]); setShowMobileKabupaten(false); }} className={`text-left px-3 py-2.5 rounded-xl text-xs font-black transition-all ${selectedKabupaten.length === 1 && selectedKabupaten[0] === kab ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-blue-50'}`}>{kab}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* Tombol Pilih Wilayah KHUSUS MOBILE */}
-              <div className="md:hidden relative">
-                <button 
-                  onClick={() => setShowMobileKabupaten(!showMobileKabupaten)}
-                  className="flex items-center gap-2 bg-blue-50 text-blue-700 px-3 py-2 rounded-xl border border-blue-200 font-black text-[10px] sm:text-xs uppercase"
-                >
-                  <MapPin size={14} />
-                  <span className="max-w-[80px] truncate">
-                    {selectedKabupaten.length === KABUPATEN_LIST.length ? 'Semua' : selectedKabupaten[0]}
-                  </span>
-                  <ChevronDown size={14} className={`transition-transform ${showMobileKabupaten ? 'rotate-180' : ''}`} />
-                </button>
-                
-                {/* Dropdown Wilayah Mobile */}
-                {showMobileKabupaten && (
-                  <div className="absolute right-0 top-full mt-2 w-56 max-h-80 overflow-y-auto bg-white rounded-2xl shadow-2xl border border-blue-100 z-50 flex flex-col p-2 animate-in fade-in zoom-in-95">
-                    <button onClick={() => { setSelectedKabupaten(KABUPATEN_LIST); setShowMobileKabupaten(false); }} className={`text-left px-4 py-3 rounded-xl text-xs font-black mb-1 ${selectedKabupaten.length === KABUPATEN_LIST.length ? 'bg-blue-600 text-white' : 'bg-gray-50 text-blue-600'}`}>
-                      SEMUA WILAYAH
-                    </button>
-                    {KABUPATEN_LIST.map(kab => (
-                      <button key={kab} onClick={() => { setSelectedKabupaten([kab]); setShowMobileKabupaten(false); }} className={`text-left px-4 py-3 rounded-xl text-xs font-black transition-all ${selectedKabupaten.length === 1 && selectedKabupaten[0] === kab ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-blue-50'}`}>
-                        {kab}
-                      </button>
-                    ))}
-                  </div>
-                )}
+              <div className="hidden md:flex flex-col items-end text-right ml-auto">
+                <h2 className="text-xl font-black text-blue-800 uppercase tracking-tighter leading-none">DASHBOARD DAPODIK</h2>
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">{displayTitle}</p>
               </div>
             </div>
 
-            {/* Baris Kedua: Filter Jenjang */}
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2 md:gap-4 overflow-hidden">
-              <div className="flex items-center justify-between sm:justify-start gap-2 min-w-[160px] shrink-0">
-                <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Jenjang:</span>
-                <button onClick={() => selectedJenjang.length === JENJANG_LIST.length ? setSelectedJenjang([]) : setSelectedJenjang(JENJANG_LIST)} className="px-3 py-1.5 rounded-lg md:rounded-xl text-[9px] font-black bg-red-600 text-white uppercase border-2 border-red-600">
-                  {selectedJenjang.length === JENJANG_LIST.length ? 'Kosongkan' : 'Pilih Semua'}
-                </button>
-              </div>
-              <div className="flex flex-row gap-2 overflow-x-auto pb-2 sm:pb-0 scrollbar-hide w-full">
-                {JENJANG_LIST.map(j => ( 
-                  <button key={j} onClick={() => setSelectedJenjang(prev => prev.includes(j) ? prev.filter(i => i !== j) : [...prev, j])} className={`px-3 py-1.5 rounded-lg md:rounded-xl text-[9px] md:text-[10px] font-black border-2 whitespace-nowrap shrink-0 transition-colors ${selectedJenjang.includes(j) ? 'bg-blue-600 text-white border-blue-600' : 'bg-gray-50 text-gray-400 border-gray-100 hover:border-blue-200'}`}>
-                    {j}
-                  </button> 
-                ))}
-              </div>
+            <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-1 w-full">
+              <button onClick={() => selectedJenjang.length === FILTER_JENJANG.length ? setSelectedJenjang([]) : setSelectedJenjang(FILTER_JENJANG)} className="px-4 py-2 text-xs md:px-5 md:py-2.5 md:text-sm font-black rounded-xl md:rounded-2xl bg-red-600 text-white uppercase shadow-sm active:scale-95 transition-all shrink-0">
+                {selectedJenjang.length === FILTER_JENJANG.length ? 'Kosongkan' : 'Semua / Kosongkan'}
+              </button>
+              {FILTER_JENJANG.map(j => ( 
+                <button key={j} onClick={() => setSelectedJenjang(prev => prev.includes(j) ? prev.filter(i => i !== j) : [...prev, j])} className={`px-4 py-2 text-xs md:px-5 md:py-2.5 md:text-sm font-black rounded-xl md:rounded-2xl border-2 whitespace-nowrap shrink-0 transition-colors shadow-sm active:scale-95 ${selectedJenjang.includes(j) ? 'bg-blue-600 text-white border-blue-600' : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-blue-300'}`}>{j}</button> 
+              ))}
             </div>
           </div>
 
-          {/* MAIN CONTENT / GRAFIK */}
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 md:space-y-8 bg-gray-100 text-center relative z-10">
+          {/* MAIN CONTENT */}
+          <div className="flex-1 p-3 md:p-5 flex flex-col min-h-0 bg-gray-100 relative z-10 overflow-hidden">
             {viewMode === 'main' ? (
-              <div className="animate-in fade-in duration-500 space-y-6 md:space-y-8 pb-10">
+              <div className="animate-in fade-in duration-500 h-full flex flex-col lg:flex-row gap-4 min-h-0">
                 
-                <h2 className="text-xl md:text-4xl font-black text-gray-800 flex flex-col md:flex-row items-center gap-2 md:gap-4 tracking-tighter uppercase justify-center">
-                  <div className="hidden md:block h-10 w-3 bg-blue-700 rounded-full"></div>
-                  <span className="text-blue-600 md:text-gray-800">DASHBOARD DAPODIK</span>
-                  <span className="text-sm md:text-4xl">{displayTitle} {selectedYear}</span>
-                </h2>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-8">
-                  <div onClick={() => setViewMode('detail_guru')} className="cursor-pointer hover:scale-[1.02] transition-transform active:scale-95">
-                    <StatusDoughnut label="Jumlah Guru" total={countGuru()} nValue={countGuru(true)} />
-                  </div>
-                  <StatusDoughnut label="Jumlah Kepsek" total={countGeneric('kepsek')} nValue={countGeneric('kepsek', true)} />
-                  <StatusDoughnut label="Jumlah Siswa" total={getStat('sekolah', 'PD_Total')} nValue={getStat('sekolah', 'PD_Total', true)} />
-                  <StatusDoughnut label="Jumlah Rombel" total={getStat('sekolah', 'Jumlah Rombel')} nValue={getStat('sekolah', 'Jumlah Rombel', true)} />
-                  <StatusDoughnut label="Jumlah Tendik" total={countTendik()} nValue={countTendik(true)} />
-                  <StatusDoughnut label="Satuan Pendidikan" total={countGeneric('sekolah')} nValue={countGeneric('sekolah', true)} />
-                </div>
-
-                <div className="bg-gray-800 p-6 md:p-8 rounded-[2rem] md:rounded-[3rem] text-white shadow-2xl">
-                  <h3 className="text-xs md:text-sm font-black uppercase tracking-[0.2em] md:tracking-[0.4em] mb-6 md:mb-8 text-gray-400 flex items-center gap-2 md:gap-3 justify-center">
-                    <Layers size={20} className="text-blue-500" /> Unit Sekolah per Jenjang
-                  </h3>
-                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 xl:grid-cols-7 gap-3 md:gap-4">
-                    {JENJANG_LIST.map(j => (
-                      <div key={j} className={`p-3 md:p-6 rounded-2xl md:rounded-3xl text-center border transition-all ${selectedJenjang.includes(j) ? 'bg-white/10 border-white/30 shadow-lg' : 'bg-black/20 opacity-20'}`}>
-                        <span className="text-[10px] md:text-sm font-black text-blue-400 uppercase mb-1 md:mb-2 block">{j}</span>
-                        <p className="text-xl md:text-3xl font-black">{jenjangTotals[j].toLocaleString()}</p>
-                      </div>
-                    ))}
+                <div className="flex-1 min-h-0 overflow-y-auto pr-1 sm:pr-2 scrollbar-hide">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4 content-start">
+                    <div onClick={() => setViewMode('detail_guru')} className="cursor-pointer hover:scale-[1.02] transition-transform active:scale-95">
+                      <StatusDoughnut label="Jumlah Guru" total={ptkStats.guru.total} nValue={ptkStats.guru.negeri} />
+                    </div>
+                    <StatusDoughnut label="Jumlah Kepsek" total={ptkStats.kepsek.total} nValue={ptkStats.kepsek.negeri} />
+                    <StatusDoughnut label="Jumlah Siswa" total={sekolahStats.pdTotal.total} nValue={sekolahStats.pdTotal.negeri} />
+                    <StatusDoughnut label="Jumlah Rombel" total={sekolahStats.rombel.total} nValue={sekolahStats.rombel.negeri} />
+                    <StatusDoughnut label="Jumlah Tendik" total={sekolahStats.tendik.total} nValue={sekolahStats.tendik.negeri} />
+                    <StatusDoughnut label="Satuan Pendidikan" total={sekolahStats.sekolah.total} nValue={sekolahStats.sekolah.negeri} />
                   </div>
                 </div>
+
+                <div className="w-full lg:w-64 xl:w-80 bg-blue-900 p-4 md:p-5 rounded-3xl md:rounded-[2rem] text-white shadow-xl flex flex-col shrink-0 max-h-[350px] lg:max-h-full">
+                  <div className="flex items-center justify-between mb-4 border-b border-blue-800 pb-3 shrink-0">
+                    <h3 className="text-xs md:text-sm font-black uppercase tracking-widest text-blue-200 flex items-center gap-2">
+                      <School size={16} className="text-white" /> Unit Sekolah
+                    </h3>
+                  </div>
+                  <div className="grid grid-cols-4 lg:grid-cols-2 gap-2 md:gap-3 flex-1 overflow-y-auto content-start pr-1 scrollbar-hide">
+                    {FILTER_JENJANG.map(j => {
+                      const isSelected = selectedJenjang.includes(j);
+                      return (
+                        <div key={j} className={`p-2 md:p-4 rounded-xl md:rounded-2xl text-center border-2 transition-all ${isSelected ? 'bg-white/10 border-white/20 shadow-md' : 'bg-black/20 border-transparent opacity-40'}`}>
+                          <span className="text-[9px] md:text-xs font-black text-blue-300 uppercase mb-1 block tracking-wider">{j}</span>
+                          <p className="text-sm md:text-2xl font-black">{sekolahStats.unitPerJenjang[j].toLocaleString()}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
               </div>
             ) : (
-              <div className="animate-in slide-in-from-right duration-500 h-full">
+              <div className="animate-in slide-in-from-right duration-500 h-full flex flex-col min-h-0 bg-white rounded-3xl shadow-sm overflow-hidden">
                 <DetailGuruPage 
-                  data={filtered.ptk.filter(d => String(d['Jenis PTK'] || '').toUpperCase().includes("GURU"))} 
+                  data={filtered.ptk.filter(d => getSafeVal(d, 'jenis_ptk', 'Jenis PTK').toUpperCase().includes("GURU"))} 
                   onBack={() => setViewMode('main')}
                   selectedYear={selectedYear}
                   title={displayTitle}

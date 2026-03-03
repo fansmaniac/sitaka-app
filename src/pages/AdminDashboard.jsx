@@ -20,7 +20,7 @@ export default function AdminDashboard({ Header }) {
 
   const fileInputRef = useRef(null);
 
-  // --- 1. LOGIKA STATUS DATABASE ---
+  // --- 1. LOGIKA STATUS DATABASE (MENYALA BILA ADA DATA _chunks) ---
   const checkDatabaseStatus = async () => {
     const categories = [
       { id: 'dapodik_sekolah' }, { id: 'dapodik_ptk' }, 
@@ -41,7 +41,7 @@ export default function AdminDashboard({ Header }) {
 
   useEffect(() => { if (adminView === 'input') checkDatabaseStatus(); }, [adminView]);
 
-  // --- 2. LOGIKA HAPUS DATA PER TAHUN ---
+  // --- 2. LOGIKA HAPUS DATA PER TAHUN (VERSI CHUNKS) ---
   const handleDeleteData = async (target) => {
     const confirmDelete = window.confirm(`PERINGATAN KERAS!\n\nYakin Menghapus Database ${target.label} Tahun ${target.year}?\nData yang dihapus tidak bisa dikembalikan.`);
     if (!confirmDelete) return;
@@ -105,14 +105,14 @@ export default function AdminDashboard({ Header }) {
         await deleteBatch.commit();
       }
 
-      // 2. CHUNKING PROCESS (Batas Firestore adalah 1MB per dokumen. Kita pakai 150 baris agar 100% aman)
+      // 2. CHUNKING PROCESS (Batas Firestore adalah 1MB. Pakai 150 agar data besar pun aman)
       const CHUNK_SIZE = 150; 
       const totalChunks = Math.ceil(totalRowsInExcel / CHUNK_SIZE);
 
       for (let i = 0; i < totalChunks; i++) {
         const chunkData = jsonData.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE).map(item => {
           
-          // Firebase akan menolak data bertipe 'undefined' atau Objek Date murni yang tidak di-parse
+          // Sanitasi Data: Firebase tidak bisa menyimpan 'undefined' atau Objek Tanggal yang mentah
           const sanitizedItem = {};
           for (const key in item) {
              let val = item[key];
@@ -125,9 +125,11 @@ export default function AdminDashboard({ Header }) {
              }
           }
 
+          // Pencarian NIK dan NPSN secara case-insensitive
           const keys = Object.keys(sanitizedItem);
           const nikKey = keys.find(k => k.toLowerCase() === 'nik');
-          const npsnKey = keys.find(k => k.toLowerCase() === 'npsn');
+          // Update: Di file PTK baru, kolom NPSN bernama 'npsn_sekolah'. Kita harus menangkap 'npsn' maupun 'npsn_sekolah'
+          const npsnKey = keys.find(k => k.toLowerCase() === 'npsn' || k.toLowerCase() === 'npsn_sekolah');
           
           return {
              ...sanitizedItem,
@@ -184,35 +186,16 @@ export default function AdminDashboard({ Header }) {
         'l_Hindu', 'p_Hindu', 'l_Budha', 'p_Budha', 'l_Konghucu', 'p_Konghucu', 'l_Kepercayaan', 'p_Kepercayaan', 
         'l_agama_lainnya', 'p_agama_lainnya', 'tendik', 'pd_l', 'pd_p', 'pd_total'
       ],
+      // FORMAT PTK RINGKAS (32 KOLOM) SESUAI PERMINTAAN TERBARU
       'dapodik_ptk': [
-        'nik', 'nama', 'nip', 'jenis_kelamin', 'tempat_lahir', 'tanggal_lahir', 'no_kk', 'niy_nigk', 'nuptk', 
-        'nuks', 'status_kepegawaian', 'jenis_ptk', 'pengawas_bidang_studi', 'agama', 'kewarganegaraan', 'alamat_jalan', 
-        'rt', 'rw', 'nama_dusun', 'kode_desa_kelurahan', 'desa_kelurahan', 'kode_kecamatan', 'kecamatan', 
-        'kode_kabupaten', 'kabupaten', 'kode_provinsi', 'provinsi', 'kode_pos', 'lintang', 'bujur', 'no_telepon_rumah', 
-        'email', 'status_keaktifan', 'sk_cpns', 'tgl_cpns', 'sk_pengangkatan', 'tmt_pengangkatan', 'lembaga_pengangkat', 
-        'pangkat_golongan', 'keahlian_laboratorium', 'sumber_gaji', 'nama_ibu_kandung', 'status_perkawinan', 
-        'nama_suami_istri', 'nip_suami_istri', 'pekerjaan_suami_istri', 'tmt_pns', 'sudah_lisensi_kepala_sekolah', 
-        'jumlah_sekolah_binaan', 'pernah_diklat_kepengawasan', 'nm_wp', 'status_data', 'karpeg', 'karpas', 
-        'mampu_handle_kk', 'keahlian_braille', 'keahlian_bhs_isyarat', 'npwp', 'bank', 'rekening_bank', 
-        'rekening_atas_nama', 'tahun_ajaran', 'nomor_surat_tugas', 'tanggal_surat_tugas', 'tmt_tugas', 'ptk_induk', 
-        'jenis_keluar', 'tgl_ptk_keluar', 'riwayat_kepangkatan_pangkat_golongan', 'riwayat_kepangkatan_nomor_sk', 
-        'riwayat_kepangkatan_tanggal_sk', 'riwayat_kepangkatan_tmt_pangkat', 'riwayat_kepangkatan_masa_kerja_gol_tahun', 
-        'riwayat_kepangkatan_masa_kerja_gol_bulan', 'riwayat_gaji_berkala_pangkat_golongan', 'riwayat_gaji_berkala_nomor_sk', 
-        'riwayat_gaji_berkala_tanggal_sk', 'riwayat_gaji_berkala_tmt_kgb', 'riwayat_gaji_berkala_masa_kerja_tahun', 
-        'riwayat_gaji_berkala_masa_kerja_bulan', 'riwayat_gaji_berkala_gaji_pokok', 'inpassing_pangkat_golongan', 
-        'inpassing_no_sk_inpassing', 'inpassing_tgl_sk_inpassing', 'inpassing_tmt_inpassing', 'inpassing_angka_kredit', 
-        'inpassing_masa_kerja_tahun', 'inpassing_masa_kerja_bulan', 'riwayat_sertifikasi_bidang_studi', 
-        'riwayat_sertifikasi_jenis_sertifikasi', 'riwayat_sertifikasi_tahun_sertifikasi', 'riwayat_sertifikasi_nomor_sertifikat', 
-        'riwayat_sertifikasi_nrg', 'riwayat_sertifikasi_nomor_peserta', 'riwayat_pendidikan_formal_bidang_studi', 
-        'riwayat_pendidikan_formal_jenjang_pendidikan', 'riwayat_pendidikan_formal_gelar_akademik', 
-        'riwayat_pendidikan_formal_satuan_pendidikan_formal', 'riwayat_pendidikan_formal_fakultas', 
-        'riwayat_pendidikan_formal_kependidikan', 'riwayat_pendidikan_formal_tahun_masuk', 
-        'riwayat_pendidikan_formal_tahun_lulus', 'riwayat_pendidikan_formal_nim', 'riwayat_pendidikan_formal_status_kuliah', 
-        'riwayat_pendidikan_formal_semester', 'riwayat_pendidikan_formal_ipk', 'jumlah_anak', 'tugas_tambahan_jabatan_ptk', 
-        'tugas_tambahan_sekolah', 'tugas_tambahan_jumlah_jam', 'tugas_tambahan_nomor_sk', 'tugas_tambahan_tmt_tambahan', 
-        'tugas_tambahan_tst_tambahan', 'riwayat_struktural_jabatan_ptk', 'riwayat_struktural_sk_struktural', 
-        'riwayat_struktural_tmt_jabatan', 'riwayat_fungsional_jabatan_fungsional', 'riwayat_fungsional_sk_jabfung', 
-        'riwayat_fungsional_tmt_jabatan', 'jabatan_ptk', 'npsn', 'sekolah', 'jenjang', 'status_sekolah'
+        'nik', 'nama', 'nip', 'jenis_kelamin', 'tempat_lahir', 'tanggal_lahir', 'nuptk', 
+        'status_kepegawaian', 'jenis_ptk', 'agama', 'alamat_jalan', 'desa_kelurahan', 'kecamatan', 
+        'kabupaten', 'kode_pos', 'no_telepon_rumah', 'email', 'pangkat_golongan', 
+        'riwayat_sertifikasi_bidang_studi', 'riwayat_sertifikasi_jenis_sertifikasi', 
+        'riwayat_pendidikan_formal_bidang_studi', 'riwayat_pendidikan_formal_jenjang_pendidikan', 
+        'riwayat_pendidikan_formal_gelar_akademik', 'riwayat_pendidikan_formal_satuan_pendidikan_formal', 
+        'riwayat_pendidikan_formal_fakultas', 'jabatan_ptk', 'nama_tempat_tugas', 'npsn_sekolah', 
+        'bentuk_pendidikan', 'jenjang', 'ptk_induk', 'status_keaktifan'
       ],
       'dapodik_kepsek': ['NIK', 'NPSN', 'Nama Kepala Sekolah', 'Bentuk Pendidikan', 'Kabupaten/Kota', 'Status Sekolah'],
       'rapor_pendidikan': ['NPSN', 'Kabupaten/Kota', 'Bentuk Pendidikan', 'Indeks Literasi', 'Indeks Numerasi'],

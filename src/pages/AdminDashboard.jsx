@@ -5,7 +5,8 @@ import {
   FileText, Layers, CheckCircle, Download, Trash2, Building2 
 } from 'lucide-react';
 import { db } from '../firebase/config';
-import { collection, writeBatch, doc, query, where, getDocs, limit, setDoc } from 'firebase/firestore';
+// IMPORT deleteDoc DITAMBAHKAN, writeBatch KITA BUANG UNTUK PENGHAPUSAN
+import { collection, doc, query, where, getDocs, limit, setDoc, deleteDoc } from 'firebase/firestore';
 import { readExcel } from '../utils/excelHelper';
 import ExcelJS from 'exceljs';
 
@@ -20,7 +21,7 @@ export default function AdminDashboard({ Header }) {
 
   const fileInputRef = useRef(null);
 
-  // --- 1. LOGIKA STATUS DATABASE (MENYALA BILA ADA DATA _chunks) ---
+  // --- 1. LOGIKA STATUS DATABASE ---
   const checkDatabaseStatus = async () => {
     const categories = [
       { id: 'dapodik_sekolah' }, { id: 'dapodik_ptk' }, 
@@ -41,7 +42,7 @@ export default function AdminDashboard({ Header }) {
 
   useEffect(() => { if (adminView === 'input') checkDatabaseStatus(); }, [adminView]);
 
-  // --- 2. LOGIKA HAPUS DATA PER TAHUN (VERSI CHUNKS) ---
+  // --- 2. LOGIKA HAPUS DATA (SEKUENSIAL - ANTI ERROR KEPENUHAN) ---
   const handleDeleteData = async (target) => {
     const confirmDelete = window.confirm(`PERINGATAN KERAS!\n\nYakin Menghapus Database ${target.label} Tahun ${target.year}?\nData yang dihapus tidak bisa dikembalikan.`);
     if (!confirmDelete) return;
@@ -62,26 +63,28 @@ export default function AdminDashboard({ Header }) {
 
       const allDocs = snapshot.docs;
       const totalDocs = allDocs.length;
-      const chunkSize = 500;
-      for (let i = 0; i < totalDocs; i += chunkSize) {
-        const batch = writeBatch(db);
-        const chunk = allDocs.slice(i, i + chunkSize);
-        chunk.forEach((docSnap) => batch.delete(docSnap.ref));
-        await batch.commit();
-        setUploadProgress(Math.round(((i + chunk.length) / totalDocs) * 100));
+      
+      // MENGHAPUS SATU PER SATU (MENGHINDARI ERROR TRANSACTION TOO BIG)
+      for (let i = 0; i < totalDocs; i++) {
+        await deleteDoc(allDocs[i].ref);
+        setUploadProgress(Math.round(((i + 1) / totalDocs) * 100));
       }
 
       alert(`BERHASIL! Data ${target.label} Tahun ${target.year} telah dibersihkan.`);
-      checkDatabaseStatus();
+      setTimeout(() => {
+        checkDatabaseStatus();
+      }, 1000);
+      
     } catch (error) {
-      alert("Gagal menghapus data.");
+      console.error("Delete error:", error);
+      alert("Gagal menghapus data. Periksa koneksi internet Anda.");
     } finally {
       setUploading(false);
       setUploadProgress(0);
     }
   };
 
-  // --- 3. LOGIKA SMART SYNC & UPLOAD (SUPER CHUNKING ANTI-CRASH) ---
+  // --- 3. LOGIKA SMART SYNC & UPLOAD (SUPER CHUNKING) ---
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -96,23 +99,23 @@ export default function AdminDashboard({ Header }) {
       const collectionName = `${activeTarget.collection}_chunks`; 
       const cleanTahun = String(activeTarget.year);
       
-      // 1. WIPE DATA LAMA TAHUN INI AGAR BERSIH SEBELUM DITIMPA
+      // 1. WIPE DATA LAMA TAHUN INI AGAR BERSIH SEBELUM DITIMPA (SEKUENSIAL)
       const q = query(collection(db, collectionName), where("tahun_data", "==", cleanTahun));
       const snapshot = await getDocs(q);
       if (!snapshot.empty) {
-        const deleteBatch = writeBatch(db);
-        snapshot.docs.forEach((docSnap) => deleteBatch.delete(docSnap.ref));
-        await deleteBatch.commit();
+        const allDocs = snapshot.docs;
+        for (let i = 0; i < allDocs.length; i++) {
+          await deleteDoc(allDocs[i].ref);
+        }
       }
 
-      // 2. CHUNKING PROCESS (Batas Firestore adalah 1MB. Pakai 150 agar data besar pun aman)
+      // 2. CHUNKING PROCESS (Batas Firestore adalah 1MB. Pakai 150 baris per dokumen agar 100% aman)
       const CHUNK_SIZE = 150; 
       const totalChunks = Math.ceil(totalRowsInExcel / CHUNK_SIZE);
 
       for (let i = 0; i < totalChunks; i++) {
         const chunkData = jsonData.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE).map(item => {
           
-          // Sanitasi Data: Firebase tidak bisa menyimpan 'undefined' atau Objek Tanggal yang mentah
           const sanitizedItem = {};
           for (const key in item) {
              let val = item[key];
@@ -125,11 +128,9 @@ export default function AdminDashboard({ Header }) {
              }
           }
 
-          // Pencarian NIK dan NPSN secara case-insensitive
           const keys = Object.keys(sanitizedItem);
           const nikKey = keys.find(k => k.toLowerCase() === 'nik');
-          // Update: Di file PTK baru, kolom NPSN bernama 'npsn_sekolah'. Kita harus menangkap 'npsn' maupun 'npsn_sekolah'
-          const npsnKey = keys.find(k => k.toLowerCase() === 'npsn' || k.toLowerCase() === 'npsn_sekolah');
+          const npsnKey = keys.find(k => k.toLowerCase() === 'npsn');
           
           return {
              ...sanitizedItem,
@@ -186,16 +187,14 @@ export default function AdminDashboard({ Header }) {
         'l_Hindu', 'p_Hindu', 'l_Budha', 'p_Budha', 'l_Konghucu', 'p_Konghucu', 'l_Kepercayaan', 'p_Kepercayaan', 
         'l_agama_lainnya', 'p_agama_lainnya', 'tendik', 'pd_l', 'pd_p', 'pd_total'
       ],
-      // FORMAT PTK RINGKAS (32 KOLOM) SESUAI PERMINTAAN TERBARU
+      // FORMAT PTK TERBARU (31 KOLOM TERMASUK BENTUK PENDIDIKAN)
       'dapodik_ptk': [
-        'nik', 'nama', 'nip', 'jenis_kelamin', 'tempat_lahir', 'tanggal_lahir', 'nuptk', 
-        'status_kepegawaian', 'jenis_ptk', 'agama', 'alamat_jalan', 'desa_kelurahan', 'kecamatan', 
-        'kabupaten', 'kode_pos', 'no_telepon_rumah', 'email', 'pangkat_golongan', 
-        'riwayat_sertifikasi_bidang_studi', 'riwayat_sertifikasi_jenis_sertifikasi', 
-        'riwayat_pendidikan_formal_bidang_studi', 'riwayat_pendidikan_formal_jenjang_pendidikan', 
-        'riwayat_pendidikan_formal_gelar_akademik', 'riwayat_pendidikan_formal_satuan_pendidikan_formal', 
-        'riwayat_pendidikan_formal_fakultas', 'jabatan_ptk', 'nama_tempat_tugas', 'npsn_sekolah', 
-        'bentuk_pendidikan', 'jenjang', 'ptk_induk', 'status_keaktifan'
+        'nik', 'nama', 'nuptk', 'nip', 'gender', 'tempat_lahir', 'tanggal_lahir', 'status_tugas', 
+        'tempat_tugas', 'npsn', 'bentuk_pendidikan', 'kecamatan', 'kabupaten', 'nomor_hp', 'sk_cpns', 'tanggal_cpns', 
+        'sk_pengangkatan', 'tmt_pengangkatan', 'jenis_ptk', 'jabatan_ptk', 'pendidikan', 
+        'bidang_studi_pendidikan', 'bidang_studi_sertifikasi', 'status_kepegawaian', 'pangkat', 
+        'tmt_pangkat', 'masa_kerja_tahun', 'masa_kerja_bulan', 'mata_pelajaran_diajarkan', 
+        'jam_mengajar_per_minggu', 'jabatan_kepsek'
       ],
       'dapodik_kepsek': ['NIK', 'NPSN', 'Nama Kepala Sekolah', 'Bentuk Pendidikan', 'Kabupaten/Kota', 'Status Sekolah'],
       'rapor_pendidikan': ['NPSN', 'Kabupaten/Kota', 'Bentuk Pendidikan', 'Indeks Literasi', 'Indeks Numerasi'],

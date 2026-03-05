@@ -3,7 +3,7 @@ import { MapPin, Layers, Loader2, ChevronDown, RefreshCw, School } from 'lucide-
 import { KABUPATEN_LIST } from '../constants/listData';
 import { StatusDoughnut } from '../components/StatusDoughnut';
 import { db } from '../firebase/config';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where, limit } from 'firebase/firestore';
 import DetailGuruPage from './DetailGuruPage';
 
 // =====================================================================
@@ -11,7 +11,7 @@ import DetailGuruPage from './DetailGuruPage';
 // =====================================================================
 const DB_NAME = "SitakaCacheDB";
 const STORE_NAME = "dapodikData";
-const CACHE_EXPIRY_HOURS = 12;
+const CACHE_EXPIRY_HOURS = 24;
 
 const initDB = () => {
   return new Promise((resolve, reject) => {
@@ -22,12 +22,12 @@ const initDB = () => {
   });
 };
 
-const saveToCache = async (key, data) => {
+const saveToCache = async (key, data, firestoreLastUpdate) => {
   try {
     const db = await initDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
-      tx.objectStore(STORE_NAME).put({ data, timestamp: Date.now() }, key);
+      tx.objectStore(STORE_NAME).put({ data, timestamp: Date.now(), firestoreLastUpdate }, key);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -44,7 +44,7 @@ const getFromCache = async (key) => {
         const result = req.result;
         if (result) {
           const hoursOld = (Date.now() - result.timestamp) / (1000 * 60 * 60);
-          if (hoursOld < CACHE_EXPIRY_HOURS) return resolve(result.data);
+          if (hoursOld < CACHE_EXPIRY_HOURS) return resolve(result); 
         }
         resolve(null);
       };
@@ -54,7 +54,7 @@ const getFromCache = async (key) => {
 };
 
 // =====================================================================
-// UTILITY: AMAN & CEPAT AKSES KOLOM
+// UTILITY: AMAN BACA KOLOM
 // =====================================================================
 const getSafeVal = (obj, ...possibleKeys) => {
   if (!obj) return '';
@@ -66,11 +66,9 @@ const getSafeVal = (obj, ...possibleKeys) => {
   return '';
 };
 
-// DAFTAR JENJANG SESUAI DATABASE DAPODIK
 const FILTER_JENJANG = ['TK', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'PKBM', 'TPA', 'SPS', 'SKB', 'KB'];
 
 export default function DapodikPage({ Header }) {
-  // --- 1. STATE ---
   const [selectedJenjang, setSelectedJenjang] = useState(FILTER_JENJANG);
   const [selectedKabupaten, setSelectedKabupaten] = useState(KABUPATEN_LIST);
   const [selectedYear, setSelectedYear] = useState('2026'); 
@@ -83,7 +81,6 @@ export default function DapodikPage({ Header }) {
   const [viewMode, setViewMode] = useState('main'); 
   const [showMobileKabupaten, setShowMobileKabupaten] = useState(false);
 
-  // --- 2. FETCH DATA: BATCHED CHUNK LOADING (ANTI-CRASH) ---
   const loadData = async (forceSync = false) => {
     setLoading(true);
     if (forceSync) setIsSyncing(true);
@@ -91,61 +88,88 @@ export default function DapodikPage({ Header }) {
     const cacheKey = `dapodik_all_${selectedYear}`;
 
     try {
-      if (!forceSync) {
-        const cachedData = await getFromCache(cacheKey);
-        if (cachedData && cachedData.sekolah && cachedData.ptk) {
-          setSekolahData(cachedData.sekolah);
-          setPtkData(cachedData.ptk);
-          setKepsekData(cachedData.kepsek || []);
-          setLoading(false);
-          return; 
+      const cached = await getFromCache(cacheKey);
+      let shouldFetchFromFirebase = forceSync || !cached;
+      let latestFirestoreTime = null;
+
+      if (!shouldFetchFromFirebase && cached) {
+        try {
+          const checkQ = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", selectedYear), limit(1));
+          const snapCheck = await getDocs(checkQ);
+          if (!snapCheck.empty) {
+             const docData = snapCheck.docs[0].data();
+             if (docData.updatedAt) {
+                 latestFirestoreTime = new Date(docData.updatedAt).getTime();
+                 const cachedTime = cached.firestoreLastUpdate ? new Date(cached.firestoreLastUpdate).getTime() : 0;
+                 if (latestFirestoreTime > cachedTime) {
+                     shouldFetchFromFirebase = true;
+                     setIsSyncing(true);
+                 }
+             }
+          }
+        } catch (e) {
+           console.warn("Gagal mengecek update terbaru, menggunakan cache.");
         }
       }
 
-      // Fungsi helper untuk mengambil dan menggabungkan isi dokumen chunks dengan aman
+      if (!shouldFetchFromFirebase && cached && cached.data) {
+          setSekolahData(cached.data.sekolah || []);
+          setPtkData(cached.data.ptk || []);
+          setKepsekData(cached.data.kepsek || []);
+          setLoading(false);
+          return;
+      }
+
       const fetchCollectionChunks = async (collectionName) => {
         const q = query(collection(db, collectionName), where("tahun_data", "==", selectedYear));
         const snapshot = await getDocs(q);
         let allData = [];
+        let colLatestUpdate = null;
+
         snapshot.forEach(doc => {
            const docData = doc.data();
-           if (docData.data && Array.isArray(docData.data)) {
-               // Menggabungkan bungkusan 500 data ke array utama secara efisien
+           if(docData.data && Array.isArray(docData.data)) {
                allData = allData.concat(docData.data);
            }
+           if (docData.updatedAt) {
+              const docTime = new Date(docData.updatedAt).getTime();
+              if (!colLatestUpdate || docTime > colLatestUpdate) {
+                  colLatestUpdate = docTime;
+              }
+           }
         });
-        return allData;
+        return { data: allData, lastUpdate: colLatestUpdate };
       };
 
-      // Tarik data dari target koleksi berakhiran _chunks
-      const [sekolah, ptk, kepsek] = await Promise.all([
+      const [sekolahRes, ptkRes, kepsekRes] = await Promise.all([
         fetchCollectionChunks('dapodik_sekolah_chunks'),
         fetchCollectionChunks('dapodik_ptk_chunks'),
-        fetchCollectionChunks('dapodik_kepsek_chunks')
+        fetchCollectionChunks('dapodik_kepsek_chunks') 
       ]);
 
-      const freshData = { sekolah, ptk, kepsek };
+      const freshData = { sekolah: sekolahRes.data, ptk: ptkRes.data, kepsek: kepsekRes.data };
 
-      setSekolahData(sekolah);
-      setPtkData(ptk);
-      setKepsekData(kepsek);
+      setSekolahData(freshData.sekolah);
+      setPtkData(freshData.ptk);
+      setKepsekData(freshData.kepsek);
 
-      await saveToCache(cacheKey, freshData);
+      const maxUpdate = Math.max(sekolahRes.lastUpdate || 0, ptkRes.lastUpdate || 0, kepsekRes.lastUpdate || 0);
+      const firestoreLastUpdateToSave = maxUpdate > 0 ? new Date(maxUpdate).toISOString() : new Date().toISOString();
+
+      await saveToCache(cacheKey, freshData, firestoreLastUpdateToSave);
 
     } catch (error) {
       console.error("Error mengambil data SITAKA:", error);
-      alert("Gagal melakukan Sinkronisasi. Terjadi masalah jaringan atau format database.");
+      alert("Gagal memuat data dari server. Menampilkan data lokal jika tersedia.");
     } finally {
       setLoading(false);
       setIsSyncing(false);
     }
   };
 
-  useEffect(() => {
-    loadData(false);
-  }, [selectedYear]);
+  useEffect(() => { loadData(false); }, [selectedYear]);
 
-  // --- 3. FILTER LOGIC (SUPER FAST LOOP MENGGUNAKAN SET) ---
+  // --- 3. FILTER LOGIC & SANITASI NIK (SUPER KETAT & IDENTIK DGN DETAILGURUPAGE) ---
   const filtered = useMemo(() => {
     const isSemuaJenjang = selectedJenjang.length === FILTER_JENJANG.length;
     const isSemuaKab = selectedKabupaten.length === KABUPATEN_LIST.length;
@@ -153,24 +177,56 @@ export default function DapodikPage({ Header }) {
     const jenjangSet = new Set(selectedJenjang.map(j => j.toUpperCase()));
     const kabSet = new Set(selectedKabupaten.map(k => k.replace(/^(Kab\.|Kota)\s+/i, '').trim().toUpperCase()));
 
-    const filterItem = (d) => {
+    const filterWilayahJenjang = (d) => {
       if (isSemuaJenjang && isSemuaKab) return true;
-
       const jenjangDb = getSafeVal(d, 'bentuk_pendidikan', 'Bentuk Pendidikan', 'jenjang').toUpperCase() || 'TIDAK DIKETAHUI';
       if (!isSemuaJenjang && !jenjangSet.has(jenjangDb)) return false;
-
       const kabDb = getSafeVal(d, 'kabupaten', 'Kabupaten/Kota', 'Kab/Kota').replace(/^(Kab\.|Kota)\s+/i, '').toUpperCase();
       if (!isSemuaKab && !kabSet.has(kabDb)) return false;
-
       return true;
     };
 
+    // Filter Sekolah
+    const fSekolah = sekolahData.filter(filterWilayahJenjang);
+
+    // --- LOGIKA FILTER PTK (Membersihkan Induk & Duplikat SEBELUM filter wilayah) ---
+    // Logika ini menjamin angka yang dihasilkan akan 100% cocok dengan DetailGuruPage
+    const uniqueMap = new Map();
+    
+    for (let i = 0; i < ptkData.length; i++) {
+        const ptk = ptkData[i];
+        
+        // Cek Induk
+        const isInduk = String(getSafeVal(ptk, 'status_tugas', 'ptk_induk', 'PTK Induk')).trim().toUpperCase() === 'INDUK' || String(getSafeVal(ptk, 'status_tugas', 'ptk_induk', 'PTK Induk')).trim() === '1';
+        
+        // Cek Guru
+        const isGuru = getSafeVal(ptk, 'jenis_ptk', 'Jenis PTK').toUpperCase().includes('GURU');
+        
+        // Hanya yang statusnya Guru dan Induk yang masuk mesin anti-duplikat
+        if (isGuru && isInduk) {
+            const nik = String(getSafeVal(ptk, 'nik', 'NIK')).replace(/\D/g, '');
+            const docId = nik ? nik : Math.random().toString();
+            
+            // Simpan yang pertama kali ketemu saja
+            if (!uniqueMap.has(docId)) {
+                uniqueMap.set(docId, ptk);
+            }
+        } 
+        // Jika bukan guru induk (misal tendik), kita simpan sementara dengan kunci acak agar tetap lolos
+        else if (!isGuru) {
+            uniqueMap.set(Math.random().toString(), ptk);
+        }
+    }
+
+    // Ubah map jadi array, lalu BARU filter berdasarkan wilayah & jenjang
+    const sanitizedPtkArray = Array.from(uniqueMap.values());
+    const fPtk = sanitizedPtkArray.filter(filterWilayahJenjang);
+
     return {
-      sekolah: sekolahData.filter(filterItem),
-      ptk: ptkData.filter(filterItem),
-      kepsek: kepsekData.filter(filterItem)
+      sekolah: fSekolah,
+      ptk: fPtk
     };
-  }, [sekolahData, ptkData, kepsekData, selectedJenjang, selectedKabupaten]);
+  }, [sekolahData, ptkData, selectedJenjang, selectedKabupaten]);
 
   const displayTitle = useMemo(() => {
     if (selectedKabupaten.length === KABUPATEN_LIST.length) return `PROVINSI KALIMANTAN BARAT`;
@@ -178,7 +234,7 @@ export default function DapodikPage({ Header }) {
     return "WILAYAH TERPILIH";
   }, [selectedKabupaten]);
 
-  // --- 4. HELPER PERHITUNGAN BARU (O(N) MURNI, 1 KALI PUTARAN SAJA) ---
+  // --- 4. HELPER PERHITUNGAN ---
   const getPtkStatus = (item) => {
     const sp = getSafeVal(item, 'status_kepegawaian', 'Status Kepegawaian').toUpperCase();
     if (sp.includes('PNS') || sp.includes('PPPK') || sp.includes('DAERAH') || sp.includes('PROV') || sp.includes('KAB')) return 'NEGERI';
@@ -186,9 +242,8 @@ export default function DapodikPage({ Header }) {
     return 'UNKNOWN';
   };
 
-  // Kalkulasi Sekolah (Hanya 1x putaran untuk semua infografis terkait sekolah)
   const sekolahStats = useMemo(() => {
-    const res = { sekolah: { total: 0, negeri: 0 }, pdTotal: { total: 0, negeri: 0 }, rombel: { total: 0, negeri: 0 }, tendik: { total: 0, negeri: 0 }, unitPerJenjang: {} };
+    const res = { sekolah: { total: 0, negeri: 0 }, pdTotal: { total: 0, negeri: 0 }, rombel: { total: 0, negeri: 0 }, tendik: { total: 0, negeri: 0 }, kepsek: { total: 0, negeri: 0, kosong: 0 }, unitPerJenjang: {} };
     FILTER_JENJANG.forEach(j => res.unitPerJenjang[j] = 0);
 
     for (let i = 0; i < filtered.sekolah.length; i++) {
@@ -196,23 +251,25 @@ export default function DapodikPage({ Header }) {
       const status = getSafeVal(s, 'status_sekolah', 'Status Sekolah').toUpperCase();
       const isNegeri = status === 'NEGERI';
       
-      res.sekolah.total++; 
-      if (isNegeri) res.sekolah.negeri++;
-
+      res.sekolah.total++; if (isNegeri) res.sekolah.negeri++;
       const pd = parseFloat(getSafeVal(s, 'pd_total').replace(/[^0-9.-]+/g, "")) || 0;
-      res.pdTotal.total += pd; 
-      if (isNegeri) res.pdTotal.negeri += pd;
-
+      res.pdTotal.total += pd; if (isNegeri) res.pdTotal.negeri += pd;
       const tdk = parseFloat(getSafeVal(s, 'tendik').replace(/[^0-9.-]+/g, "")) || 0;
-      res.tendik.total += tdk; 
-      if (isNegeri) res.tendik.negeri += tdk;
+      res.tendik.total += tdk; if (isNegeri) res.tendik.negeri += tdk;
 
       let rmbl = 0;
       for (const key in s) {
         if (key.toLowerCase().includes('rombel_')) rmbl += parseFloat(String(s[key]).replace(/[^0-9.-]+/g, "")) || 0;
       }
-      res.rombel.total += rmbl; 
-      if (isNegeri) res.rombel.negeri += rmbl;
+      res.rombel.total += rmbl; if (isNegeri) res.rombel.negeri += rmbl;
+
+      const namaKepsek = getSafeVal(s, 'nama_kepala_sekolah', 'Nama Kepala Sekolah').toLowerCase();
+      res.kepsek.total++; 
+      if (namaKepsek === '' || namaKepsek === 'null' || namaKepsek === '-' || namaKepsek === 'undefined') {
+          res.kepsek.kosong++; 
+      } else {
+          if (isNegeri) res.kepsek.negeri++; 
+      }
 
       const jenjangDb = getSafeVal(s, 'bentuk_pendidikan', 'Bentuk Pendidikan', 'jenjang').toUpperCase();
       if (res.unitPerJenjang[jenjangDb] !== undefined) res.unitPerJenjang[jenjangDb]++;
@@ -220,32 +277,23 @@ export default function DapodikPage({ Header }) {
     return res;
   }, [filtered.sekolah]);
 
-  // Kalkulasi PTK & Kepsek (Hanya 1x putaran)
   const ptkStats = useMemo(() => {
-    const res = { guru: { total: 0, negeri: 0 }, kepsek: { total: 0, negeri: 0 } };
-
+    const res = { guru: { total: 0, negeri: 0 } };
+    
     for (let i = 0; i < filtered.ptk.length; i++) {
       const p = filtered.ptk[i];
-      // Pastikan hanya memproses PTK Induk
-      if (getSafeVal(p, 'ptk_induk', 'PTK Induk') !== '1') continue;
-
+      // Karena kita sudah menyaring Induk & Guru di tahap filtered.ptk, 
+      // kita tinggal menghitung statusnya untuk Doughnut (Negeri/Swasta)
       const jenis = getSafeVal(p, 'jenis_ptk', 'Jenis PTK').toUpperCase();
-      const statusNegeri = getPtkStatus(p) === 'NEGERI';
-
-      if (jenis.includes("GURU")) {
-        res.guru.total++;
-        if (statusNegeri) res.guru.negeri++;
+      if (jenis.includes('GURU')) {
+          res.guru.total++;
+          if (getPtkStatus(p) === 'NEGERI') {
+              res.guru.negeri++;
+          }
       }
     }
-
-    for (let i = 0; i < filtered.kepsek.length; i++) {
-      const k = filtered.kepsek[i];
-      const statusNegeri = getPtkStatus(k) === 'NEGERI';
-      res.kepsek.total++;
-      if (statusNegeri) res.kepsek.negeri++;
-    }
     return res;
-  }, [filtered.ptk, filtered.kepsek]);
+  }, [filtered.ptk]);
 
   if (loading && !isSyncing) return (
     <div className="h-screen flex flex-col items-center justify-center bg-gray-100 italic font-black uppercase tracking-widest text-gray-400">
@@ -259,9 +307,7 @@ export default function DapodikPage({ Header }) {
       <Header />
       <div className="flex-1 flex overflow-hidden">
         
-        {/* ===================================================================== */}
         {/* SIDEBAR WILAYAH */}
-        {/* ===================================================================== */}
         <aside className="hidden md:flex w-64 lg:w-72 bg-blue-50/40 border-r border-blue-100 flex-col shrink-0 z-20 shadow-[2px_0_15px_-3px_rgba(0,0,0,0.05)]">
           <div className="px-5 py-4 border-b border-blue-200 flex justify-between items-center bg-blue-100/60 shrink-0">
             <div className="flex items-center gap-3">
@@ -270,7 +316,6 @@ export default function DapodikPage({ Header }) {
             </div>
             <button onClick={() => setSelectedKabupaten(KABUPATEN_LIST)} className={`text-[10px] font-black px-3 py-1.5 rounded-lg transition-all ${selectedKabupaten.length === KABUPATEN_LIST.length ? 'bg-blue-700 text-white shadow-md' : 'bg-white text-blue-700 border border-blue-200 hover:bg-blue-100 active:scale-95'}`}>RESET</button>
           </div>
-          
           <div className="flex-1 overflow-y-auto p-4 space-y-2.5 text-left scrollbar-hide">
             {KABUPATEN_LIST.map(kab => {
               const active = selectedKabupaten.length === 1 && selectedKabupaten[0] === kab;
@@ -284,7 +329,6 @@ export default function DapodikPage({ Header }) {
         {/* AREA KONTEN UTAMA */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           
-          {/* CONTROL BAR ATAS */}
           <div className="bg-white border-b px-4 md:px-6 py-3 flex flex-col gap-3 shrink-0 shadow-sm relative z-20">
             <div className="flex items-center justify-between w-full">
               <div className="flex items-center gap-2 md:gap-3">
@@ -332,13 +376,21 @@ export default function DapodikPage({ Header }) {
           <div className="flex-1 p-3 md:p-5 flex flex-col min-h-0 bg-gray-100 relative z-10 overflow-hidden">
             {viewMode === 'main' ? (
               <div className="animate-in fade-in duration-500 h-full flex flex-col lg:flex-row gap-4 min-h-0">
-                
                 <div className="flex-1 min-h-0 overflow-y-auto pr-1 sm:pr-2 scrollbar-hide">
                   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4 content-start">
+                    
+                    {/* Klik untuk masuk ke DetailGuruPage */}
                     <div onClick={() => setViewMode('detail_guru')} className="cursor-pointer hover:scale-[1.02] transition-transform active:scale-95">
                       <StatusDoughnut label="Jumlah Guru" total={ptkStats.guru.total} nValue={ptkStats.guru.negeri} />
                     </div>
-                    <StatusDoughnut label="Jumlah Kepsek" total={ptkStats.kepsek.total} nValue={ptkStats.kepsek.negeri} />
+                    
+                    <StatusDoughnut 
+                       label="Jumlah Kepsek" 
+                       total={sekolahStats.kepsek.total} 
+                       nValue={sekolahStats.kepsek.negeri} 
+                       xValue={sekolahStats.kepsek.kosong}
+                       xLabel="Tdk. Ada Kepsek"
+                    />
                     <StatusDoughnut label="Jumlah Siswa" total={sekolahStats.pdTotal.total} nValue={sekolahStats.pdTotal.negeri} />
                     <StatusDoughnut label="Jumlah Rombel" total={sekolahStats.rombel.total} nValue={sekolahStats.rombel.negeri} />
                     <StatusDoughnut label="Jumlah Tendik" total={sekolahStats.tendik.total} nValue={sekolahStats.tendik.negeri} />
@@ -369,6 +421,7 @@ export default function DapodikPage({ Header }) {
             ) : (
               <div className="animate-in slide-in-from-right duration-500 h-full flex flex-col min-h-0 bg-white rounded-3xl shadow-sm overflow-hidden">
                 <DetailGuruPage 
+                  // Data yang dikirim sudah bersih (Induk & Unik) karena disaring di `filtered.ptk`
                   data={filtered.ptk.filter(d => getSafeVal(d, 'jenis_ptk', 'Jenis PTK').toUpperCase().includes("GURU"))} 
                   onBack={() => setViewMode('main')}
                   selectedYear={selectedYear}

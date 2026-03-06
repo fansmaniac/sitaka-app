@@ -5,6 +5,7 @@ import { StatusDoughnut } from '../components/StatusDoughnut';
 import { db } from '../firebase/config';
 import { collection, getDocs, query, where, limit } from 'firebase/firestore';
 import DetailGuruPage from './DetailGuruPage';
+import DetailSekolah from './DetailSekolah'; // Import Detail Sekolah
 
 // =====================================================================
 // UTILITY: INDEXED-DB CACHING (BRANKAS LOKAL)
@@ -78,7 +79,7 @@ export default function DapodikPage({ Header }) {
   
   const [loading, setLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false); 
-  const [viewMode, setViewMode] = useState('main'); 
+  const [viewMode, setViewMode] = useState('main'); // 'main', 'detail_guru', 'detail_sekolah'
   const [showMobileKabupaten, setShowMobileKabupaten] = useState(false);
 
   const loadData = async (forceSync = false) => {
@@ -236,6 +237,11 @@ export default function DapodikPage({ Header }) {
 
   // --- 4. HELPER PERHITUNGAN ---
   const getPtkStatus = (item) => {
+    const statusSekolahDb = getSafeVal(item, 'status_sekolah').toUpperCase();
+    if (statusSekolahDb === 'NEGERI') return 'NEGERI';
+    if (statusSekolahDb === 'SWASTA') return 'SWASTA';
+    
+    // Fallback jika ternyata data lama/kosong
     const sp = getSafeVal(item, 'status_kepegawaian', 'Status Kepegawaian').toUpperCase();
     if (sp.includes('PNS') || sp.includes('PPPK') || sp.includes('DAERAH') || sp.includes('PROV') || sp.includes('KAB')) return 'NEGERI';
     if (sp.includes('GTY') || sp.includes('PTY') || sp.includes('YAYASAN') || sp.includes('SEKOLAH')) return 'SWASTA';
@@ -282,8 +288,6 @@ export default function DapodikPage({ Header }) {
     
     for (let i = 0; i < filtered.ptk.length; i++) {
       const p = filtered.ptk[i];
-      // Karena kita sudah menyaring Induk & Guru di tahap filtered.ptk, 
-      // kita tinggal menghitung statusnya untuk Doughnut (Negeri/Swasta)
       const jenis = getSafeVal(p, 'jenis_ptk', 'Jenis PTK').toUpperCase();
       if (jenis.includes('GURU')) {
           res.guru.total++;
@@ -379,7 +383,6 @@ export default function DapodikPage({ Header }) {
                 <div className="flex-1 min-h-0 overflow-y-auto pr-1 sm:pr-2 scrollbar-hide">
                   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4 content-start">
                     
-                    {/* Klik untuk masuk ke DetailGuruPage */}
                     <div onClick={() => setViewMode('detail_guru')} className="cursor-pointer hover:scale-[1.02] transition-transform active:scale-95">
                       <StatusDoughnut label="Jumlah Guru" total={ptkStats.guru.total} nValue={ptkStats.guru.negeri} />
                     </div>
@@ -394,7 +397,12 @@ export default function DapodikPage({ Header }) {
                     <StatusDoughnut label="Jumlah Siswa" total={sekolahStats.pdTotal.total} nValue={sekolahStats.pdTotal.negeri} />
                     <StatusDoughnut label="Jumlah Rombel" total={sekolahStats.rombel.total} nValue={sekolahStats.rombel.negeri} />
                     <StatusDoughnut label="Jumlah Tendik" total={sekolahStats.tendik.total} nValue={sekolahStats.tendik.negeri} />
-                    <StatusDoughnut label="Satuan Pendidikan" total={sekolahStats.sekolah.total} nValue={sekolahStats.sekolah.negeri} />
+                    
+                    {/* Klik untuk masuk ke DetailSekolah */}
+                    <div onClick={() => setViewMode('detail_sekolah')} className="cursor-pointer hover:scale-[1.02] transition-transform active:scale-95">
+                      <StatusDoughnut label="Satuan Pendidikan" total={sekolahStats.sekolah.total} nValue={sekolahStats.sekolah.negeri} />
+                    </div>
+
                   </div>
                 </div>
 
@@ -418,17 +426,26 @@ export default function DapodikPage({ Header }) {
                 </div>
 
               </div>
-            ) : (
+            ) : viewMode === 'detail_guru' ? (
               <div className="animate-in slide-in-from-right duration-500 h-full flex flex-col min-h-0 bg-white rounded-3xl shadow-sm overflow-hidden">
                 <DetailGuruPage 
-                  // Data yang dikirim sudah bersih (Induk & Unik) karena disaring di `filtered.ptk`
                   data={filtered.ptk.filter(d => getSafeVal(d, 'jenis_ptk', 'Jenis PTK').toUpperCase().includes("GURU"))} 
                   onBack={() => setViewMode('main')}
                   selectedYear={selectedYear}
                   title={displayTitle}
                 />
               </div>
-            )}
+            ) : viewMode === 'detail_sekolah' ? (
+              <div className="animate-in slide-in-from-right duration-500 h-full flex flex-col min-h-0 bg-white rounded-3xl shadow-sm overflow-hidden">
+                <DetailSekolah 
+                  // Melempar data sekolah yang sudah tersaring berdasarkan wilayah
+                  data={filtered.sekolah} 
+                  onBack={() => setViewMode('main')}
+                  selectedYear={selectedYear}
+                  title={displayTitle}
+                />
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

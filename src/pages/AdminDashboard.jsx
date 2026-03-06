@@ -93,9 +93,59 @@ export default function AdminDashboard({ Header }) {
     setUploadProgress(0);
 
     try {
-      const jsonData = await readExcel(file);
-      const totalRowsInExcel = jsonData.length;
+      let jsonData = await readExcel(file);
       
+      // --- 3A. FILTER KHUSUS DATABASE PTK (INDUK & ANTI DUPLIKAT NIK) ---
+      if (activeTarget.collection === 'dapodik_ptk') {
+         const mapUnique = new Map();
+         
+         jsonData.forEach(item => {
+            const keys = Object.keys(item);
+            
+            // Cari Key secara case-insensitive
+            const statusTugasKey = keys.find(k => k.toLowerCase() === 'status_tugas' || k.toLowerCase() === 'ptk_induk');
+            const jenisPtkKey = keys.find(k => k.toLowerCase() === 'jenis_ptk');
+            const nikKey = keys.find(k => k.toLowerCase() === 'nik');
+            
+            const isGuru = jenisPtkKey ? String(item[jenisPtkKey]).toUpperCase().includes('GURU') : false;
+            const isInduk = statusTugasKey ? (String(item[statusTugasKey]).trim().toUpperCase() === 'INDUK' || String(item[statusTugasKey]).trim() === '1') : false;
+            
+            // Jika dia GURU, pastikan dia INDUK. Jika bukan Guru (Tendik dll), biarkan lewat
+            if (isGuru && !isInduk) return; 
+
+            // Sterilisasi NIK (Buang huruf/spasi, murni angka)
+            const nik = nikKey ? String(item[nikKey]).replace(/\D/g, '') : '';
+            const docId = (isGuru && nik) ? nik : Math.random().toString(); 
+            
+            if (!mapUnique.has(docId)) {
+                mapUnique.set(docId, item);
+            }
+         });
+         
+         jsonData = Array.from(mapUnique.values());
+      }
+
+      // --- 3B. FILTER KHUSUS DATABASE SEKOLAH (ANTI DUPLIKAT NPSN) ---
+      if (activeTarget.collection === 'dapodik_sekolah') {
+         const mapUniqueSekolah = new Map();
+
+         jsonData.forEach(item => {
+            const keys = Object.keys(item);
+            const npsnKey = keys.find(k => k.toLowerCase() === 'npsn');
+            
+            const npsn = npsnKey ? String(item[npsnKey]).trim() : '';
+            const docId = npsn ? npsn : Math.random().toString(); // Fallback jika npsn kosong
+
+            // Hanya ambil sekolah pertama yang muncul dengan NPSN tersebut
+            if (!mapUniqueSekolah.has(docId)) {
+                mapUniqueSekolah.set(docId, item);
+            }
+         });
+
+         jsonData = Array.from(mapUniqueSekolah.values());
+      }
+      
+      const totalRowsInExcel = jsonData.length;
       const collectionName = `${activeTarget.collection}_chunks`; 
       const cleanTahun = String(activeTarget.year);
       
@@ -129,14 +179,23 @@ export default function AdminDashboard({ Header }) {
           }
 
           const keys = Object.keys(sanitizedItem);
+          
+          // DETEKSI OTOMATIS: Apakah ini database NIK atau NPSN?
           const nikKey = keys.find(k => k.toLowerCase() === 'nik');
           const npsnKey = keys.find(k => k.toLowerCase() === 'npsn');
           
-          return {
-             ...sanitizedItem,
-             NIK: nikKey ? String(sanitizedItem[nikKey]).replace(/\D/g, '') : '',
-             npsn: npsnKey ? String(sanitizedItem[npsnKey]).trim() : ''
-          };
+          let returnData = { ...sanitizedItem };
+          
+          // Jika ada NIK (seperti PTK/Kepsek), bersihkan format NIK-nya
+          if (nikKey) {
+             returnData.NIK = String(sanitizedItem[nikKey]).replace(/\D/g, '');
+          }
+          // Jika ada NPSN (seperti Sekolah/Sarpras), pastikan npsn terisi bersih
+          if (npsnKey) {
+             returnData.npsn = String(sanitizedItem[npsnKey]).trim();
+          }
+
+          return returnData;
         });
 
         const docRef = doc(collection(db, collectionName));
@@ -150,7 +209,7 @@ export default function AdminDashboard({ Header }) {
 
       alert(
         `SINKRONISASI BERHASIL!\n\n` +
-        `Total ${totalRowsInExcel.toLocaleString('id-ID')} baris data telah di-compress menjadi ${totalChunks} dokumen yang super ringan.`
+        `Total ${totalRowsInExcel.toLocaleString('id-ID')} baris data unik telah di-compress menjadi ${totalChunks} dokumen yang super ringan.`
       );
 
       checkDatabaseStatus();
@@ -187,10 +246,10 @@ export default function AdminDashboard({ Header }) {
         'l_Hindu', 'p_Hindu', 'l_Budha', 'p_Budha', 'l_Konghucu', 'p_Konghucu', 'l_Kepercayaan', 'p_Kepercayaan', 
         'l_agama_lainnya', 'p_agama_lainnya', 'tendik', 'pd_l', 'pd_p', 'pd_total'
       ],
-      // FORMAT PTK TERBARU (31 KOLOM TERMASUK BENTUK PENDIDIKAN)
+      // FORMAT PTK TERBARU (32 KOLOM TERMASUK bentuk_pendidikan dan status_sekolah)
       'dapodik_ptk': [
         'nik', 'nama', 'nuptk', 'nip', 'gender', 'tempat_lahir', 'tanggal_lahir', 'status_tugas', 
-        'tempat_tugas', 'npsn', 'bentuk_pendidikan', 'kecamatan', 'kabupaten', 'nomor_hp', 'sk_cpns', 'tanggal_cpns', 
+        'tempat_tugas', 'npsn', 'bentuk_pendidikan', 'status_sekolah', 'kecamatan', 'kabupaten', 'nomor_hp', 'sk_cpns', 'tanggal_cpns', 
         'sk_pengangkatan', 'tmt_pengangkatan', 'jenis_ptk', 'jabatan_ptk', 'pendidikan', 
         'bidang_studi_pendidikan', 'bidang_studi_sertifikasi', 'status_kepegawaian', 'pangkat', 
         'tmt_pangkat', 'masa_kerja_tahun', 'masa_kerja_bulan', 'mata_pelajaran_diajarkan', 

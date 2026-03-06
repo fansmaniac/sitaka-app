@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Search, ChevronLeft, ChevronRight, Award, School, MapPin, BookOpen } from 'lucide-react';
+import { X, Search, ChevronLeft, ChevronRight, Calendar, School, MapPin, BookOpen } from 'lucide-react';
 
 // --- UTILITY BACA KOLOM ---
 const getVal = (obj, keyName) => {
@@ -9,21 +9,36 @@ const getVal = (obj, keyName) => {
   return key ? obj[key] : '';
 };
 
-// --- NORMALISASI STATUS SERTIFIKASI ---
-const getStatusSertifikasi = (ptk) => {
-  const cert = String(getVal(ptk, 'bidang_studi_sertifikasi') || '').trim();
-  if (cert !== '' && cert !== '-' && cert.toLowerCase() !== 'null' && cert.toLowerCase() !== 'undefined') {
-    return 'Sudah Sertifikasi';
-  }
-  return 'Belum Sertifikasi';
+// --- LOGIKA MENGHITUNG USIA ---
+const getUsia = (ptk, year) => {
+  const tglLahir = getVal(ptk, 'tanggal_lahir');
+  if (!tglLahir) return null;
+  
+  const tglStr = String(tglLahir).trim();
+  const yearMatch = tglStr.match(/(19|20)\d{2}/); // Cari 4 digit tahun (19xx atau 20xx)
+  
+  if (!yearMatch) return null;
+  const birthYear = parseInt(yearMatch[0], 10);
+  return parseInt(year) - birthYear;
+};
+
+// --- KATEGORI USIA PENSIUN ---
+const getUsiaCategory = (usia) => {
+  if (usia === null) return null;
+  if (usia === 56) return '56';
+  if (usia === 57) return '57';
+  if (usia === 58) return '58';
+  if (usia === 59) return '59';
+  if (usia >= 60) return '60+';
+  return null; // Jika di bawah 56, abaikan dari tabel proyeksi pensiun
 };
 
 const JENJANG_LIST = ['TK', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'PKBM', 'TPA', 'SPS', 'SKB', 'KB'];
 
-export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah }) {
+export default function RincianPensiunModal({ isOpen, onClose, data, wilayah, selectedYear }) {
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterSertifikasi, setFilterSertifikasi] = useState('SEMUA');
-  const [filterStatus, setFilterStatus] = useState('SEMUA');
+  const [filterUsia, setFilterUsia] = useState('SEMUA');
+  const [filterStatusSekolah, setFilterStatusSekolah] = useState('SEMUA');
   const [filterJenjang, setFilterJenjang] = useState('SEMUA');
   
   const [currentPage, setCurrentPage] = useState(1);
@@ -31,7 +46,7 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterSertifikasi, filterStatus, filterJenjang]);
+  }, [searchTerm, filterUsia, filterStatusSekolah, filterJenjang]);
 
   useEffect(() => {
     const handleEsc = (e) => { if (e.key === 'Escape') onClose(); };
@@ -40,7 +55,7 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
   }, [isOpen, onClose]);
 
   const processedData = useMemo(() => {
-    if (!data) return [];
+    if (!data || !selectedYear) return [];
 
     let result = data.filter(ptk => {
       // 0. WAJIB: Hanya ambil data dengan status_tugas = INDUK (Cegah Data Ganda)
@@ -51,36 +66,48 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
       const kabPtk = String(getVal(ptk, 'kabupaten') || getVal(ptk, 'Kabupaten/Kota') || '').trim().toUpperCase();
       if (kabPtk !== wilayah.toUpperCase()) return false;
 
-      // 2. Filter Search Nama
+      // 2. Filter Usia Pensiun
+      const usia = getUsia(ptk, selectedYear);
+      const catUsia = getUsiaCategory(usia);
+      
+      // Hanya tampilkan yang masuk kategori pensiun (56 ke atas)
+      if (!catUsia) return false;
+      
+      if (filterUsia !== 'SEMUA' && catUsia !== filterUsia) return false;
+
+      // 3. Filter Search Nama
       if (searchTerm) {
         const nama = String(getVal(ptk, 'nama') || getVal(ptk, 'Nama PTK') || '').toLowerCase();
         if (!nama.includes(searchTerm.toLowerCase())) return false;
       }
 
-      // 3. Filter Sertifikasi
-      const statusCert = getStatusSertifikasi(ptk);
-      if (filterSertifikasi !== 'SEMUA' && statusCert !== filterSertifikasi) return false;
-
       // 4. Filter Status Sekolah (Baca langsung dari kolom database)
       const statusSekolahDb = String(getVal(ptk, 'status_sekolah') || '').trim().toUpperCase();
-      if (filterStatus !== 'SEMUA' && statusSekolahDb !== filterStatus) return false;
+      if (filterStatusSekolah !== 'SEMUA' && statusSekolahDb !== filterStatusSekolah) return false;
 
       // 5. Filter Jenjang
       const jenjang = String(getVal(ptk, 'bentuk_pendidikan') || getVal(ptk, 'jenjang') || '').trim().toUpperCase();
       if (filterJenjang !== 'SEMUA' && jenjang !== filterJenjang) return false;
 
+      // Sisipkan properti usia agar mudah dibaca saat render
+      ptk._computedUsia = usia;
+      ptk._computedCatUsia = catUsia;
+
       return true;
     });
 
-    // Urutkan berdasarkan nama agar rapi
+    // Urutkan berdasarkan Usia (Paling tua di atas) lalu Nama
     result.sort((a, b) => {
+      if (b._computedUsia !== a._computedUsia) {
+        return b._computedUsia - a._computedUsia;
+      }
       const namaA = String(getVal(a, 'nama') || getVal(a, 'Nama PTK') || '').toUpperCase();
       const namaB = String(getVal(b, 'nama') || getVal(b, 'Nama PTK') || '').toUpperCase();
       return namaA.localeCompare(namaB);
     });
 
     return result;
-  }, [data, wilayah, searchTerm, filterSertifikasi, filterStatus, filterJenjang]);
+  }, [data, wilayah, searchTerm, filterUsia, filterStatusSekolah, filterJenjang, selectedYear]);
 
   const totalPages = Math.ceil(processedData.length / rowsPerPage) || 1;
   const startIndex = (currentPage - 1) * rowsPerPage;
@@ -99,13 +126,13 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
         onClick={(e) => e.stopPropagation()} 
       >
         
-        {/* HEADER (EMERALD THEME) */}
-        <div className="bg-emerald-600 px-6 py-5 flex items-center justify-between shrink-0">
+        {/* HEADER (ORANGE THEME) */}
+        <div className="bg-orange-600 px-6 py-5 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3 text-white">
             <div className="bg-white/20 p-2 rounded-xl"><MapPin size={24} /></div>
             <div>
-              <h2 className="text-xl font-black uppercase tracking-tighter leading-none">Rincian Guru Wilayah</h2>
-              <p className="text-emerald-100 text-sm font-bold uppercase tracking-widest mt-1">{wilayah}</p>
+              <h2 className="text-xl font-black uppercase tracking-tighter leading-none">Rincian Proyeksi Pensiun</h2>
+              <p className="text-orange-200 text-sm font-bold uppercase tracking-widest mt-1">{wilayah} • {selectedYear}</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 bg-white/10 hover:bg-red-500 text-white rounded-xl transition-colors">
@@ -122,7 +149,7 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
               placeholder="Cari Nama Guru..." 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-gray-200 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 transition-all font-bold text-gray-700 placeholder:font-normal"
+              className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-gray-200 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200 transition-all font-bold text-gray-700 placeholder:font-normal"
             />
             {searchTerm && (
               <button 
@@ -135,26 +162,29 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
           </div>
 
           <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
-            <Award size={16} className="text-gray-400 mr-2" />
+            <Calendar size={16} className="text-gray-400 mr-2" />
             <select 
-              value={filterSertifikasi} 
-              onChange={(e) => setFilterSertifikasi(e.target.value)} 
+              value={filterUsia} 
+              onChange={(e) => setFilterUsia(e.target.value)} 
               className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer"
             >
-              <option value="SEMUA">Semua Sertifikasi</option>
-              <option value="Sudah Sertifikasi">Sudah Sertifikasi</option>
-              <option value="Belum Sertifikasi">Belum Sertifikasi</option>
+              <option value="SEMUA">Semua Usia (56+)</option>
+              <option value="56">Usia 56 Tahun</option>
+              <option value="57">Usia 57 Tahun</option>
+              <option value="58">Usia 58 Tahun</option>
+              <option value="59">Usia 59 Tahun</option>
+              <option value="60+">Usia ≥ 60 Tahun</option>
             </select>
           </div>
 
           <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
             <School size={16} className="text-gray-400 mr-2" />
             <select 
-              value={filterStatus} 
-              onChange={(e) => setFilterStatus(e.target.value)} 
+              value={filterStatusSekolah} 
+              onChange={(e) => setFilterStatusSekolah(e.target.value)} 
               className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer"
             >
-              <option value="SEMUA">Semua Status</option>
+              <option value="SEMUA">Semua Sekolah</option>
               <option value="NEGERI">Negeri</option>
               <option value="SWASTA">Swasta</option>
             </select>
@@ -181,18 +211,25 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
                 <th className="px-4 py-3 text-center rounded-tl-xl w-16">No</th>
                 <th className="px-4 py-3">Nama</th>
                 <th className="px-4 py-3 text-center">Jenjang</th>
-                <th className="px-4 py-3 rounded-tr-xl text-center">Status Sertifikasi</th>
+                <th className="px-4 py-3 rounded-tr-xl text-center">Usia di Tahun {selectedYear}</th>
               </tr>
             </thead>
             <tbody>
               {currentRows.map((row, idx) => {
-                const statusCert = getStatusSertifikasi(row);
                 const jenjang = String(getVal(row, 'bentuk_pendidikan') || getVal(row, 'jenjang') || '-').toUpperCase();
+                const usia = row._computedUsia;
+                const catUsia = row._computedCatUsia;
                 
-                let badgeColor = statusCert === 'Sudah Sertifikasi' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-50 text-red-600';
+                // Warna Badge Usia (Sesuai gradasi merah ke kuning)
+                let badgeColor = 'bg-gray-100 text-gray-600';
+                if (catUsia === '60+') badgeColor = 'bg-red-100 text-red-800';
+                else if (catUsia === '59') badgeColor = 'bg-orange-200 text-orange-900';
+                else if (catUsia === '58') badgeColor = 'bg-orange-100 text-orange-800';
+                else if (catUsia === '57') badgeColor = 'bg-amber-100 text-amber-800';
+                else if (catUsia === '56') badgeColor = 'bg-yellow-100 text-yellow-800';
 
                 return (
-                  <tr key={idx} className="border-b border-gray-100 hover:bg-emerald-50/50 transition-colors">
+                  <tr key={idx} className="border-b border-gray-100 hover:bg-orange-50/50 transition-colors">
                     <td className="px-4 py-4 text-center font-bold text-gray-400 text-xs">
                       {startIndex + idx + 1}
                     </td>
@@ -202,12 +239,12 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
                          {getVal(row, 'tempat_tugas') || '-'}
                       </div>
                     </td>
-                    <td className="px-4 py-4 text-center font-black text-emerald-700 text-xs uppercase">
+                    <td className="px-4 py-4 text-center font-black text-orange-700 text-xs uppercase">
                       {jenjang}
                     </td>
                     <td className="px-4 py-4 text-center">
                       <span className={`px-3 py-1.5 rounded-lg text-xs font-black ${badgeColor}`}>
-                        {statusCert}
+                        {usia} Tahun
                       </span>
                     </td>
                   </tr>
@@ -228,14 +265,14 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
         {/* FOOTER */}
         <div className="bg-gray-50 p-4 border-t border-gray-200 flex items-center justify-between shrink-0 rounded-b-3xl">
           <p className="text-xs font-bold text-gray-500">
-            Menampilkan <span className="text-gray-800">{processedData.length === 0 ? 0 : startIndex + 1}</span> - <span className="text-gray-800">{Math.min(startIndex + rowsPerPage, processedData.length)}</span> dari <span className="text-emerald-700 font-black">{processedData.length}</span> guru
+            Menampilkan <span className="text-gray-800">{processedData.length === 0 ? 0 : startIndex + 1}</span> - <span className="text-gray-800">{Math.min(startIndex + rowsPerPage, processedData.length)}</span> dari <span className="text-orange-700 font-black">{processedData.length}</span> guru
           </p>
           
           <div className="flex items-center gap-2">
             <button 
               disabled={currentPage === 1}
               onClick={() => goToPage(currentPage - 1)}
-              className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-emerald-50 disabled:opacity-50 transition-all"
+              className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-orange-50 hover:text-orange-700 disabled:opacity-50 transition-all"
             >
               <ChevronLeft size={16} />
             </button>
@@ -245,7 +282,7 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
             <button 
               disabled={currentPage === totalPages || totalPages === 0}
               onClick={() => goToPage(currentPage + 1)}
-              className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-emerald-50 disabled:opacity-50 transition-all"
+              className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-orange-50 hover:text-orange-700 disabled:opacity-50 transition-all"
             >
               <ChevronRight size={16} />
             </button>

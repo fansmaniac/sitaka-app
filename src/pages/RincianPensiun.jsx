@@ -1,10 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { 
   ArrowLeft, ChevronLeft, ChevronRight, FileSpreadsheet, 
-  MapPin, Filter, Download, GraduationCap, Eye, School
+  MapPin, Filter, Download, Calendar, Eye, School, BookOpen
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
-import RincianKualifikasiModal from './RincianKualifikasiModal'; // Import Modal
+import RincianPensiunModal from './RincianPensiunModal'; // Modal yang akan kita buat selanjutnya
 
 // Utility akses properti object yang aman
 const getVal = (obj, keyName) => {
@@ -30,24 +30,24 @@ const getKabupatenRank = (kabName) => {
   if (name.includes("SINTANG")) return 12;
   if (name.includes("PONTIANAK")) return 13;
   if (name.includes("SINGKAWANG")) return 14;
-  return 99; // Jika ada data di luar wilayah di atas, taruh paling bawah
+  return 99;
 };
 
 // Daftar Jenjang untuk Filter
 const FILTER_JENJANG = ['TK', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'PKBM', 'TPA', 'SPS', 'SKB', 'KB'];
 
-export default function RincianKualifikasi({ data, qualificationLabel, onBack, title }) {
+export default function RincianPensiun({ data, pensiunLabel, onBack, title, selectedYear }) {
   const [selectedKab, setSelectedKab] = useState('SEMUA'); 
   const [selectedJenjang, setSelectedJenjang] = useState('SEMUA'); 
   const [selectedStatus, setSelectedStatus] = useState('SEMUA'); 
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const [currentPage, setCurrentPage] = useState(1);
 
-  // --- STATE UNTUK MODAL RINCIAN INDIVIDU ---
+  // STATE UNTUK MODAL RINCIAN INDIVIDU
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedWilayahModal, setSelectedWilayahModal] = useState('');
 
-  // 1. Ekstrak daftar unik Kabupaten dari data & Urutkan secara Custom
+  // 1. Ekstrak daftar unik Kabupaten
   const listKabupaten = useMemo(() => {
     const unik = [...new Set(data.map(item => String(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota') || '').trim()))];
     return unik.filter(k => k !== '').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
@@ -56,7 +56,7 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
   // 2. MESIN PENGHITUNG AGREGASI PER KABUPATEN
   const aggregatedData = useMemo(() => {
     const filteredData = data.filter(item => {
-      // WAJIB: Hanya hitung yang berstatus INDUK
+      // 0. WAJIB: Hanya hitung yang berstatus INDUK
       const statusTugas = String(getVal(item, 'status_tugas') || getVal(item, 'ptk_induk') || '').trim().toUpperCase();
       if (statusTugas !== 'INDUK' && statusTugas !== '1') return false;
 
@@ -68,7 +68,7 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
       const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
       if (selectedJenjang !== 'SEMUA' && jenjangDb !== selectedJenjang.toUpperCase()) return false;
 
-      // Filter Status Sekolah (SEKARANG MEMBACA LANGSUNG DARI KOLOM)
+      // Filter Status Sekolah (Baca langsung dari kolom database)
       const statusSekolahDb = String(getVal(item, 'status_sekolah') || '').trim().toUpperCase();
       if (selectedStatus !== 'SEMUA' && statusSekolahDb !== selectedStatus) return false;
 
@@ -82,99 +82,87 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
        
        if (!mapAgg.has(kab)) {
            mapAgg.set(kab, {
-               wilayah: kab,
-               s1: 0, s2: 0, s3: 0, sma: 0, tidakDiketahui: 0, total: 0
+               wilayah: kab, u56: 0, u57: 0, u58: 0, u59: 0, u60plus: 0, total: 0
            });
        }
 
        const row = mapAgg.get(kab);
-       const qual = String(getVal(ptk, 'pendidikan') || getVal(ptk, 'riwayat_pendidikan_formal_gelar_akademik') || '').toUpperCase().trim();
        
-       if (qual === 'S1' || qual === 'S.1' || qual === 'D4' || qual === 'D.IV') {
-         row.s1++;
-       } else if (qual === 'S2' || qual === 'S.2') {
-         row.s2++;
-       } else if (qual === 'S3' || qual === 'S.3') {
-         row.s3++;
-       } else if (qual.includes('SMA') || qual.includes('SMK') || qual.includes('SLTA') || qual.includes('D1') || qual.includes('D2') || qual.includes('D3')) {
-         row.sma++;
-       } else {
-         row.tidakDiketahui++;
+       // Logika Penghitungan Usia Pensiun
+       const tglLahir = getVal(ptk, 'tanggal_lahir');
+       if (tglLahir) {
+         const tglStr = String(tglLahir).trim();
+         const yearMatch = tglStr.match(/(19|20)\d{2}/);
+         
+         if (yearMatch) {
+           const birthYear = parseInt(yearMatch[0], 10);
+           const age = parseInt(selectedYear) - birthYear;
+           
+           if (age === 56) { row.u56++; row.total++; }
+           else if (age === 57) { row.u57++; row.total++; }
+           else if (age === 58) { row.u58++; row.total++; }
+           else if (age === 59) { row.u59++; row.total++; }
+           else if (age >= 60) { row.u60plus++; row.total++; }
+         }
        }
-       row.total++;
     });
 
     // Ubah ke Array dan urutkan sesuai pakem wilayah
     return Array.from(mapAgg.values()).sort((a, b) => getKabupatenRank(a.wilayah) - getKabupatenRank(b.wilayah));
 
-  }, [data, selectedKab, selectedJenjang, selectedStatus]);
+  }, [data, selectedKab, selectedJenjang, selectedStatus, selectedYear]);
 
-  // 3. KALKULASI GRAND TOTAL (TOTAL KESELURUHAN KOLOM BAWAH)
+  // 3. KALKULASI GRAND TOTAL
   const grandTotals = useMemo(() => {
     return aggregatedData.reduce((acc, curr) => {
-      acc.s1 += curr.s1;
-      acc.s2 += curr.s2;
-      acc.s3 += curr.s3;
-      acc.sma += curr.sma;
-      acc.tidakDiketahui += curr.tidakDiketahui;
+      acc.u56 += curr.u56;
+      acc.u57 += curr.u57;
+      acc.u58 += curr.u58;
+      acc.u59 += curr.u59;
+      acc.u60plus += curr.u60plus;
       acc.total += curr.total;
       return acc;
-    }, { s1: 0, s2: 0, s3: 0, sma: 0, tidakDiketahui: 0, total: 0 });
+    }, { u56: 0, u57: 0, u58: 0, u59: 0, u60plus: 0, total: 0 });
   }, [aggregatedData]);
 
-  // 4. FUNGSI UNDUH EXCEL (.xlsx) TERMASUK BARIS TOTAL
+  // 4. FUNGSI UNDUH EXCEL (.xlsx)
   const downloadExcel = async () => {
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Rekap Kualifikasi');
+    const worksheet = workbook.addWorksheet('Rekap Proyeksi Pensiun');
 
-    // Header Excel (Tanpa kolom Aksi)
+    // Header Excel
     worksheet.columns = [
       { header: 'Wilayah (Kabupaten/Kota)', key: 'wilayah', width: 30 },
-      { header: 'S1', key: 's1', width: 15 },
-      { header: 'S2', key: 's2', width: 15 },
-      { header: 'S3', key: 's3', width: 15 },
-      { header: 'SMA / Sederajat', key: 'sma', width: 20 },
-      { header: 'Tidak Diketahui', key: 'tidakDiketahui', width: 20 },
-      { header: 'Jumlah', key: 'total', width: 15 },
+      { header: 'Usia 56', key: 'u56', width: 15 },
+      { header: 'Usia 57', key: 'u57', width: 15 },
+      { header: 'Usia 58', key: 'u58', width: 15 },
+      { header: 'Usia 59', key: 'u59', width: 15 },
+      { header: 'Usia ≥ 60', key: 'u60plus', width: 15 },
+      { header: 'Jumlah Pensiun', key: 'total', width: 20 },
     ];
 
-    // Data Baris per Wilayah
     aggregatedData.forEach(item => {
-      worksheet.addRow({
-        wilayah: item.wilayah,
-        s1: item.s1,
-        s2: item.s2,
-        s3: item.s3,
-        sma: item.sma,
-        tidakDiketahui: item.tidakDiketahui,
-        total: item.total
-      });
+      worksheet.addRow(item);
     });
 
-    // Data Baris Grand Total
     const totalRow = worksheet.addRow({
       wilayah: 'TOTAL KESELURUHAN',
-      s1: grandTotals.s1,
-      s2: grandTotals.s2,
-      s3: grandTotals.s3,
-      sma: grandTotals.sma,
-      tidakDiketahui: grandTotals.tidakDiketahui,
-      total: grandTotals.total
+      ...grandTotals
     });
 
     // Styling Header
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEA580C' } }; // Warna Orange SITAKA
     
     // Styling Baris Total
-    totalRow.font = { bold: true, color: { argb: 'FF1E3A8A' } };
-    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
+    totalRow.font = { bold: true, color: { argb: 'FF7C2D12' } };
+    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEDD5' } };
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Rekap_Kualifikasi_Guru_${new Date().getTime()}.xlsx`;
+    link.download = `Rekap_Proyeksi_Pensiun_${new Date().getTime()}.xlsx`;
     link.click();
   };
 
@@ -187,7 +175,6 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
     if (page >= 1 && page <= totalPages) setCurrentPage(page);
   };
 
-  // Fungsi Action saat klik Rincian
   const handleLihatRincian = (wilayah) => {
     setSelectedWilayahModal(wilayah);
     setModalOpen(true);
@@ -196,17 +183,17 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
   return (
     <div className="flex flex-col h-full bg-white rounded-[2rem] shadow-xl overflow-hidden animate-in slide-in-from-right duration-500 relative">
       
-      {/* HEADER & FILTER AREA */}
-      <div className="bg-blue-700 p-6 text-white flex flex-col gap-5">
+      {/* HEADER & FILTER AREA (TEMA ORANGE) */}
+      <div className="bg-orange-600 p-6 text-white flex flex-col gap-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <button onClick={onBack} className="p-2 bg-white/20 rounded-xl hover:bg-white/30 transition-all">
               <ArrowLeft size={20} />
             </button>
             <div>
-              <h3 className="text-xl font-black uppercase tracking-tight">Rekap Kualifikasi Guru Per Wilayah</h3>
-              <p className="text-xs opacity-80 font-bold uppercase tracking-widest mt-1">
-                 {title}
+              <h3 className="text-xl font-black uppercase tracking-tight">Rekap Proyeksi Pensiun Per Wilayah</h3>
+              <p className="text-xs opacity-90 font-bold uppercase tracking-widest mt-1">
+                 {title} • TAHUN {selectedYear}
               </p>
             </div>
           </div>
@@ -214,7 +201,7 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
           <div className="flex items-center gap-3">
             <button 
               onClick={downloadExcel}
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-2xl font-black uppercase text-xs shadow-lg transition-all active:scale-95 border-b-4 border-emerald-800"
+              className="flex items-center gap-2 bg-orange-800 hover:bg-orange-900 text-white px-6 py-3 rounded-2xl font-black uppercase text-xs shadow-lg transition-all active:scale-95 border-b-4 border-orange-950"
             >
               <Download size={16} /> Unduh Tabel
             </button>
@@ -224,8 +211,9 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
         {/* BARIS FILTER */}
         <div className="flex flex-wrap gap-3 items-center">
           
+          {/* Filter Kabupaten */}
           <div className="flex items-center gap-2 bg-black/20 p-2 rounded-xl border border-white/10 flex-1 min-w-[200px]">
-            <MapPin size={16} className="text-blue-300 ml-1" />
+            <MapPin size={16} className="text-orange-200 ml-1" />
             <select 
               value={selectedKab} 
               onChange={(e) => { setSelectedKab(e.target.value); setCurrentPage(1); }} 
@@ -238,8 +226,9 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
             </select>
           </div>
 
+          {/* Filter Jenjang */}
           <div className="flex items-center gap-2 bg-black/20 p-2 rounded-xl border border-white/10 flex-1 min-w-[150px]">
-            <GraduationCap size={16} className="text-blue-300 ml-1" />
+            <BookOpen size={16} className="text-orange-200 ml-1" />
             <select 
               value={selectedJenjang} 
               onChange={(e) => { setSelectedJenjang(e.target.value); setCurrentPage(1); }} 
@@ -252,8 +241,9 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
             </select>
           </div>
 
+          {/* Filter Status Sekolah */}
           <div className="flex items-center gap-2 bg-black/20 p-2 rounded-xl border border-white/10 flex-1 min-w-[150px]">
-            <School size={16} className="text-blue-300 ml-1" />
+            <School size={16} className="text-orange-200 ml-1" />
             <select 
               value={selectedStatus} 
               onChange={(e) => { setSelectedStatus(e.target.value); setCurrentPage(1); }} 
@@ -265,13 +255,14 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
             </select>
           </div>
 
+          {/* Pengaturan Baris */}
           <div className="flex items-center gap-1 bg-black/20 p-1.5 rounded-xl border border-white/10 shrink-0">
-            <Filter size={16} className="text-blue-300 ml-2 mr-1" />
+            <Filter size={16} className="text-orange-200 ml-2 mr-1" />
             {[10, 20, 50].map(num => (
               <button 
                 key={num} 
                 onClick={() => { setRowsPerPage(num); setCurrentPage(1); }}
-                className={`px-3 py-1 rounded-lg text-[10px] font-black transition-all ${rowsPerPage === num ? 'bg-white text-blue-700 shadow-md' : 'hover:bg-white/10 text-white'}`}
+                className={`px-3 py-1 rounded-lg text-[10px] font-black transition-all ${rowsPerPage === num ? 'bg-white text-orange-700 shadow-md' : 'hover:bg-white/10 text-white'}`}
               >
                 {num}
               </button>
@@ -285,42 +276,40 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
       <div className="flex-1 overflow-auto p-6 bg-gray-50/50 relative">
         <table className="w-full text-left border-separate border-spacing-y-2">
           
-          {/* THEAD */}
           <thead className="sticky top-0 bg-gray-100 z-20 rounded-xl shadow-sm">
             <tr className="text-[10px] font-black uppercase text-gray-500 text-center">
-              <th className="px-6 py-3 text-left rounded-l-xl">Wilayah</th>
-              <th className="px-4 py-3">S1</th>
-              <th className="px-4 py-3">S2</th>
-              <th className="px-4 py-3">S3</th>
-              <th className="px-4 py-3">SMA/Sederajat</th>
-              <th className="px-4 py-3">Tidak Diketahui</th>
-              <th className="px-4 py-3 text-emerald-600">Jumlah</th>
-              <th className="px-6 py-3 rounded-r-xl">Aksi</th>
+              <th className="px-4 py-3 text-left rounded-l-xl">Wilayah</th>
+              <th className="px-3 py-3">Usia 56</th>
+              <th className="px-3 py-3">Usia 57</th>
+              <th className="px-3 py-3">Usia 58</th>
+              <th className="px-3 py-3">Usia 59</th>
+              <th className="px-3 py-3">Usia ≥ 60</th>
+              <th className="px-4 py-3 text-orange-700">Jumlah</th>
+              <th className="px-4 py-3 rounded-r-xl">Aksi</th>
             </tr>
           </thead>
           
-          {/* TBODY */}
           <tbody>
             {currentRows.map((row, idx) => (
               <tr key={idx} className="bg-white shadow-sm hover:shadow-md hover:scale-[1.01] transition-all text-center group cursor-default">
-                <td className="px-6 py-4 rounded-l-2xl font-black text-gray-800 uppercase text-left border-y border-l border-gray-100">
+                <td className="px-4 py-4 rounded-l-2xl font-black text-gray-800 uppercase text-left border-y border-l border-gray-100 whitespace-nowrap">
                   {row.wilayah}
                 </td>
-                <td className="px-4 py-4 font-black text-blue-700 text-base border-y border-gray-100">{row.s1.toLocaleString()}</td>
-                <td className="px-4 py-4 font-black text-indigo-700 text-base border-y border-gray-100">{row.s2.toLocaleString()}</td>
-                <td className="px-4 py-4 font-black text-purple-700 text-base border-y border-gray-100">{row.s3.toLocaleString()}</td>
-                <td className="px-4 py-4 font-bold text-gray-600 border-y border-gray-100">{row.sma.toLocaleString()}</td>
-                <td className="px-4 py-4 font-bold text-red-400 border-y border-gray-100">{row.tidakDiketahui.toLocaleString()}</td>
+                <td className="px-3 py-4 font-bold text-yellow-600 border-y border-gray-100">{row.u56.toLocaleString()}</td>
+                <td className="px-3 py-4 font-bold text-amber-600 border-y border-gray-100">{row.u57.toLocaleString()}</td>
+                <td className="px-3 py-4 font-black text-orange-600 text-base border-y border-gray-100">{row.u58.toLocaleString()}</td>
+                <td className="px-3 py-4 font-black text-orange-700 text-base border-y border-gray-100">{row.u59.toLocaleString()}</td>
+                <td className="px-3 py-4 font-black text-red-600 text-base border-y border-gray-100">{row.u60plus.toLocaleString()}</td>
                 
                 {/* KOLOM JUMLAH PER BARIS */}
-                <td className="px-4 py-4 font-black text-emerald-600 text-lg border-y border-gray-100 bg-emerald-50/30">
+                <td className="px-4 py-4 font-black text-orange-700 text-lg border-y border-gray-100 bg-orange-50/50">
                   {row.total.toLocaleString()}
                 </td>
 
-                <td className="px-6 py-4 rounded-r-2xl border-y border-r border-gray-100">
+                <td className="px-4 py-4 rounded-r-2xl border-y border-r border-gray-100">
                    <button 
                       onClick={() => handleLihatRincian(row.wilayah)}
-                      className="flex items-center justify-center gap-2 bg-blue-50 text-blue-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-blue-600 hover:text-white transition-colors mx-auto"
+                      className="flex items-center justify-center gap-2 bg-orange-50 text-orange-700 px-4 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-orange-600 hover:text-white transition-colors mx-auto"
                    >
                      <Eye size={14} /> Rincian
                    </button>
@@ -332,24 +321,24 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
           {/* TFOOT: BARIS TOTAL KESELURUHAN (STICKY BOTTOM) */}
           {aggregatedData.length > 0 && (
             <tfoot className="sticky bottom-0 z-20 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
-              <tr className="bg-blue-50 text-center font-black uppercase text-sm border-t-2 border-blue-200">
-                <td className="px-6 py-4 text-left rounded-l-2xl border-y border-l border-blue-200 text-blue-900">
+              <tr className="bg-orange-50 text-center font-black uppercase text-sm border-t-2 border-orange-200">
+                <td className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-orange-200 text-orange-900">
                   TOTAL KESELURUHAN
                 </td>
-                <td className="px-4 py-4 text-blue-700 border-y border-blue-200">{grandTotals.s1.toLocaleString()}</td>
-                <td className="px-4 py-4 text-indigo-700 border-y border-blue-200">{grandTotals.s2.toLocaleString()}</td>
-                <td className="px-4 py-4 text-purple-700 border-y border-blue-200">{grandTotals.s3.toLocaleString()}</td>
-                <td className="px-4 py-4 text-gray-700 border-y border-blue-200">{grandTotals.sma.toLocaleString()}</td>
-                <td className="px-4 py-4 text-red-500 border-y border-blue-200">{grandTotals.tidakDiketahui.toLocaleString()}</td>
-                <td className="px-4 py-4 text-emerald-600 border-y border-blue-200 text-lg bg-emerald-100/50">{grandTotals.total.toLocaleString()}</td>
-                <td className="px-6 py-4 rounded-r-2xl border-y border-r border-blue-200"></td>
+                <td className="px-3 py-4 text-yellow-700 border-y border-orange-200">{grandTotals.u56.toLocaleString()}</td>
+                <td className="px-3 py-4 text-amber-700 border-y border-orange-200">{grandTotals.u57.toLocaleString()}</td>
+                <td className="px-3 py-4 text-orange-700 border-y border-orange-200">{grandTotals.u58.toLocaleString()}</td>
+                <td className="px-3 py-4 text-orange-800 border-y border-orange-200">{grandTotals.u59.toLocaleString()}</td>
+                <td className="px-3 py-4 text-red-700 border-y border-orange-200">{grandTotals.u60plus.toLocaleString()}</td>
+                <td className="px-4 py-4 text-orange-900 border-y border-orange-200 text-lg bg-orange-100/60">{grandTotals.total.toLocaleString()}</td>
+                <td className="px-4 py-4 rounded-r-2xl border-y border-r border-orange-200"></td>
               </tr>
             </tfoot>
           )}
         </table>
 
         {aggregatedData.length === 0 && (
-          <div className="py-20 flex flex-col items-center opacity-30">
+          <div className="py-20 flex flex-col items-center opacity-30 text-orange-900">
             <FileSpreadsheet size={64} className="mb-4" />
             <p className="font-black uppercase tracking-widest text-xl">Data Tidak Ditemukan</p>
             <p className="text-sm font-bold mt-2">Ubah kombinasi filter di atas</p>
@@ -367,7 +356,7 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
           <button 
             disabled={currentPage === 1}
             onClick={() => goToPage(currentPage - 1)}
-            className="p-2 rounded-xl bg-gray-50 border border-gray-200 text-gray-600 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-30 transition-all"
+            className="p-2 rounded-xl bg-gray-50 border border-gray-200 text-gray-600 hover:bg-orange-50 hover:text-orange-600 disabled:opacity-30 transition-all"
           >
             <ChevronLeft size={20} />
           </button>
@@ -380,7 +369,7 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
                   {i > 0 && arr[i-1] !== p-1 && <span className="px-2 opacity-30 flex items-end pb-1">...</span>}
                   <button 
                     onClick={() => goToPage(p)}
-                    className={`w-8 h-8 rounded-lg text-xs font-black transition-all ${currentPage === p ? 'bg-blue-700 text-white shadow-md' : 'bg-white border hover:bg-gray-50 text-gray-600'}`}
+                    className={`w-8 h-8 rounded-lg text-xs font-black transition-all ${currentPage === p ? 'bg-orange-600 text-white shadow-md' : 'bg-white border hover:bg-gray-50 text-gray-600'}`}
                   >
                     {p}
                   </button>
@@ -392,7 +381,7 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
           <button 
             disabled={currentPage === totalPages}
             onClick={() => goToPage(currentPage + 1)}
-            className="p-2 rounded-xl bg-gray-50 border border-gray-200 text-gray-600 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-30 transition-all"
+            className="p-2 rounded-xl bg-gray-50 border border-gray-200 text-gray-600 hover:bg-orange-50 hover:text-orange-600 disabled:opacity-30 transition-all"
           >
             <ChevronRight size={20} />
           </button>
@@ -400,11 +389,12 @@ export default function RincianKualifikasi({ data, qualificationLabel, onBack, t
       </div>
 
       {/* MODAL RINCIAN INDIVIDU */}
-      <RincianKualifikasiModal 
+      <RincianPensiunModal 
         isOpen={modalOpen} 
         onClose={() => setModalOpen(false)} 
         data={data} 
-        wilayah={selectedWilayahModal} 
+        wilayah={selectedWilayahModal}
+        selectedYear={selectedYear} // Meneruskan tahun agar modal bisa menghitung umur
       />
 
     </div>

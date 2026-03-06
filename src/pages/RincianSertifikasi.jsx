@@ -4,7 +4,7 @@ import {
   MapPin, Filter, Download, Award, Eye, School
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
-import RincianSertifikasiModal from './RincianSertifikasiModal'; // Kita siapkan import untuk modalnya nanti
+import RincianSertifikasiModal from './RincianSertifikasiModal'; 
 
 // Utility akses properti object yang aman
 const getVal = (obj, keyName) => {
@@ -56,6 +56,10 @@ export default function RincianSertifikasi({ data, certificationLabel, onBack, t
   // 2. MESIN PENGHITUNG AGREGASI PER KABUPATEN
   const aggregatedData = useMemo(() => {
     const filteredData = data.filter(item => {
+      // WAJIB: Hanya hitung yang berstatus INDUK (Mencegah Data Ganda)
+      const statusTugas = String(getVal(item, 'status_tugas') || getVal(item, 'ptk_induk') || '').trim().toUpperCase();
+      if (statusTugas !== 'INDUK' && statusTugas !== '1') return false;
+
       // Filter Wilayah
       const kab = String(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota') || '').trim().toUpperCase();
       if (selectedKab !== 'SEMUA' && kab !== selectedKab.toUpperCase()) return false;
@@ -64,13 +68,9 @@ export default function RincianSertifikasi({ data, certificationLabel, onBack, t
       const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
       if (selectedJenjang !== 'SEMUA' && jenjangDb !== selectedJenjang.toUpperCase()) return false;
 
-      // Filter Status Sekolah
-      const statusPegawai = String(getVal(item, 'status_kepegawaian') || '').toUpperCase();
-      let statusSekolah = 'SWASTA';
-      if (statusPegawai.includes('PNS') || statusPegawai.includes('PPPK') || statusPegawai.includes('DAERAH') || statusPegawai.includes('PROV') || statusPegawai.includes('KAB')) {
-          statusSekolah = 'NEGERI';
-      }
-      if (selectedStatus !== 'SEMUA' && statusSekolah !== selectedStatus) return false;
+      // Filter Status Sekolah (BACA LANGSUNG DARI KOLOM DATABASE)
+      const statusSekolahDb = String(getVal(item, 'status_sekolah') || '').trim().toUpperCase();
+      if (selectedStatus !== 'SEMUA' && statusSekolahDb !== selectedStatus) return false;
 
       return true;
     });
@@ -149,7 +149,7 @@ export default function RincianSertifikasi({ data, certificationLabel, onBack, t
 
     // Styling Header
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF059669' } }; // Warna Emerald SITAKA
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF059669' } }; 
     
     // Styling Baris Total
     totalRow.font = { bold: true, color: { argb: 'FF064E3B' } };
@@ -379,7 +379,7 @@ export default function RincianSertifikasi({ data, certificationLabel, onBack, t
         </div>
       </div>
 
-      {/* MODAL RINCIAN INDIVIDU (NANTI KITA BUAT FILE NYA) */}
+      {/* MODAL RINCIAN INDIVIDU */}
       <RincianSertifikasiModal 
         isOpen={modalOpen} 
         onClose={() => setModalOpen(false)} 

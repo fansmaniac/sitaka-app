@@ -1,7 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { ArrowLeft, Users, MousePointer2, GraduationCap, Award, Calendar, Briefcase } from 'lucide-react';
 import RincianKualifikasi from './RincianKualifikasi';
-import RincianSertifikasi from './RincianSertifikasi'; // Tembahan Import Rincian Sertifikasi
+import RincianSertifikasi from './RincianSertifikasi'; 
+import RincianStatusKepegawaianPage from './RincianStatusKepegawaianPage';
+import RincianPensiun from './RincianPensiun'; // Tambahan Import Rincian Pensiun
 
 // --- UTILITY AMAN BACA KOLOM ---
 const getVal = (obj, keyName) => {
@@ -99,12 +101,14 @@ const InfoCard = ({ title, icon: Icon, segments, total, onClick, onSegmentClick,
 };
 
 export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
-  // State untuk mengontrol view ('charts', 'table_kualifikasi', 'table_sertifikasi')
+  // State untuk mengontrol view 
   const [selectedSubView, setSelectedSubView] = useState('charts');
   
   // State untuk melacak kategori spesifik yang diklik
   const [activeKualifikasi, setActiveKualifikasi] = useState('SEMUA');
   const [activeSertifikasi, setActiveSertifikasi] = useState('SEMUA');
+  const [activePegawai, setActivePegawai] = useState('SEMUA');
+  const [activePensiun, setActivePensiun] = useState('SEMUA');
 
   // --- MEGA OPTIMASI: HITUNG STATISTIK TANPA MENYARING ULANG DATA ---
   const stats = useMemo(() => {
@@ -189,7 +193,6 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
         if (activeKualifikasi === 'S3') return (q === 'S3' || q === 'S.3');
         if (activeKualifikasi === 'SMA/Sederajat') return (q.includes('SMA') || q.includes('SMK') || q.includes('SLTA') || q.includes('D1') || q.includes('D2') || q.includes('D3'));
         
-        // Tidak diketahui
         return !(q.includes('S1') || q.includes('S2') || q.includes('S3') || q.includes('D4') || q.includes('SMA') || q.includes('SMK') || q.includes('SLTA') || q.includes('D1') || q.includes('D2') || q.includes('D3'));
     });
     return <RincianKualifikasi data={dataFiltered} qualificationLabel={activeKualifikasi} onBack={() => { setSelectedSubView('charts'); setActiveKualifikasi('SEMUA'); }} title={`${title} ${selectedYear}`} />;
@@ -206,6 +209,48 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
         return true;
     });
     return <RincianSertifikasi data={dataFiltered} certificationLabel={activeSertifikasi} onBack={() => { setSelectedSubView('charts'); setActiveSertifikasi('SEMUA'); }} title={`${title} ${selectedYear}`} />;
+  }
+
+  // Mode View Rincian Tabel Status Kepegawaian
+  if (selectedSubView === 'table_pegawai') {
+    const dataFiltered = activePegawai === 'SEMUA' ? data : data.filter(d => {
+        const sp = String(getVal(d, 'status_kepegawaian') || '').toUpperCase();
+        let jenis = 'Lainnya';
+        if (sp.includes('PNS')) jenis = 'PNS';
+        else if (sp.includes('PPPK')) jenis = 'PPPK';
+        else if (sp.includes('GTY') || sp.includes('PTY') || sp.includes('YAYASAN')) jenis = 'GTY/PTY';
+        else if (sp.includes('SEKOLAH') || sp.includes('HONORER SEKOLAH')) jenis = 'Honor Sekolah';
+        else if (sp.includes('DAERAH') || sp.includes('HONORER DAERAH') || sp.includes('KAB') || sp.includes('PROV')) jenis = 'Honor Daerah';
+
+        return jenis === activePegawai;
+    });
+    return <RincianStatusKepegawaianPage data={dataFiltered} statusLabel={activePegawai} onBack={() => { setSelectedSubView('charts'); setActivePegawai('SEMUA'); }} title={`${title} ${selectedYear}`} />;
+  }
+
+  // Mode View Rincian Tabel Proyeksi Pensiun
+  if (selectedSubView === 'table_pensiun') {
+    const dataFiltered = activePensiun === 'SEMUA' ? data : data.filter(d => {
+        const tglLahir = getVal(d, 'tanggal_lahir');
+        if (!tglLahir) return false;
+        
+        const tglStr = String(tglLahir).trim();
+        const yearMatch = tglStr.match(/(19|20)\d{2}/);
+        if (!yearMatch) return false;
+
+        const birthYear = parseInt(yearMatch[0], 10);
+        const age = parseInt(selectedYear) - birthYear;
+
+        if (activePensiun === 'Usia 56') return age === 56;
+        if (activePensiun === 'Usia 57') return age === 57;
+        if (activePensiun === 'Usia 58') return age === 58;
+        if (activePensiun === 'Usia 59') return age === 59;
+        if (activePensiun === 'Usia ≥ 60') return age >= 60;
+        
+        return false;
+    });
+    
+    // Pastikan data kosong juga memicu filter jika diklik "SEMUA", tapi yang lolos ke `RincianPensiun` akan disaring oleh umurnya sendiri
+    return <RincianPensiun data={activePensiun === 'SEMUA' ? data : dataFiltered} pensiunLabel={activePensiun} onBack={() => { setSelectedSubView('charts'); setActivePensiun('SEMUA'); }} title={title} selectedYear={selectedYear} />;
   }
 
 
@@ -227,7 +272,6 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
         </div>
         <div className="bg-white px-6 py-3 rounded-2xl text-blue-800 shadow-lg flex items-center gap-3">
           <Users size={20} className="text-blue-600"/>
-          {/* Angka Total murni mengambil length dari property 'data' */}
           <span className="text-xl font-black">{data.length.toLocaleString('id-ID')}</span>
         </div>
       </div>
@@ -260,7 +304,8 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
 
         <InfoCard 
           title="Proyeksi Pensiun" icon={Calendar} colorClass="bg-orange-600"
-          total={Object.values(stats.pensiun).reduce((a, b) => a + b, 0)}
+          total={Object.values(stats.pensiun).reduce((a, b) => a + b, 0)} onClick={() => { setActivePensiun('SEMUA'); setSelectedSubView('table_pensiun'); }}
+          onSegmentClick={(label) => { setActivePensiun(label); setSelectedSubView('table_pensiun'); }}
           segments={[
             { name: 'Usia 56', value: stats.pensiun.u56, color: '#fcd34d' }, 
             { name: 'Usia 57', value: stats.pensiun.u57, color: '#f59e0b' },
@@ -272,7 +317,8 @@ export default function DetailGuruPage({ data, onBack, selectedYear, title }) {
 
         <InfoCard 
           title="Status Kepegawaian" icon={Briefcase} colorClass="bg-purple-600"
-          total={data.length}
+          total={data.length} onClick={() => { setActivePegawai('SEMUA'); setSelectedSubView('table_pegawai'); }}
+          onSegmentClick={(label) => { setActivePegawai(label); setSelectedSubView('table_pegawai'); }}
           segments={[
             { name: 'PNS', value: stats.pegawai.pns, color: '#9333ea' }, 
             { name: 'PPPK', value: stats.pegawai.pppk, color: '#7e22ce' },

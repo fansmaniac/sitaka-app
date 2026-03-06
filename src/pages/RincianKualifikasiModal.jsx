@@ -19,13 +19,6 @@ const getKualifikasi = (ptk) => {
   return 'Tidak Diketahui';
 };
 
-// --- NORMALISASI STATUS SEKOLAH ---
-const getStatusSekolah = (ptk) => {
-  const sp = String(getVal(ptk, 'status_kepegawaian') || '').toUpperCase();
-  if (sp.includes('PNS') || sp.includes('PPPK') || sp.includes('DAERAH') || sp.includes('PROV') || sp.includes('KAB')) return 'NEGERI';
-  return 'SWASTA';
-};
-
 const KUALIFIKASI_WEIGHT = {
   'S3': 1,
   'S2': 2,
@@ -61,6 +54,10 @@ export default function RincianKualifikasiModal({ isOpen, onClose, data, wilayah
     if (!data) return [];
 
     let result = data.filter(ptk => {
+      // 0. WAJIB: Hanya ambil data dengan status_tugas = INDUK (Cegah Data Ganda)
+      const statusTugas = String(getVal(ptk, 'status_tugas') || getVal(ptk, 'ptk_induk') || '').trim().toUpperCase();
+      if (statusTugas !== 'INDUK' && statusTugas !== '1') return false;
+
       // 1. Filter Wilayah (Pastikan hanya PTK di wilayah ini yang masuk)
       const kabPtk = String(getVal(ptk, 'kabupaten') || getVal(ptk, 'Kabupaten/Kota') || '').trim().toUpperCase();
       if (kabPtk !== wilayah.toUpperCase()) return false;
@@ -75,9 +72,9 @@ export default function RincianKualifikasiModal({ isOpen, onClose, data, wilayah
       const kualPtk = getKualifikasi(ptk);
       if (filterKualifikasi !== 'SEMUA' && kualPtk !== filterKualifikasi) return false;
 
-      // 4. Filter Status Sekolah
-      const statusSekolah = getStatusSekolah(ptk);
-      if (filterStatus !== 'SEMUA' && statusSekolah !== filterStatus) return false;
+      // 4. Filter Status Sekolah (Baca langsung dari kolom database)
+      const statusSekolahDb = String(getVal(ptk, 'status_sekolah') || '').trim().toUpperCase();
+      if (filterStatus !== 'SEMUA' && statusSekolahDb !== filterStatus) return false;
 
       // 5. Filter Jenjang
       const jenjang = String(getVal(ptk, 'bentuk_pendidikan') || getVal(ptk, 'jenjang') || '').trim().toUpperCase();
@@ -226,8 +223,11 @@ export default function RincianKualifikasiModal({ isOpen, onClose, data, wilayah
                     </td>
                     <td className="px-4 py-4 font-black text-gray-800 text-sm uppercase">
                       {getVal(row, 'nama') || getVal(row, 'Nama PTK') || '-'}
+                      <div className="text-[10px] text-gray-500 mt-1 font-bold">
+                         {getVal(row, 'tempat_tugas') || '-'}
+                      </div>
                     </td>
-                    <td className="px-4 py-4 text-center font-bold text-gray-600 text-xs uppercase">
+                    <td className="px-4 py-4 text-center font-black text-blue-700 text-xs uppercase">
                       {getVal(row, 'bentuk_pendidikan') || getVal(row, 'jenjang') || '-'}
                     </td>
                     <td className="px-4 py-4 text-center">

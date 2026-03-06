@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Search, ChevronLeft, ChevronRight, Award, School, MapPin, BookOpen } from 'lucide-react';
+import { X, Search, ChevronLeft, ChevronRight, Briefcase, School, MapPin, BookOpen } from 'lucide-react';
 
 // --- UTILITY BACA KOLOM ---
 const getVal = (obj, keyName) => {
@@ -9,21 +9,33 @@ const getVal = (obj, keyName) => {
   return key ? obj[key] : '';
 };
 
-// --- NORMALISASI STATUS SERTIFIKASI ---
-const getStatusSertifikasi = (ptk) => {
-  const cert = String(getVal(ptk, 'bidang_studi_sertifikasi') || '').trim();
-  if (cert !== '' && cert !== '-' && cert.toLowerCase() !== 'null' && cert.toLowerCase() !== 'undefined') {
-    return 'Sudah Sertifikasi';
-  }
-  return 'Belum Sertifikasi';
+// --- NORMALISASI STATUS KEPEGAWAIAN UNTUK TABEL & FILTER ---
+const getStatusKepegawaian = (ptk) => {
+  const sp = String(getVal(ptk, 'status_kepegawaian') || '').toUpperCase();
+  if (sp.includes('PNS')) return 'PNS';
+  if (sp.includes('PPPK')) return 'PPPK';
+  if (sp.includes('GTY') || sp.includes('PTY') || sp.includes('YAYASAN')) return 'GTY/PTY';
+  if (sp.includes('SEKOLAH') || sp.includes('HONORER SEKOLAH')) return 'Honor Sekolah';
+  if (sp.includes('DAERAH') || sp.includes('HONORER DAERAH') || sp.includes('KAB') || sp.includes('PROV')) return 'Honor Daerah';
+  return 'Lainnya';
+};
+
+// Pengurutan prioritas: PNS -> PPPK -> GTY -> Honor Daerah -> Honor Sekolah -> Lainnya
+const KEPEGAWAIAN_WEIGHT = {
+  'PNS': 1,
+  'PPPK': 2,
+  'GTY/PTY': 3,
+  'Honor Daerah': 4,
+  'Honor Sekolah': 5,
+  'Lainnya': 6
 };
 
 const JENJANG_LIST = ['TK', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'PKBM', 'TPA', 'SPS', 'SKB', 'KB'];
 
-export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah }) {
+export default function RincianStatusKepegawaianModal({ isOpen, onClose, data, wilayah }) {
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterSertifikasi, setFilterSertifikasi] = useState('SEMUA');
-  const [filterStatus, setFilterStatus] = useState('SEMUA');
+  const [filterPegawai, setFilterPegawai] = useState('SEMUA');
+  const [filterStatusSekolah, setFilterStatusSekolah] = useState('SEMUA');
   const [filterJenjang, setFilterJenjang] = useState('SEMUA');
   
   const [currentPage, setCurrentPage] = useState(1);
@@ -31,7 +43,7 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterSertifikasi, filterStatus, filterJenjang]);
+  }, [searchTerm, filterPegawai, filterStatusSekolah, filterJenjang]);
 
   useEffect(() => {
     const handleEsc = (e) => { if (e.key === 'Escape') onClose(); };
@@ -57,13 +69,13 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
         if (!nama.includes(searchTerm.toLowerCase())) return false;
       }
 
-      // 3. Filter Sertifikasi
-      const statusCert = getStatusSertifikasi(ptk);
-      if (filterSertifikasi !== 'SEMUA' && statusCert !== filterSertifikasi) return false;
+      // 3. Filter Status Kepegawaian Khusus (PNS, PPPK, dll)
+      const jenisPegawai = getStatusKepegawaian(ptk);
+      if (filterPegawai !== 'SEMUA' && jenisPegawai !== filterPegawai) return false;
 
       // 4. Filter Status Sekolah (Baca langsung dari kolom database)
       const statusSekolahDb = String(getVal(ptk, 'status_sekolah') || '').trim().toUpperCase();
-      if (filterStatus !== 'SEMUA' && statusSekolahDb !== filterStatus) return false;
+      if (filterStatusSekolah !== 'SEMUA' && statusSekolahDb !== filterStatusSekolah) return false;
 
       // 5. Filter Jenjang
       const jenjang = String(getVal(ptk, 'bentuk_pendidikan') || getVal(ptk, 'jenjang') || '').trim().toUpperCase();
@@ -72,15 +84,19 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
       return true;
     });
 
-    // Urutkan berdasarkan nama agar rapi
+    // Urutkan berdasarkan hierarki kepegawaian lalu nama
     result.sort((a, b) => {
+      const weightA = KEPEGAWAIAN_WEIGHT[getStatusKepegawaian(a)] || 99;
+      const weightB = KEPEGAWAIAN_WEIGHT[getStatusKepegawaian(b)] || 99;
+      if (weightA !== weightB) return weightA - weightB;
+
       const namaA = String(getVal(a, 'nama') || getVal(a, 'Nama PTK') || '').toUpperCase();
       const namaB = String(getVal(b, 'nama') || getVal(b, 'Nama PTK') || '').toUpperCase();
       return namaA.localeCompare(namaB);
     });
 
     return result;
-  }, [data, wilayah, searchTerm, filterSertifikasi, filterStatus, filterJenjang]);
+  }, [data, wilayah, searchTerm, filterPegawai, filterStatusSekolah, filterJenjang]);
 
   const totalPages = Math.ceil(processedData.length / rowsPerPage) || 1;
   const startIndex = (currentPage - 1) * rowsPerPage;
@@ -99,13 +115,13 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
         onClick={(e) => e.stopPropagation()} 
       >
         
-        {/* HEADER (EMERALD THEME) */}
-        <div className="bg-emerald-600 px-6 py-5 flex items-center justify-between shrink-0">
+        {/* HEADER (PURPLE THEME) */}
+        <div className="bg-purple-700 px-6 py-5 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3 text-white">
             <div className="bg-white/20 p-2 rounded-xl"><MapPin size={24} /></div>
             <div>
               <h2 className="text-xl font-black uppercase tracking-tighter leading-none">Rincian Guru Wilayah</h2>
-              <p className="text-emerald-100 text-sm font-bold uppercase tracking-widest mt-1">{wilayah}</p>
+              <p className="text-purple-200 text-sm font-bold uppercase tracking-widest mt-1">{wilayah}</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 bg-white/10 hover:bg-red-500 text-white rounded-xl transition-colors">
@@ -122,7 +138,7 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
               placeholder="Cari Nama Guru..." 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-gray-200 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 transition-all font-bold text-gray-700 placeholder:font-normal"
+              className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-gray-200 outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-all font-bold text-gray-700 placeholder:font-normal"
             />
             {searchTerm && (
               <button 
@@ -135,23 +151,27 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
           </div>
 
           <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
-            <Award size={16} className="text-gray-400 mr-2" />
+            <Briefcase size={16} className="text-gray-400 mr-2" />
             <select 
-              value={filterSertifikasi} 
-              onChange={(e) => setFilterSertifikasi(e.target.value)} 
+              value={filterPegawai} 
+              onChange={(e) => setFilterPegawai(e.target.value)} 
               className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer"
             >
-              <option value="SEMUA">Semua Sertifikasi</option>
-              <option value="Sudah Sertifikasi">Sudah Sertifikasi</option>
-              <option value="Belum Sertifikasi">Belum Sertifikasi</option>
+              <option value="SEMUA">Semua Status Pegawai</option>
+              <option value="PNS">PNS</option>
+              <option value="PPPK">PPPK</option>
+              <option value="GTY/PTY">GTY/PTY</option>
+              <option value="Honor Daerah">Honor Daerah</option>
+              <option value="Honor Sekolah">Honor Sekolah</option>
+              <option value="Lainnya">Lainnya</option>
             </select>
           </div>
 
           <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
             <School size={16} className="text-gray-400 mr-2" />
             <select 
-              value={filterStatus} 
-              onChange={(e) => setFilterStatus(e.target.value)} 
+              value={filterStatusSekolah} 
+              onChange={(e) => setFilterStatusSekolah(e.target.value)} 
               className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer"
             >
               <option value="SEMUA">Semua Status</option>
@@ -181,18 +201,24 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
                 <th className="px-4 py-3 text-center rounded-tl-xl w-16">No</th>
                 <th className="px-4 py-3">Nama</th>
                 <th className="px-4 py-3 text-center">Jenjang</th>
-                <th className="px-4 py-3 rounded-tr-xl text-center">Status Sertifikasi</th>
+                <th className="px-4 py-3 rounded-tr-xl text-center">Status Kepegawaian</th>
               </tr>
             </thead>
             <tbody>
               {currentRows.map((row, idx) => {
-                const statusCert = getStatusSertifikasi(row);
+                const statusPegawai = getStatusKepegawaian(row);
                 const jenjang = String(getVal(row, 'bentuk_pendidikan') || getVal(row, 'jenjang') || '-').toUpperCase();
                 
-                let badgeColor = statusCert === 'Sudah Sertifikasi' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-50 text-red-600';
+                // Warna Badge Status Pegawai (Tema Ungu/Purple)
+                let badgeColor = 'bg-gray-100 text-gray-600';
+                if (statusPegawai === 'PNS') badgeColor = 'bg-purple-900 text-white';
+                if (statusPegawai === 'PPPK') badgeColor = 'bg-purple-600 text-white';
+                if (statusPegawai === 'GTY/PTY') badgeColor = 'bg-purple-200 text-purple-900';
+                if (statusPegawai === 'Honor Daerah') badgeColor = 'bg-indigo-100 text-indigo-800';
+                if (statusPegawai === 'Honor Sekolah') badgeColor = 'bg-slate-200 text-slate-800';
 
                 return (
-                  <tr key={idx} className="border-b border-gray-100 hover:bg-emerald-50/50 transition-colors">
+                  <tr key={idx} className="border-b border-gray-100 hover:bg-purple-50/50 transition-colors">
                     <td className="px-4 py-4 text-center font-bold text-gray-400 text-xs">
                       {startIndex + idx + 1}
                     </td>
@@ -202,12 +228,12 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
                          {getVal(row, 'tempat_tugas') || '-'}
                       </div>
                     </td>
-                    <td className="px-4 py-4 text-center font-black text-emerald-700 text-xs uppercase">
+                    <td className="px-4 py-4 text-center font-black text-purple-700 text-xs uppercase">
                       {jenjang}
                     </td>
                     <td className="px-4 py-4 text-center">
                       <span className={`px-3 py-1.5 rounded-lg text-xs font-black ${badgeColor}`}>
-                        {statusCert}
+                        {statusPegawai}
                       </span>
                     </td>
                   </tr>
@@ -228,14 +254,14 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
         {/* FOOTER */}
         <div className="bg-gray-50 p-4 border-t border-gray-200 flex items-center justify-between shrink-0 rounded-b-3xl">
           <p className="text-xs font-bold text-gray-500">
-            Menampilkan <span className="text-gray-800">{processedData.length === 0 ? 0 : startIndex + 1}</span> - <span className="text-gray-800">{Math.min(startIndex + rowsPerPage, processedData.length)}</span> dari <span className="text-emerald-700 font-black">{processedData.length}</span> guru
+            Menampilkan <span className="text-gray-800">{processedData.length === 0 ? 0 : startIndex + 1}</span> - <span className="text-gray-800">{Math.min(startIndex + rowsPerPage, processedData.length)}</span> dari <span className="text-purple-700 font-black">{processedData.length}</span> guru
           </p>
           
           <div className="flex items-center gap-2">
             <button 
               disabled={currentPage === 1}
               onClick={() => goToPage(currentPage - 1)}
-              className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-emerald-50 disabled:opacity-50 transition-all"
+              className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-purple-50 hover:text-purple-700 disabled:opacity-50 transition-all"
             >
               <ChevronLeft size={16} />
             </button>
@@ -245,7 +271,7 @@ export default function RincianSertifikasiModal({ isOpen, onClose, data, wilayah
             <button 
               disabled={currentPage === totalPages || totalPages === 0}
               onClick={() => goToPage(currentPage + 1)}
-              className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-emerald-50 disabled:opacity-50 transition-all"
+              className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-purple-50 hover:text-purple-700 disabled:opacity-50 transition-all"
             >
               <ChevronRight size={16} />
             </button>

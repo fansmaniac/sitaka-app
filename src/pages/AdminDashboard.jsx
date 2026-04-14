@@ -5,7 +5,6 @@ import {
   FileText, Layers, CheckCircle, Download, Trash2, Building2 
 } from 'lucide-react';
 import { db } from '../firebase/config';
-// IMPORT deleteDoc DITAMBAHKAN, writeBatch KITA BUANG UNTUK PENGHAPUSAN
 import { collection, doc, query, where, getDocs, limit, setDoc, deleteDoc } from 'firebase/firestore';
 import { readExcel } from '../utils/excelHelper';
 import ExcelJS from 'exceljs';
@@ -95,30 +94,45 @@ export default function AdminDashboard({ Header }) {
     try {
       let jsonData = await readExcel(file);
       
-      // --- 3A. FILTER KHUSUS DATABASE PTK (INDUK & ANTI DUPLIKAT NIK) ---
+      // --- 3A. FILTER KHUSUS DATABASE PTK (HANYA GURU INDUK & KOLOM RINGKAS) ---
       if (activeTarget.collection === 'dapodik_ptk') {
          const mapUnique = new Map();
          
          jsonData.forEach(item => {
             const keys = Object.keys(item);
             
-            // Cari Key secara case-insensitive
+            // Pencarian key yang case-insensitive
             const statusTugasKey = keys.find(k => k.toLowerCase() === 'status_tugas' || k.toLowerCase() === 'ptk_induk');
-            const jenisPtkKey = keys.find(k => k.toLowerCase() === 'jenis_ptk');
+            const jenisPtkKey = keys.find(k => k.toLowerCase() === 'jenis_ptk'); // KEMBALI MENGGUNAKAN JENIS_PTK
             const nikKey = keys.find(k => k.toLowerCase() === 'nik');
             
-            const isGuru = jenisPtkKey ? String(item[jenisPtkKey]).toUpperCase().includes('GURU') : false;
+            // Logika Deteksi:
+            const isGuru = jenisPtkKey ? /guru/i.test(String(item[jenisPtkKey])) : false;
             const isInduk = statusTugasKey ? (String(item[statusTugasKey]).trim().toUpperCase() === 'INDUK' || String(item[statusTugasKey]).trim() === '1') : false;
             
-            // Jika dia GURU, pastikan dia INDUK. Jika bukan Guru (Tendik dll), biarkan lewat
-            if (isGuru && !isInduk) return; 
+            // Hanya izinkan Guru Induk masuk database
+            if (!isGuru || !isInduk) return; 
 
-            // Sterilisasi NIK (Buang huruf/spasi, murni angka)
+            // Sterilisasi NIK
             const nik = nikKey ? String(item[nikKey]).replace(/\D/g, '') : '';
-            const docId = (isGuru && nik) ? nik : Math.random().toString(); 
+            const docId = nik ? nik : Math.random().toString(); 
             
             if (!mapUnique.has(docId)) {
-                mapUnique.set(docId, item);
+                // Hanya simpan kolom yang dibutuhkan untuk PTK (jenis_ptk ditambahkan)
+                const filteredItem = {};
+                const allowedKeys = [
+                  'nik', 'nama', 'gender', 'tanggal_lahir', 'status_tugas', 'npsn', 'kecamatan', 
+                  'kabupaten', 'jenis_ptk', 'pendidikan', 'bidang_studi_sertifikasi', 
+                  'status_kepegawaian', 'bentuk_pendidikan', 'status_sekolah'
+                ];
+                
+                keys.forEach(k => {
+                   if (allowedKeys.includes(k.toLowerCase())) {
+                       filteredItem[k] = item[k];
+                   }
+                });
+                
+                mapUnique.set(docId, filteredItem);
             }
          });
          
@@ -134,9 +148,8 @@ export default function AdminDashboard({ Header }) {
             const npsnKey = keys.find(k => k.toLowerCase() === 'npsn');
             
             const npsn = npsnKey ? String(item[npsnKey]).trim() : '';
-            const docId = npsn ? npsn : Math.random().toString(); // Fallback jika npsn kosong
+            const docId = npsn ? npsn : Math.random().toString();
 
-            // Hanya ambil sekolah pertama yang muncul dengan NPSN tersebut
             if (!mapUniqueSekolah.has(docId)) {
                 mapUniqueSekolah.set(docId, item);
             }
@@ -149,7 +162,7 @@ export default function AdminDashboard({ Header }) {
       const collectionName = `${activeTarget.collection}_chunks`; 
       const cleanTahun = String(activeTarget.year);
       
-      // 1. WIPE DATA LAMA TAHUN INI AGAR BERSIH SEBELUM DITIMPA (SEKUENSIAL)
+      // 1. WIPE DATA LAMA TAHUN INI
       const q = query(collection(db, collectionName), where("tahun_data", "==", cleanTahun));
       const snapshot = await getDocs(q);
       if (!snapshot.empty) {
@@ -159,7 +172,7 @@ export default function AdminDashboard({ Header }) {
         }
       }
 
-      // 2. CHUNKING PROCESS (Batas Firestore adalah 1MB. Pakai 150 baris per dokumen agar 100% aman)
+      // 2. CHUNKING PROCESS 
       const CHUNK_SIZE = 150; 
       const totalChunks = Math.ceil(totalRowsInExcel / CHUNK_SIZE);
 
@@ -180,19 +193,16 @@ export default function AdminDashboard({ Header }) {
 
           const keys = Object.keys(sanitizedItem);
           
-          // DETEKSI OTOMATIS: Apakah ini database NIK atau NPSN?
           const nikKey = keys.find(k => k.toLowerCase() === 'nik');
           const npsnKey = keys.find(k => k.toLowerCase() === 'npsn');
           
           let returnData = { ...sanitizedItem };
           
-          // Jika ada NIK (seperti PTK/Kepsek), bersihkan format NIK-nya
           if (nikKey) {
-             returnData.NIK = String(sanitizedItem[nikKey]).replace(/\D/g, '');
+             returnData[nikKey] = String(sanitizedItem[nikKey]).replace(/\D/g, '');
           }
-          // Jika ada NPSN (seperti Sekolah/Sarpras), pastikan npsn terisi bersih
           if (npsnKey) {
-             returnData.npsn = String(sanitizedItem[npsnKey]).trim();
+             returnData[npsnKey] = String(sanitizedItem[npsnKey]).trim();
           }
 
           return returnData;
@@ -215,7 +225,7 @@ export default function AdminDashboard({ Header }) {
       checkDatabaseStatus();
     } catch (error) {
       console.error("Upload error:", error);
-      alert("Error saat memproses. Pastikan format file sesuai.");
+      alert("Error saat memproses. Pastikan format file sesuai. Pesan Error: " + error.message);
     } finally {
       setUploading(false);
       e.target.value = null; 
@@ -246,14 +256,10 @@ export default function AdminDashboard({ Header }) {
         'l_Hindu', 'p_Hindu', 'l_Budha', 'p_Budha', 'l_Konghucu', 'p_Konghucu', 'l_Kepercayaan', 'p_Kepercayaan', 
         'l_agama_lainnya', 'p_agama_lainnya', 'tendik', 'pd_l', 'pd_p', 'pd_total'
       ],
-      // FORMAT PTK TERBARU (32 KOLOM TERMASUK bentuk_pendidikan dan status_sekolah)
+      // FORMAT PTK RINGKAS (14 Kolom termasuk 'pendidikan' & 'jenis_ptk')
       'dapodik_ptk': [
-        'nik', 'nama', 'nuptk', 'nip', 'gender', 'tempat_lahir', 'tanggal_lahir', 'status_tugas', 
-        'tempat_tugas', 'npsn', 'bentuk_pendidikan', 'status_sekolah', 'kecamatan', 'kabupaten', 'nomor_hp', 'sk_cpns', 'tanggal_cpns', 
-        'sk_pengangkatan', 'tmt_pengangkatan', 'jenis_ptk', 'jabatan_ptk', 'pendidikan', 
-        'bidang_studi_pendidikan', 'bidang_studi_sertifikasi', 'status_kepegawaian', 'pangkat', 
-        'tmt_pangkat', 'masa_kerja_tahun', 'masa_kerja_bulan', 'mata_pelajaran_diajarkan', 
-        'jam_mengajar_per_minggu', 'jabatan_kepsek'
+        'nik', 'nama', 'gender', 'tanggal_lahir', 'status_tugas', 'npsn', 'kecamatan', 
+        'kabupaten', 'jenis_ptk', 'pendidikan', 'bidang_studi_sertifikasi', 'status_kepegawaian', 'bentuk_pendidikan', 'status_sekolah'
       ],
       'dapodik_kepsek': ['NIK', 'NPSN', 'Nama Kepala Sekolah', 'Bentuk Pendidikan', 'Kabupaten/Kota', 'Status Sekolah'],
       'rapor_pendidikan': ['NPSN', 'Kabupaten/Kota', 'Bentuk Pendidikan', 'Indeks Literasi', 'Indeks Numerasi'],

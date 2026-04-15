@@ -7,6 +7,7 @@ import {
 import { db } from '../firebase/config';
 import { collection, doc, query, where, getDocs, limit, setDoc, deleteDoc } from 'firebase/firestore';
 import { readExcel } from '../utils/excelHelper';
+import ExcelJS from 'exceljs';
 
 // =====================================================================
 // UTILITY & REFERENSI
@@ -162,7 +163,7 @@ export default function AdminDashboard({ Header }) {
          jsonData = Array.from(mapUnique.values());
       }
 
-      if (activeTarget.collection === 'dapodik_sekolah') {
+      if (activeTarget.collection === 'dapodik_sekolah' || activeTarget.collection === 'data_sarpras') {
          const mapUniqueSekolah = new Map();
          jsonData.forEach(item => {
             const keys = Object.keys(item);
@@ -228,7 +229,103 @@ export default function AdminDashboard({ Header }) {
   };
 
   // =====================================================================
-  // MESIN PRE-CALCULATION RASIO (METODOLOGI BARU: DIRECT COMPARISON)
+  // FUNGSI UNDUH FORMAT EXCEL (BERDASARKAN STRUKTUR ASLI)
+  // =====================================================================
+  
+  const handleDownloadFormatSekolah = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Satuan Pendidikan');
+    
+    const columns = [
+      'npsn', 'nama_satuan_pendidikan', 'status_sekolah', 'bentuk_pendidikan', 'alamat', 
+      'desa', 'kecamatan', 'kabupaten', 'lintang', 'bujur', 'npwp', 'nama_kepala_sekolah', 
+      'nomor_hp_kepsek', 'tmt_akreditasi', 'akreditasi', 'nama_operator', 'nomor_hp_operator', 
+      'rombel_t1', 'rombel_t2', 'rombel_t3', 'rombel_t4', 'rombel_t5', 'rombel_t6', 'rombel_t7', 
+      'rombel_t8', 'rombel_t9', 'rombel_t10', 'rombel_t11', 'rombel_t12', 'rombel_t13', 
+      'rombel_tka', 'rombel_tkb', 'rombel_pkta', 'rombel_pktb', 'rombel_pktc', 
+      'tka_l', 'tka_p', 'tkb_l', 'tkb_p', 't1_l', 't1_p', 't2_l', 't2_p', 't3_l', 't3_p', 
+      't4_l', 't4_p', 't5_l', 't5_p', 't6_l', 't6_p', 't7_l', 't7_p', 't8_l', 't8_p', 
+      't9_l', 't9_p', 't10_l', 't10_p', 't11_l', 't11_p', 't12_l', 't12_p', 't13_l', 't13_p', 
+      'paket_a_l', 'paket_a_p', 'paket_b_l', 'paket_b_p', 'paket_c_l', 'paket_c_p'
+    ];
+
+    worksheet.columns = columns.map(col => ({ header: col, key: col, width: 15 }));
+    
+    worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } }; // Blue
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Format_Upload_Sekolah.xlsx`;
+    link.click();
+  };
+
+  const handleDownloadFormatPtk = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Data PTK');
+    
+    const columns = [
+      'nik', 'nama', 'gender', 'tanggal_lahir', 'status_tugas', 'npsn', 'kecamatan', 
+      'kabupaten', 'jenis_ptk', 'pendidikan', 'bidang_studi_sertifikasi', 
+      'status_kepegawaian', 'bentuk_pendidikan', 'status_sekolah'
+    ];
+
+    worksheet.columns = columns.map(col => ({ header: col, key: col, width: 18 }));
+
+    worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3B82F6' } }; // Light Blue
+    
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Format_Upload_PTK.xlsx`;
+    link.click();
+  };
+
+  const handleDownloadFormatSarpras = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Data Sarpras');
+    
+    const columns = [
+      'npsn', 'nama_sekolah', 'jenjang', 'kecamatan', 'kabupaten',
+      'ruang_kelas_baik', 'ruang_kelas_rusak_ringan', 'ruang_kelas_rusak_sedang', 'ruang_kelas_rusak_berat', 'ruang_kelas_tidak_bisa_dipakai',
+      'ruang_perpustakaan_baik', 'ruang_perpustakaan_rusak_ringan', 'ruang_perpustakaan_rusak_sedang', 'ruang_perpustakaan_rusak_berat', 'ruang_perpustakaan_tidak_bisa_dipakai',
+      'ruang_lab_komputer_baik', 'ruang_lab_komputer_rusak_ringan', 'ruang_lab_komputer_rusak_sedang', 'ruang_lab_komputer_rusak_berat', 'ruang_lab_komputer_tidak_bisa_dipakai',
+      'ruang_lab_bahasa_baik', 'ruang_lab_bahasa_rusak_ringan', 'ruang_lab_bahasa_rusak_sedang', 'ruang_lab_bahasa_rusak_berat', 'ruang_lab_bahasa_tidak_bisa_dipakai',
+      'ruang_lab_ipa_baik', 'ruang_lab_ipa_rusak_ringan', 'ruang_lab_ipa_rusak_sedang', 'ruang_lab_ipa_rusak_berat', 'ruang_lab_ipa_tidak_bisa_dipakai',
+      'ruang_lab_fisika_baik', 'ruang_lab_fisika_rusak_ringan', 'ruang_lab_fisika_rusak_sedang', 'ruang_lab_fisika_rusak_berat', 'ruang_lab_fisika_tidak_bisa_dipakai',
+      'ruang_lab_biologi_baik', 'ruang_lab_biologi_rusak_ringan', 'ruang_lab_biologi_rusak_sedang', 'ruang_lab_biologi_rusak_berat', 'ruang_lab_biologi_tidak_bisa_dipakai',
+      'ruang_ruang_kepsek_baik', 'ruang_ruang_kepsek_rusak_ringan', 'ruang_ruang_kepsek_rusak_sedang', 'ruang_ruang_kepsek_rusak_berat', 'ruang_ruang_kepsek_tidak_bisa_dipakai',
+      'ruang_ruang_guru_baik', 'ruang_ruang_guru_rusak_ringan', 'ruang_ruang_guru_rusak_sedang', 'ruang_ruang_guru_rusak_berat', 'ruang_ruang_guru_tidak_bisa_dipakai',
+      'ruang_ruang_tu_baik', 'ruang_ruang_tu_rusak_ringan', 'ruang_ruang_tu_rusak_sedang', 'ruang_ruang_tu_rusak_berat', 'ruang_ruang_tu_tidak_bisa_dipakai',
+      'ruang_wc_guru_laki_laki_baik', 'ruang_wc_guru_laki_laki_rusak_ringan', 'ruang_wc_guru_laki_laki_rusak_sedang', 'ruang_wc_guru_laki_laki_rusak_berat', 'ruang_wc_guru_laki_laki_tidak_bisa_dipakai',
+      'ruang_wc_guru_perempuan_baik', 'ruang_wc_guru_perempuan_rusak_ringan', 'ruang_wc_guru_perempuan_rusak_sedang', 'ruang_wc_guru_perempuan_rusak_berat', 'ruang_wc_guru_perempuan_tidak_bisa_dipakai',
+      'ruang_wc_siswa_laki_laki_baik', 'ruang_wc_siswa_laki_laki_rusak_ringan', 'ruang_wc_siswa_laki_laki_rusak_sedang', 'ruang_wc_siswa_laki_laki_rusak_berat', 'ruang_wc_siswa_laki_laki_tidak_bisa_dipakai',
+      'ruang_wc_siswa_perempuan_baik', 'ruang_wc_siswa_perempuan_rusak_ringan', 'ruang_wc_siswa_perempuan_rusak_sedang', 'ruang_wc_siswa_perempuan_rusak_berat', 'ruang_wc_siswa_perempuan_tidak_bisa_dipakai',
+      'meja_siswa_baik', 'meja_siswa_rusak_ringan', 'meja_siswa_rusak_sedang', 'meja_siswa_rusak_berat', 'meja_siswa_tidak_bisa_dipakai',
+      'kursi_siswa_baik', 'kursi_siswa_rusak_ringan', 'kursi_siswa_rusak_sedang', 'kursi_siswa_rusak_berat', 'kursi_siswa_tidak_bisa_dipakai',
+      'papan_tulis_baik', 'papan_tulis_rusak_ringan', 'papan_tulis_rusak_sedang', 'papan_tulis_rusak_berat', 'papan_tulis_tidak_bisa_dipakai',
+      'komputer_baik', 'komputer_rusak_ringan', 'komputer_rusak_sedang', 'komputer_rusak_berat', 'komputer_tidak_bisa_dipakai'
+    ];
+
+    worksheet.columns = columns.map(col => ({ header: col, key: col, width: 25 }));
+
+    worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF9333EA' } }; // Purple
+    
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Format_Upload_Sarpras.xlsx`;
+    link.click();
+  };
+
+  // =====================================================================
+  // MESIN PRE-CALCULATION RASIO
   // =====================================================================
   
   // 1. SEKOLAH VS PD (PD / SEKOLAH)
@@ -261,8 +358,34 @@ export default function AdminDashboard({ Header }) {
         if (!group) return;
 
         const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
-        const pd = parseInt(getVal(item, 'pd_total')) || (parseInt(getVal(item, 'pd_l')) || 0) + (parseInt(getVal(item, 'pd_p')) || 0);
         
+        let pd = parseInt(getVal(item, 'pd_total'));
+        if (isNaN(pd)) {
+          const totalLaki = 
+            (parseInt(getVal(item, 'tka_l')) || 0) + (parseInt(getVal(item, 'tkb_l')) || 0) +
+            (parseInt(getVal(item, 't1_l')) || 0) + (parseInt(getVal(item, 't2_l')) || 0) +
+            (parseInt(getVal(item, 't3_l')) || 0) + (parseInt(getVal(item, 't4_l')) || 0) +
+            (parseInt(getVal(item, 't5_l')) || 0) + (parseInt(getVal(item, 't6_l')) || 0) +
+            (parseInt(getVal(item, 't7_l')) || 0) + (parseInt(getVal(item, 't8_l')) || 0) +
+            (parseInt(getVal(item, 't9_l')) || 0) + (parseInt(getVal(item, 't10_l')) || 0) +
+            (parseInt(getVal(item, 't11_l')) || 0) + (parseInt(getVal(item, 't12_l')) || 0) +
+            (parseInt(getVal(item, 't13_l')) || 0) + (parseInt(getVal(item, 'paket_a_l')) || 0) +
+            (parseInt(getVal(item, 'paket_b_l')) || 0) + (parseInt(getVal(item, 'paket_c_l')) || 0);
+          
+          const totalPerempuan = 
+            (parseInt(getVal(item, 'tka_p')) || 0) + (parseInt(getVal(item, 'tkb_p')) || 0) +
+            (parseInt(getVal(item, 't1_p')) || 0) + (parseInt(getVal(item, 't2_p')) || 0) +
+            (parseInt(getVal(item, 't3_p')) || 0) + (parseInt(getVal(item, 't4_p')) || 0) +
+            (parseInt(getVal(item, 't5_p')) || 0) + (parseInt(getVal(item, 't6_p')) || 0) +
+            (parseInt(getVal(item, 't7_p')) || 0) + (parseInt(getVal(item, 't8_p')) || 0) +
+            (parseInt(getVal(item, 't9_p')) || 0) + (parseInt(getVal(item, 't10_p')) || 0) +
+            (parseInt(getVal(item, 't11_p')) || 0) + (parseInt(getVal(item, 't12_p')) || 0) +
+            (parseInt(getVal(item, 't13_p')) || 0) + (parseInt(getVal(item, 'paket_a_p')) || 0) +
+            (parseInt(getVal(item, 'paket_b_p')) || 0) + (parseInt(getVal(item, 'paket_c_p')) || 0);
+
+          pd = totalLaki + totalPerempuan;
+        }
+
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
         if (isNegeri) { rowTab1.sek_n++; rowTab1.pd_n += pd; } 
         else { rowTab1.sek_s++; rowTab1.pd_s += pd; }
@@ -449,7 +572,7 @@ export default function AdminDashboard({ Header }) {
          if(npsn) {
              let rombelTotal = 0;
              Object.keys(s).forEach(k => {
-                 if(k.toLowerCase().includes('rombel')) rombelTotal += parseInt(s[k]) || 0;
+                 if(k.toLowerCase().includes('rombel_')) rombelTotal += parseInt(s[k]) || 0;
              });
              mapSekolah.set(npsn, { ...s, rombel_total: rombelTotal, guru_aktual: 0 });
          }
@@ -531,7 +654,6 @@ export default function AdminDashboard({ Header }) {
     }
   };
 
-
   // 4. SEKOLAH VS ROMBEL (ROMBEL / SEKOLAH)
   const handleCalculateRasioSekolahRombel = async (year) => {
     setUploading(true);
@@ -564,7 +686,7 @@ export default function AdminDashboard({ Header }) {
         
         let rombelTotal = 0;
         Object.keys(item).forEach(k => {
-            if(k.toLowerCase().includes('rombel')) {
+            if(k.toLowerCase().includes('rombel_')) {
                 rombelTotal += parseInt(item[k]) || 0;
             }
         });
@@ -651,11 +773,37 @@ export default function AdminDashboard({ Header }) {
         if (!group) return;
 
         const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
-        const pd = parseInt(getVal(item, 'pd_total')) || (parseInt(getVal(item, 'pd_l')) || 0) + (parseInt(getVal(item, 'pd_p')) || 0);
+        
+        let pd = parseInt(getVal(item, 'pd_total'));
+        if (isNaN(pd)) {
+          const totalLaki = 
+            (parseInt(getVal(item, 'tka_l')) || 0) + (parseInt(getVal(item, 'tkb_l')) || 0) +
+            (parseInt(getVal(item, 't1_l')) || 0) + (parseInt(getVal(item, 't2_l')) || 0) +
+            (parseInt(getVal(item, 't3_l')) || 0) + (parseInt(getVal(item, 't4_l')) || 0) +
+            (parseInt(getVal(item, 't5_l')) || 0) + (parseInt(getVal(item, 't6_l')) || 0) +
+            (parseInt(getVal(item, 't7_l')) || 0) + (parseInt(getVal(item, 't8_l')) || 0) +
+            (parseInt(getVal(item, 't9_l')) || 0) + (parseInt(getVal(item, 't10_l')) || 0) +
+            (parseInt(getVal(item, 't11_l')) || 0) + (parseInt(getVal(item, 't12_l')) || 0) +
+            (parseInt(getVal(item, 't13_l')) || 0) + (parseInt(getVal(item, 'paket_a_l')) || 0) +
+            (parseInt(getVal(item, 'paket_b_l')) || 0) + (parseInt(getVal(item, 'paket_c_l')) || 0);
+          
+          const totalPerempuan = 
+            (parseInt(getVal(item, 'tka_p')) || 0) + (parseInt(getVal(item, 'tkb_p')) || 0) +
+            (parseInt(getVal(item, 't1_p')) || 0) + (parseInt(getVal(item, 't2_p')) || 0) +
+            (parseInt(getVal(item, 't3_p')) || 0) + (parseInt(getVal(item, 't4_p')) || 0) +
+            (parseInt(getVal(item, 't5_p')) || 0) + (parseInt(getVal(item, 't6_p')) || 0) +
+            (parseInt(getVal(item, 't7_p')) || 0) + (parseInt(getVal(item, 't8_p')) || 0) +
+            (parseInt(getVal(item, 't9_p')) || 0) + (parseInt(getVal(item, 't10_p')) || 0) +
+            (parseInt(getVal(item, 't11_p')) || 0) + (parseInt(getVal(item, 't12_p')) || 0) +
+            (parseInt(getVal(item, 't13_p')) || 0) + (parseInt(getVal(item, 'paket_a_p')) || 0) +
+            (parseInt(getVal(item, 'paket_b_p')) || 0) + (parseInt(getVal(item, 'paket_c_p')) || 0);
+
+          pd = totalLaki + totalPerempuan;
+        }
 
         let rombelTotal = 0;
         Object.keys(item).forEach(k => {
-            if(k.toLowerCase().includes('rombel')) {
+            if(k.toLowerCase().includes('rombel_')) {
                 rombelTotal += parseInt(item[k]) || 0;
             }
         });
@@ -715,16 +863,142 @@ export default function AdminDashboard({ Header }) {
     }
   };
 
+  // 6. ROMBEL VS RUANG KELAS (KELAS / ROMBEL)
+  const handleCalculateRasioRombelKelas = async (year) => {
+    setUploading(true);
+    setProgressLabel(`Menghitung Rasio Rombel VS Ruang Kelas ${year}...`);
+    setUploadProgress(10);
 
-  const YearUploadGroup = ({ label, collection, icon: Icon, colorClass }) => (
-    <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-gray-100 flex flex-col gap-6">
+    try {
+      const qSek = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", year));
+      const snapSek = await getDocs(qSek);
+      
+      const qSarpras = query(collection(db, 'data_sarpras_chunks'), where("tahun_data", "==", year));
+      const snapSarpras = await getDocs(qSarpras);
+
+      if (snapSek.empty || snapSarpras.empty) {
+        alert("Data Sekolah atau Data Sarpras Kosong! Pastikan kedua data sudah diunggah untuk tahun ini.");
+        setUploading(false); return;
+      }
+
+      let allSekolahData = [];
+      snapSek.forEach(doc => { if(doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data); });
+      
+      let allSarprasData = [];
+      snapSarpras.forEach(doc => { if(doc.data().data) allSarprasData = allSarprasData.concat(doc.data().data); });
+
+      setUploadProgress(40);
+
+      // Map Sarpras untuk mencari Ruang Kelas per NPSN.
+      // Menjumlahkan semua kondisi kelas sebagai total kapasitas fisik kelas yang bisa difungsikan
+      const mapSarpras = new Map();
+      allSarprasData.forEach(s => {
+         const npsn = String(getVal(s, 'npsn')).trim();
+         if(npsn) {
+             const kelasBaik = parseInt(getVal(s, 'ruang_kelas_baik')) || 0;
+             const kelasRusakRingan = parseInt(getVal(s, 'ruang_kelas_rusak_ringan')) || 0;
+             const kelasRusakSedang = parseInt(getVal(s, 'ruang_kelas_rusak_sedang')) || 0;
+             const kelasRusakBerat = parseInt(getVal(s, 'ruang_kelas_rusak_berat')) || 0;
+             
+             const ruangKelasTotal = kelasBaik + kelasRusakRingan + kelasRusakSedang + kelasRusakBerat;
+             mapSarpras.set(npsn, ruangKelasTotal);
+         }
+      });
+
+      const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, rombel_n: 0, kelas_n: 0, rombel_s: 0, kelas_s: 0 }));
+      const mapWilayah = new Map();
+
+      allSekolahData.forEach(item => {
+        const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
+        const group = identifyJenjangGroup(bentuk);
+        if (!group) return;
+
+        const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
+        const npsn = String(getVal(item, 'npsn')).trim();
+        
+        let rombelTotal = 0;
+        Object.keys(item).forEach(k => {
+            if(k.toLowerCase().includes('rombel_')) {
+                rombelTotal += parseInt(item[k]) || 0;
+            }
+        });
+
+        const kelasTotal = mapSarpras.get(npsn) || 0;
+
+        const rowTab1 = tab1Data.find(r => r.jenjang === group);
+        if (isNegeri) { rowTab1.rombel_n += rombelTotal; rowTab1.kelas_n += kelasTotal; } 
+        else { rowTab1.rombel_s += rombelTotal; rowTab1.kelas_s += kelasTotal; }
+
+        const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+        const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+        const uniqueId = `${kabDb}_${keyKec}`;
+
+        if (!mapWilayah.has(uniqueId)) {
+          const init = { wilayah: kabDb, kecamatan: keyKec };
+          JENJANG_KEYS.forEach(k => { 
+             init[`${k}_rombel`] = 0; 
+             init[`${k}_kelas`] = 0;
+             init[`${k}_rombel_n`] = 0; init[`${k}_kelas_n`] = 0;
+             init[`${k}_rombel_s`] = 0; init[`${k}_kelas_s`] = 0;
+          });
+          mapWilayah.set(uniqueId, init);
+        }
+
+        const rowTab2 = mapWilayah.get(uniqueId);
+        rowTab2[`${group}_rombel`] += rombelTotal;
+        rowTab2[`${group}_kelas`] += kelasTotal;
+        
+        if (isNegeri) {
+           rowTab2[`${group}_rombel_n`] += rombelTotal;
+           rowTab2[`${group}_kelas_n`] += kelasTotal;
+        } else {
+           rowTab2[`${group}_rombel_s`] += rombelTotal;
+           rowTab2[`${group}_kelas_s`] += kelasTotal;
+        }
+      });
+
+      setUploadProgress(80); 
+
+      const tab2DataRaw = Array.from(mapWilayah.values());
+
+      const docRef = doc(db, 'dapodik_agregasi', `rasio_rombel_kelas_${year}`);
+      await setDoc(docRef, {
+        tahun_data: year,
+        tabel1: tab1Data, 
+        tabel2: tab2DataRaw, 
+        last_updated: new Date().toISOString()
+      });
+
+      setUploadProgress(100);
+      alert(`KALKULASI SUKSES!\n\nHasil rasio Rombel VS Ruang Kelas tahun ${year} berhasil dihitung dan disimpan.`);
+
+    } catch (error) {
+      console.error(error);
+      alert("Terjadi kesalahan saat melakukan kalkulasi rasio Rombel VS Kelas.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // --- KOMPONEN UI ---
+
+  const YearUploadGroup = ({ label, collection, icon: Icon, colorClass, formatHandler }) => (
+    <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-gray-100 flex flex-col gap-6 relative">
+      {formatHandler && (
+        <button 
+          onClick={formatHandler} 
+          className={`absolute top-8 right-8 text-[10px] flex items-center gap-1 bg-gray-100 text-gray-700 px-3 py-1.5 rounded-full font-bold hover:bg-gray-200 transition-colors shadow-sm`}
+        >
+          <Download size={12} /> Unduh Format
+        </button>
+      )}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <div className={`${colorClass} text-white p-4 rounded-2xl shadow-lg`}><Icon size={32} /></div>
           <h4 className="text-2xl font-black text-gray-800 uppercase tracking-tight">{label}</h4>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-4 mt-2">
         {['2024', '2025', '2026'].map((year) => {
           const hasData = dbStatus[`${collection}_${year}`];
           return (
@@ -800,12 +1074,12 @@ export default function AdminDashboard({ Header }) {
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full pb-20">
-              <YearUploadGroup label="Satuan Pendidikan" collection="dapodik_sekolah" icon={School} colorClass="bg-blue-600" />
-              <YearUploadGroup label="Database PTK" collection="dapodik_ptk" icon={Users} colorClass="bg-blue-500" />
+              <YearUploadGroup label="Satuan Pendidikan" collection="dapodik_sekolah" icon={School} colorClass="bg-blue-600" formatHandler={handleDownloadFormatSekolah} />
+              <YearUploadGroup label="Database PTK" collection="dapodik_ptk" icon={Users} colorClass="bg-blue-500" formatHandler={handleDownloadFormatPtk} />
               <YearUploadGroup label="Database Kepsek" collection="dapodik_kepsek" icon={UserCheck} colorClass="bg-blue-400" />
               <YearUploadGroup label="Rapor Pendidikan" collection="rapor_pendidikan" icon={FileText} colorClass="bg-emerald-600" />
               <YearUploadGroup label="Database ATS" collection="data_ats" icon={Layers} colorClass="bg-orange-600" />
-              <YearUploadGroup label="Data Sarpras" collection="data_sarpras" icon={Building2} colorClass="bg-purple-600" />
+              <YearUploadGroup label="Data Sarpras" collection="data_sarpras" icon={Building2} colorClass="bg-purple-600" formatHandler={handleDownloadFormatSarpras} />
             </div>
           </div>
         )}
@@ -898,6 +1172,21 @@ export default function AdminDashboard({ Header }) {
                     <div className="flex gap-2">
                        {['2024', '2025', '2026'].map(year => (
                          <button key={year} onClick={() => handleCalculateRasioRombelPD(year)} className="bg-white border-2 border-orange-200 text-orange-600 hover:bg-orange-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
+                           Hitung {year}
+                         </button>
+                       ))}
+                    </div>
+                 </div>
+
+                 {/* ROMBEL VS RUANG KELAS */}
+                 <div className="bg-gray-50 p-6 rounded-3xl border border-gray-200 flex flex-col md:flex-row items-center justify-between gap-6">
+                    <div>
+                      <h4 className="text-xl font-black text-amber-900 uppercase">Rombel VS Ruang Kelas</h4>
+                      <p className="text-sm font-medium text-gray-500 mt-1">Metodologi Baru: Pembagian Murni (Total Kelas / Total Rombel)</p>
+                    </div>
+                    <div className="flex gap-2">
+                       {['2024', '2025', '2026'].map(year => (
+                         <button key={year} onClick={() => handleCalculateRasioRombelKelas(year)} className="bg-white border-2 border-amber-200 text-amber-600 hover:bg-amber-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
                            Hitung {year}
                          </button>
                        ))}

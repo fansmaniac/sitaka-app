@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LineChart, ArrowRightLeft, Layers, Users, School, GraduationCap, AlertCircle } from 'lucide-react';
+import { LineChart, ArrowRightLeft, Layers, Users, School, GraduationCap, AlertCircle, Building } from 'lucide-react';
 
 // IMPORT KOMPONEN ANAK ASLI
 import RasioSekolahVsPD from './RasioSekolahVsPD';
@@ -7,11 +7,7 @@ import RasioSekolahVsGuru from './RasioSekolahVsGuru';
 import RasioRombelVsPD from './RasioRombelVsPD'; 
 import RasioSekolahVsRombel from './RasioSekolahVsRombel'; 
 import RasioRombelVsGuru from './RasioRombelVsGuru'; 
-
-// =====================================================================
-// PLACEHOLDER KOMPONEN ANAK YANG BELUM DIBUAT
-// =====================================================================
-const RasioGuruVsPD = ({ dataSekolah, dataGuru }) => <div className="p-12 text-center text-gray-500 font-bold border-2 border-dashed border-blue-200 rounded-3xl bg-blue-50/30">Menampilkan Komponen: Guru VS Peserta Didik</div>;
+import RasioRombelVsKelas from './RasioRombelVsKelas'; // <-- IMPORT BARU
 
 // =====================================================================
 // MAIN COMPONENT: DAPODIK RASIO
@@ -22,19 +18,21 @@ export default function DapodikRasio({ selectedYear = '2026' }) {
   const [data2, setData2] = useState('PESERTA DIDIK');
   
   // State untuk menandai apakah user sudah mengklik "Bandingkan"
-  const [isComparing, setIsComparing] = useState(true); // Default true agar langsung tampil awal
+  const [isComparing, setIsComparing] = useState(true); 
   
-  // Opsi Data
+  // Opsi Data 1
   const OPTIONS_DATA_1 = [
     { id: 'SEKOLAH', label: 'Sekolah', icon: School },
     { id: 'ROMBEL', label: 'Rombel', icon: Layers },
     { id: 'GURU', label: 'Guru', icon: Users },
   ];
 
+  // Opsi Data 2 (Ditambah Ruang Kelas)
   const OPTIONS_DATA_2 = [
     { id: 'PESERTA DIDIK', label: 'Peserta Didik', icon: GraduationCap },
     { id: 'GURU', label: 'Guru', icon: Users },
     { id: 'ROMBEL', label: 'Rombel', icon: Layers },
+    { id: 'RUANG KELAS', label: 'Ruang Kelas', icon: Building }, // <-- OPSI BARU
   ];
 
   // Handler saat Data 1 berubah
@@ -43,18 +41,15 @@ export default function DapodikRasio({ selectedYear = '2026' }) {
     setData1(newVal);
     setIsComparing(false); 
     
-    // Logika Auto-Select untuk mencegah state terjebak di opsi yang disabled
     let currentData2 = data2;
 
-    // 1. Cegah bentrok (Memilih Data 2 yang sama dengan Data 1)
     if (newVal === currentData2) {
       const availableOption = OPTIONS_DATA_2.find(opt => opt.id !== newVal);
       if (availableOption) currentData2 = availableOption.id;
     }
 
-    // 2. Cegah Redudansi (Jika GURU dipilih di Data 1, ROMBEL di-disable, maka Data 2 tidak boleh nyangkut di ROMBEL)
     if (newVal === 'GURU' && currentData2 === 'ROMBEL') {
-       currentData2 = 'PESERTA DIDIK'; // Paksa pindah ke opsi yang valid
+       currentData2 = 'PESERTA DIDIK'; 
     }
 
     setData2(currentData2);
@@ -91,8 +86,8 @@ export default function DapodikRasio({ selectedYear = '2026' }) {
         return <RasioRombelVsPD selectedYear={selectedYear} />;
       case 'ROMBEL_VS_GURU':
         return <RasioRombelVsGuru selectedYear={selectedYear} />; 
-      case 'GURU_VS_PESERTA DIDIK':
-        return <RasioGuruVsPD selectedYear={selectedYear} />;
+      case 'ROMBEL_VS_RUANG KELAS': // <-- ROUTING BARU
+        return <RasioRombelVsKelas selectedYear={selectedYear} />; 
       default:
         return (
           <div className="flex flex-col items-center justify-center p-20 bg-orange-50 rounded-3xl border-2 border-orange-200 border-dashed text-orange-600">
@@ -108,7 +103,7 @@ export default function DapodikRasio({ selectedYear = '2026' }) {
   return (
     <div className="h-full flex flex-col animate-in fade-in duration-500 bg-gray-50">
       
-      {/* 1. HEADER & KONTROL PERBANDINGAN */}
+      {/* HEADER & KONTROL PERBANDINGAN */}
       <div className="bg-white px-6 py-8 border-b border-gray-200 shadow-sm shrink-0 z-20">
         <div className="max-w-5xl mx-auto flex flex-col items-center">
           
@@ -121,7 +116,6 @@ export default function DapodikRasio({ selectedYear = '2026' }) {
             </p>
           </div>
 
-          {/* BOX KONTROL INPUT */}
           <div className="flex flex-col md:flex-row items-center gap-4 md:gap-8 w-full bg-blue-50/50 p-6 rounded-[2rem] border border-blue-100 shadow-inner">
             
             {/* INPUT DATA 1 */}
@@ -141,12 +135,10 @@ export default function DapodikRasio({ selectedYear = '2026' }) {
               </div>
             </div>
 
-            {/* IKON VS */}
             <div className="shrink-0 bg-blue-600 text-white p-4 rounded-full shadow-lg mt-4 md:mt-6 z-10 hidden md:flex items-center justify-center">
                <span className="font-black text-xl italic leading-none pr-1">VS</span>
             </div>
             
-            {/* IKON VS MOBILE */}
             <div className="md:hidden flex items-center justify-center w-full text-blue-400 py-2">
                <ArrowRightLeft size={24} className="rotate-90" />
             </div>
@@ -161,19 +153,17 @@ export default function DapodikRasio({ selectedYear = '2026' }) {
                   className="w-full appearance-none bg-white border-2 border-blue-200 text-blue-900 font-black text-lg px-6 py-4 rounded-2xl outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100 cursor-pointer transition-all shadow-sm"
                 >
                   {OPTIONS_DATA_2.map(opt => {
-                    // LOGIKA CEGAH REDUDANSI:
-                    // 1. Disable jika ID sama dengan Data 1
                     let isDisabled = opt.id === data1;
                     let customLabel = opt.label;
 
-                    // 2. Disable opsi "ROMBEL" jika Data 1 adalah "GURU" 
-                    if (data1 === 'GURU' && opt.id === 'ROMBEL') {
-                      isDisabled = true;
-                    }
+                    if (data1 === 'GURU' && opt.id === 'ROMBEL') isDisabled = true;
+                    // Mencegah Sekolah VS Ruang Kelas (Fokus di Rombel VS Ruang Kelas)
+                    if (data1 === 'SEKOLAH' && opt.id === 'RUANG KELAS') isDisabled = true; 
+                    if (data1 === 'GURU' && opt.id === 'RUANG KELAS') isDisabled = true;
 
                     if (isDisabled) {
                       if (opt.id === data1) customLabel = `${opt.label} (Terpilih)`;
-                      else customLabel = `${opt.label} (Redudansi)`;
+                      else customLabel = `${opt.label} (Redudansi/Tidak Valid)`;
                     }
 
                     return (
@@ -192,7 +182,6 @@ export default function DapodikRasio({ selectedYear = '2026' }) {
               </div>
             </div>
 
-            {/* TOMBOL BANDINGKAN */}
             <div className="w-full md:w-auto mt-4 md:mt-6">
               <button 
                 onClick={handleBandingkan}
@@ -211,7 +200,7 @@ export default function DapodikRasio({ selectedYear = '2026' }) {
         </div>
       </div>
 
-      {/* 2. AREA HASIL PERBANDINGAN */}
+      {/* AREA HASIL PERBANDINGAN */}
       <div className="flex-1 overflow-y-auto p-4 md:p-8">
         <div className="max-w-7xl mx-auto h-full flex flex-col">
            {renderComparisonResult()}

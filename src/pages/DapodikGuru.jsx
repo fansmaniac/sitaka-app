@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Download, Users, MapPin, Eye, FileSpreadsheet, 
-  Search, X, ChevronLeft, ChevronRight, GraduationCap, Building2
+  Search, X, ChevronLeft, ChevronRight, GraduationCap, Building2, Filter
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
 
@@ -47,6 +47,16 @@ const JENJANG_GROUPS = {
   'SMA/SMK': ['SMA', 'SPK SMA', 'SMK'],
   'SLB (Inklusif)': ['SLB'],
   'Non Formal': ['PKBM', 'SKB']
+};
+
+const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'Non Formal'];
+
+const identifyJenjangGroup = (jenjangDb) => {
+  const j = String(jenjangDb).trim().toUpperCase();
+  for (const group of JENJANG_KEYS) {
+    if (JENJANG_GROUPS[group].includes(j)) return group;
+  }
+  return null;
 };
 
 const TAB_CONFIG = {
@@ -171,21 +181,22 @@ const PremiumPieChart = ({ segments, total }) => {
 
 
 // =====================================================================
-// MODAL RINCIAN GURU PER KECAMATAN (SUPER RINGAN)
+// MODAL RINCIAN GURU (DINAMIS JENJANG / KECAMATAN)
 // =====================================================================
-const DapodikGuruKecamatanModal = ({ isOpen, onClose, data, activeTabKey, activeJenjang, initialWilayah, tabConfig }) => {
+const DapodikGuruModal = ({ isOpen, onClose, data, activeTabKey, activeJenjang, initialWilayah, tabConfig }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterWilayah, setFilterWilayah] = useState(initialWilayah);
+  const [filterStatus, setFilterStatus] = useState('SEMUA');
+  const [filterKategori, setFilterKategori] = useState('SEMUA');
+  
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 15;
 
   useEffect(() => {
-    if (isOpen) {
-      setFilterWilayah(initialWilayah);
-    }
-  }, [isOpen, initialWilayah, activeTabKey]);
+    if (isOpen) setFilterWilayah(initialWilayah);
+  }, [isOpen, initialWilayah, activeTabKey, activeJenjang]);
 
-  useEffect(() => { setCurrentPage(1); }, [searchTerm, filterWilayah]);
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, filterWilayah, filterStatus, filterKategori]);
 
   useEffect(() => {
     const handleEsc = (e) => { if (e.key === 'Escape') onClose(); };
@@ -193,142 +204,194 @@ const DapodikGuruKecamatanModal = ({ isOpen, onClose, data, activeTabKey, active
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen, onClose]);
 
-  // ENGINE REKAP KECAMATAN (SUPER CEPAT)
+  const listKabupaten = useMemo(() => {
+    const unik = [...new Set(data.map(item => String(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota') || '').trim().toUpperCase()))];
+    return unik.filter(k => k !== '').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
+  }, [data]);
+
+  const isModeSemuaJenjang = activeJenjang === 'SEMUA';
+
+  // FUNGSI UNTUK MENDAPATKAN KATEGORI DINAMIS GURU
+  const getKategori = (ptk) => {
+    let u = null;
+    if (activeTabKey === 'USIA' || activeTabKey === 'PENSIUN') {
+       const tgl = getVal(ptk, 'tanggal_lahir');
+       if (tgl) {
+          const m = String(tgl).match(/(19|20)\d{2}/);
+          if (m) u = 2026 - parseInt(m[0], 10);
+       }
+       if (activeTabKey === 'PENSIUN' && (u === null || u < 56)) return null; 
+    }
+
+    if (activeTabKey === 'GENDER') {
+       const jk = String(getVal(ptk, 'jk') || getVal(ptk, 'gender')).toUpperCase();
+       if (jk === 'L' || jk === 'LAKI-LAKI') return 'Laki-Laki';
+       if (jk === 'P' || jk === 'PEREMPUAN') return 'Perempuan';
+       return null;
+    } 
+    else if (activeTabKey === 'KUALIFIKASI') {
+       const q = String(getVal(ptk, 'pendidikan')).toUpperCase().trim();
+       if (q === 'S3' || q === 'S.3') return 'S3';
+       if (q === 'S2' || q === 'S.2') return 'S2';
+       if (q === 'S1' || q === 'S.1' || q === 'D4' || q === 'D.IV') return 'S1';
+       if (q.includes('SMA') || q.includes('SMK') || q.includes('D1') || q.includes('D2') || q.includes('D3')) return 'SMA/Sederajat';
+       return 'Tidak Diketahui';
+    }
+    else if (activeTabKey === 'PEGAWAI') {
+       const sp = String(getVal(ptk, 'status_kepegawaian')).toUpperCase();
+       if (sp.includes('PNS')) return 'PNS';
+       if (sp.includes('PPPK')) return 'PPPK';
+       if (sp.includes('GTY') || sp.includes('PTY') || sp.includes('YAYASAN')) return 'GTY/PTY';
+       if (sp.includes('SEKOLAH') || sp.includes('HONORER SEKOLAH')) return 'Honor Sekolah';
+       if (sp.includes('DAERAH') || sp.includes('KAB') || sp.includes('PROV')) return 'Honor Daerah';
+       return 'Lainnya';
+    }
+    else if (activeTabKey === 'SERTIFIKASI') {
+       const cert = String(getVal(ptk, 'bidang_studi_sertifikasi')).trim();
+       return (cert !== '' && cert !== '-' && cert.toLowerCase() !== 'null') ? 'Sudah Sertifikasi' : 'Belum Sertifikasi';
+    }
+    else if (activeTabKey === 'USIA') {
+       if (u === null) return 'Tidak Diketahui';
+       if (u <= 30) return '<= 30';
+       if (u <= 40) return '31 - 40';
+       if (u <= 50) return '41 - 50';
+       return '>= 51';
+    } 
+    else if (activeTabKey === 'PENSIUN') {
+       if (u === 56) return 'Usia 56';
+       if (u === 57) return 'Usia 57';
+       if (u === 58) return 'Usia 58';
+       if (u === 59) return 'Usia 59';
+       if (u === 60) return 'Usia 60';
+       if (u >= 61) return '>= 61';
+    }
+    return null;
+  };
+
   const processedData = useMemo(() => {
     if (!data) return [];
-    
     const validJenjangList = JENJANG_GROUPS[activeJenjang];
-    const isSemuaJenjang = activeJenjang === 'SEMUA';
 
     // 1. GATEKEEPER & FILTER AWAL
     const validData = data.filter(ptk => {
-      // Pastikan Guru dan Induk
       const isGuru = String(getVal(ptk, 'jenis_ptk')).toUpperCase().includes('GURU');
       if (!isGuru) return false;
       const isInduk = String(getVal(ptk, 'status_tugas') || getVal(ptk, 'ptk_induk')).trim().toUpperCase() === 'INDUK' || String(getVal(ptk, 'status_tugas')).trim() === '1';
       if (!isInduk) return false;
 
-      // Filter Grup Jenjang
-      if (!isSemuaJenjang) {
+      if (!isModeSemuaJenjang) {
         const jenjangDb = String(getVal(ptk, 'bentuk_pendidikan') || getVal(ptk, 'jenjang')).trim().toUpperCase();
         if (!validJenjangList.includes(jenjangDb)) return false;
       }
 
-      // Filter Wilayah
-      const kabClean = cleanKabupatenName(getVal(ptk, 'kabupaten') || getVal(ptk, 'Kabupaten/Kota'));
-      if (filterWilayah !== 'SEMUA' && kabClean !== filterWilayah) return false;
+      const kabDb = cleanKabupatenName(getVal(ptk, 'kabupaten') || getVal(ptk, 'Kabupaten/Kota'));
+      if (filterWilayah !== 'SEMUA' && kabDb !== filterWilayah) return false;
+
+      const statusDb = String(getVal(ptk, 'status_sekolah') || '').trim().toUpperCase();
+      if (filterStatus !== 'SEMUA' && statusDb !== filterStatus) return false;
 
       return true;
     });
 
-    // 2. AGREGASI PER KECAMATAN
-    const mapKecamatan = new Map();
+    // 2. AGREGASI DATA
+    const mapAgg = new Map();
+
+    // Inisialisasi baris kosong jika mode Semua Jenjang
+    if (isModeSemuaJenjang) {
+      JENJANG_KEYS.forEach(j => {
+        const initRow = { keyId: j, label: j, subLabel: filterWilayah === 'SEMUA' ? 'Semua Wilayah' : filterWilayah, total: 0 };
+        tabConfig.keys.forEach(k => initRow[k] = 0);
+        mapAgg.set(j, initRow);
+      });
+    }
 
     validData.forEach(ptk => {
-       // --- PRE-CALCULATE VALUES ---
-       let u = null;
-       if (activeTabKey === 'USIA' || activeTabKey === 'PENSIUN') {
-          const tgl = getVal(ptk, 'tanggal_lahir');
-          if (tgl) {
-             const m = String(tgl).match(/(19|20)\d{2}/);
-             if (m) u = 2026 - parseInt(m[0], 10);
-          }
-       }
-       // Drop early for PENSIUN if age < 56
-       if (activeTabKey === 'PENSIUN' && (u === null || u < 56)) return;
+       const valKategori = getKategori(ptk);
+       if (!valKategori) return;
 
-       const kecRaw = String(getVal(ptk, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
-       const kabClean = cleanKabupatenName(getVal(ptk, 'kabupaten') || getVal(ptk, 'Kabupaten/Kota'));
-       const uniqueKecId = `${kabClean}_${kecRaw}`;
+       if (filterKategori !== 'SEMUA' && valKategori !== filterKategori) return;
 
-       if (!mapKecamatan.has(uniqueKecId)) {
-           const initRow = { kecamatan: kecRaw, kabupaten: kabClean, total: 0 };
-           tabConfig.keys.forEach(k => initRow[k] = 0);
-           mapKecamatan.set(uniqueKecId, initRow);
+       let keyId, label, subLabel;
+
+       if (isModeSemuaJenjang) {
+         keyId = identifyJenjangGroup(getVal(ptk, 'bentuk_pendidikan') || getVal(ptk, 'jenjang'));
+         if (!keyId) return; // Abaikan jika tidak masuk grup manapun
+       } else {
+         const kecRaw = String(getVal(ptk, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+         const kabClean = cleanKabupatenName(getVal(ptk, 'kabupaten') || getVal(ptk, 'Kabupaten/Kota'));
+         keyId = `${kabClean}_${kecRaw}`;
+         label = kecRaw;
+         subLabel = kabClean;
+
+         if (!mapAgg.has(keyId)) {
+             const initRow = { keyId, label, subLabel, total: 0 };
+             tabConfig.keys.forEach(k => initRow[k] = 0);
+             mapAgg.set(keyId, initRow);
+         }
        }
 
-       const row = mapKecamatan.get(uniqueKecId);
-       
-       if (activeTabKey === 'GENDER') {
-          const jk = String(getVal(ptk, 'jk') || getVal(ptk, 'gender')).toUpperCase();
-          if (jk === 'L' || jk === 'LAKI-LAKI') { row['Laki-Laki']++; row.total++; }
-          else if (jk === 'P' || jk === 'PEREMPUAN') { row['Perempuan']++; row.total++; }
-       } 
-       else if (activeTabKey === 'KUALIFIKASI') {
-          const q = String(getVal(ptk, 'pendidikan')).toUpperCase().trim();
-          if (q === 'S3' || q === 'S.3') row['S3']++;
-          else if (q === 'S2' || q === 'S.2') row['S2']++;
-          else if (q === 'S1' || q === 'S.1' || q === 'D4' || q === 'D.IV') row['S1']++;
-          else if (q.includes('SMA') || q.includes('SMK') || q.includes('D1') || q.includes('D2') || q.includes('D3')) row['SMA/Sederajat']++;
-          else row['Tidak Diketahui']++;
-          row.total++;
-       }
-       else if (activeTabKey === 'PEGAWAI') {
-          const sp = String(getVal(ptk, 'status_kepegawaian')).toUpperCase();
-          if (sp.includes('PNS')) row['PNS']++;
-          else if (sp.includes('PPPK')) row['PPPK']++;
-          else if (sp.includes('GTY') || sp.includes('PTY') || sp.includes('YAYASAN')) row['GTY/PTY']++;
-          else if (sp.includes('SEKOLAH') || sp.includes('HONORER SEKOLAH')) row['Honor Sekolah']++;
-          else if (sp.includes('DAERAH') || sp.includes('KAB') || sp.includes('PROV')) row['Honor Daerah']++;
-          else row['Lainnya']++;
-          row.total++;
-       }
-       else if (activeTabKey === 'SERTIFIKASI') {
-          const cert = String(getVal(ptk, 'bidang_studi_sertifikasi')).trim();
-          if (cert !== '' && cert !== '-' && cert.toLowerCase() !== 'null') row['Sudah Sertifikasi']++;
-          else row['Belum Sertifikasi']++;
-          row.total++;
-       }
-       else if (activeTabKey === 'USIA') {
-          if (u === null) row['Tidak Diketahui']++;
-          else if (u <= 30) row['<= 30']++;
-          else if (u <= 40) row['31 - 40']++;
-          else if (u <= 50) row['41 - 50']++;
-          else row['>= 51']++;
-          row.total++;
-       } 
-       else if (activeTabKey === 'PENSIUN') {
-          if (u === 56) { row['Usia 56']++; row.total++; }
-          else if (u === 57) { row['Usia 57']++; row.total++; }
-          else if (u === 58) { row['Usia 58']++; row.total++; }
-          else if (u === 59) { row['Usia 59']++; row.total++; }
-          else if (u === 60) { row['Usia 60']++; row.total++; }
-          else if (u >= 61) { row['>= 61']++; row.total++; }
+       const row = mapAgg.get(keyId);
+       if (row[valKategori] !== undefined) {
+           row[valKategori]++;
+           row.total++;
        }
     });
 
-    let resultArray = Array.from(mapKecamatan.values());
+    let resultArray = Array.from(mapAgg.values());
 
     if (searchTerm) {
-       resultArray = resultArray.filter(r => r.kecamatan.toLowerCase().includes(searchTerm.toLowerCase()));
+       resultArray = resultArray.filter(r => r.label.toLowerCase().includes(searchTerm.toLowerCase()));
     }
 
-    return resultArray.sort((a, b) => a.kecamatan.localeCompare(b.kecamatan));
+    if (isModeSemuaJenjang) {
+      return resultArray.sort((a, b) => JENJANG_KEYS.indexOf(a.keyId) - JENJANG_KEYS.indexOf(b.keyId));
+    } else {
+      return resultArray.sort((a, b) => a.label.localeCompare(b.label));
+    }
 
-  }, [data, activeJenjang, filterWilayah, activeTabKey, tabConfig.keys, searchTerm]);
+  }, [data, activeJenjang, filterWilayah, filterStatus, filterKategori, activeTabKey, searchTerm, tabConfig.keys, isModeSemuaJenjang]);
 
+  // HITUNG TOTAL KESELURUHAN (GRAND TOTAL)
+  const columnTotals = useMemo(() => {
+    const totals = { total: 0 };
+    tabConfig.keys.forEach(k => totals[k] = 0);
+
+    processedData.forEach(row => {
+      totals.total += row.total;
+      tabConfig.keys.forEach(k => totals[k] += row[k]);
+    });
+
+    return totals;
+  }, [processedData, tabConfig.keys]);
 
   const downloadExcelRincian = async () => {
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet(`Rekap Kec ${filterWilayah}`);
+    const sheetName = isModeSemuaJenjang ? 'Rekap Per Jenjang' : `Rekap ${filterWilayah}`;
+    const worksheet = workbook.addWorksheet(sheetName);
 
     worksheet.columns = [
-      { header: 'Kecamatan', key: 'kecamatan', width: 30 },
-      { header: 'Kabupaten/Kota', key: 'kabupaten', width: 25 },
+      { header: isModeSemuaJenjang ? 'Jenjang Pendidikan' : 'Kecamatan', key: 'label', width: 30 },
+      { header: isModeSemuaJenjang ? 'Wilayah' : 'Kabupaten/Kota', key: 'subLabel', width: 25 },
       ...tabConfig.keys.map(k => ({ header: k, key: k, width: 18 })),
-      { header: 'Total', key: 'total', width: 15 },
+      { header: 'Total Guru', key: 'total', width: 15 },
     ];
 
     processedData.forEach(item => worksheet.addRow(item));
 
+    const totalRowData = { label: 'TOTAL KESELURUHAN', total: columnTotals.total };
+    tabConfig.keys.forEach(k => totalRowData[k] = columnTotals[k]);
+    const totalRow = worksheet.addRow(totalRowData);
+
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
     worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
+    totalRow.font = { bold: true, color: { argb: 'FF1E3A8A' } };
+    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Rekap_Kecamatan_${activeTabKey}_${activeJenjang}_${filterWilayah}.xlsx`;
+    link.download = `Rincian_Guru_${isModeSemuaJenjang ? 'Semua_Jenjang' : filterWilayah}_${activeTabKey}.xlsx`;
     link.click();
   };
 
@@ -346,8 +409,10 @@ const DapodikGuruKecamatanModal = ({ isOpen, onClose, data, activeTabKey, active
           <div className="flex items-center gap-3 text-white">
             <div className="bg-white/20 p-2 rounded-xl"><Users size={24} /></div>
             <div>
-              <h2 className="text-xl font-black uppercase tracking-tighter leading-none">Rincian Kecamatan • {tabConfig.title}</h2>
-              <p className="text-blue-200 text-sm font-bold uppercase tracking-widest mt-1">Jenjang {activeJenjang}</p>
+              <h2 className="text-xl font-black uppercase tracking-tighter leading-none">Rincian • {tabConfig.title}</h2>
+              <p className="text-blue-200 text-sm font-bold uppercase tracking-widest mt-1">
+                {isModeSemuaJenjang ? 'Rekapitulasi Per Jenjang' : `Kecamatan di Kab. ${filterWilayah}`}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -360,53 +425,91 @@ const DapodikGuruKecamatanModal = ({ isOpen, onClose, data, activeTabKey, active
           </div>
         </div>
 
+        {/* BARIS FILTER */}
         <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex flex-wrap gap-4 items-center shrink-0">
           <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input 
-              type="text" placeholder="Cari Nama Kecamatan..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+              type="text" placeholder={`Cari ${isModeSemuaJenjang ? 'Jenjang' : 'Kecamatan'}...`} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 font-bold text-gray-700 text-sm"
             />
           </div>
+          
           <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
             <MapPin size={16} className="text-gray-400 mr-2" />
-            <select value={filterWilayah} onChange={(e) => setFilterWilayah(e.target.value)} className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer">
+            <select value={filterWilayah} onChange={(e) => setFilterWilayah(e.target.value)} className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[150px]">
               <option value="SEMUA">Semua Wilayah</option>
-              {KABUPATEN_LIST.map(k => <option key={k} value={k}>{k}</option>)}
-              <option value="TIDAK DIKETAHUI">Tidak Diketahui</option>
+              {listKabupaten.map(k => <option key={k} value={k}>{k}</option>)}
+            </select>
+          </div>
+
+          <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
+            <Building2 size={16} className="text-gray-400 mr-2" />
+            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer">
+              <option value="SEMUA">Semua Status</option>
+              <option value="NEGERI">Negeri</option>
+              <option value="SWASTA">Swasta</option>
+            </select>
+          </div>
+
+          <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
+            <Filter size={16} className="text-gray-400 mr-2" />
+            <select value={filterKategori} onChange={(e) => setFilterKategori(e.target.value)} className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[150px]">
+              <option value="SEMUA">Semua {tabConfig.title}</option>
+              {tabConfig.keys.map(k => <option key={k} value={k}>{k}</option>)}
             </select>
           </div>
         </div>
 
         <div className="flex-1 overflow-auto bg-white p-4">
           <table className="w-full text-center border-separate border-spacing-y-2">
-            <thead className="sticky top-0 bg-gray-50 z-10 shadow-sm rounded-xl">
+            <thead className="sticky top-0 bg-white z-10 shadow-sm rounded-xl">
               <tr className="text-[10px] font-black uppercase text-gray-500">
-                <th className="px-4 py-3 text-left rounded-l-xl">Kecamatan</th>
+                <th className="px-4 py-3 text-center rounded-l-xl w-16">No</th>
+                <th className="px-4 py-3 text-left">{isModeSemuaJenjang ? 'Jenjang Pendidikan' : 'Kecamatan'}</th>
                 {tabConfig.keys.map(k => (
                   <th key={k} className="px-2 py-3 text-blue-700 whitespace-nowrap">{k}</th>
                 ))}
-                <th className="px-4 py-3 rounded-r-xl text-gray-800 whitespace-nowrap">Jumlah Total</th>
+                <th className="px-4 py-3 rounded-r-xl text-gray-800">Total Guru</th>
               </tr>
             </thead>
             <tbody>
               {currentRows.map((row, idx) => (
                 <tr key={idx} className="bg-white shadow-sm hover:shadow-md hover:scale-[1.01] transition-all group">
-                  <td className="px-4 py-3 rounded-l-2xl font-black text-gray-800 uppercase text-left border-y border-l border-gray-100 whitespace-nowrap">
-                    {row.kecamatan}
-                    <div className="text-[10px] font-bold text-gray-400 mt-0.5">{row.kabupaten}</div>
+                  <td className="px-4 py-3 text-center font-bold text-gray-400 text-xs rounded-l-2xl border-y border-l border-gray-100">{startIndex + idx + 1}</td>
+                  <td className="px-4 py-3 font-black text-gray-800 text-sm uppercase text-left border-y border-gray-100 whitespace-nowrap">
+                    {row.label}
+                    <div className="text-[10px] font-bold text-gray-400 mt-0.5">{row.subLabel}</div>
                   </td>
                   {tabConfig.keys.map(k => (
                     <td key={k} className="px-2 py-3 font-bold text-gray-600 text-sm border-y border-gray-100 bg-blue-50/10">
                       {row[k].toLocaleString()}
                     </td>
                   ))}
-                  <td className="px-4 py-3 rounded-r-2xl font-black text-blue-800 text-base border-y border-r border-gray-100 bg-blue-50/50">
+                  <td className="px-4 py-3 font-black text-blue-800 text-base border-y border-r border-gray-100 bg-blue-50/50 rounded-r-2xl">
                     {row.total.toLocaleString()}
                   </td>
                 </tr>
               ))}
             </tbody>
+            {/* TFOOT: BARIS TOTAL KESELURUHAN */}
+            {processedData.length > 0 && (
+              <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
+                <tr className="bg-blue-100 text-center font-black uppercase text-xs border-t-2 border-blue-200">
+                  <td colSpan="2" className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-blue-200 text-blue-900">
+                    TOTAL KESELURUHAN
+                  </td>
+                  {tabConfig.keys.map(k => (
+                    <td key={k} className="px-2 py-4 text-blue-800 border-y border-blue-200">
+                      {columnTotals[k].toLocaleString()}
+                    </td>
+                  ))}
+                  <td className="px-4 py-4 text-blue-900 text-base border-y border-r border-blue-200 rounded-r-2xl">
+                    {columnTotals.total.toLocaleString()}
+                  </td>
+                </tr>
+              </tfoot>
+            )}
           </table>
 
           {processedData.length === 0 && (
@@ -419,7 +522,7 @@ const DapodikGuruKecamatanModal = ({ isOpen, onClose, data, activeTabKey, active
 
         <div className="bg-gray-50 p-4 border-t border-gray-200 flex items-center justify-between shrink-0 rounded-b-3xl">
           <p className="text-xs font-bold text-gray-500">
-            Menampilkan <span className="text-gray-800">{processedData.length === 0 ? 0 : startIndex + 1}</span> - <span className="text-gray-800">{Math.min(startIndex + rowsPerPage, processedData.length)}</span> dari <span className="text-blue-700 font-black">{processedData.length}</span> kecamatan
+            Menampilkan <span className="text-gray-800">{processedData.length === 0 ? 0 : startIndex + 1}</span> - <span className="text-gray-800">{Math.min(startIndex + rowsPerPage, processedData.length)}</span> dari <span className="text-blue-700 font-black">{processedData.length}</span> baris
           </p>
           <div className="flex items-center gap-2">
             <button disabled={currentPage === 1} onClick={() => goToPage(currentPage - 1)} className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-blue-50 disabled:opacity-50"><ChevronLeft size={16} /></button>
@@ -596,7 +699,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026' }) {
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Rekap_Guru_${activeTabKey}_${activeJenjang}.xlsx`;
+    link.download = `Rekap_Guru_${activeTabKey}_${activeJenjang.replace('/', '-')}.xlsx`;
     link.click();
   };
 
@@ -621,7 +724,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026' }) {
               key={tab} onClick={() => setActiveJenjang(tab)}
               className={`px-3 md:px-4 py-1.5 rounded-md font-bold text-[10px] md:text-xs transition-all whitespace-nowrap ${activeJenjang === tab ? 'bg-blue-100 text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
             >
-              {tab === 'SEMUA' ? 'SEMUA JENJANG' : tab}
+              {tab}
             </button>
           ))}
         </div>
@@ -721,7 +824,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026' }) {
 
       </div>
 
-      <DapodikGuruKecamatanModal 
+      <DapodikGuruModal 
         isOpen={modalOpen} 
         onClose={() => setModalOpen(false)}
         data={data}

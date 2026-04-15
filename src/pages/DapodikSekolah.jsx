@@ -35,7 +35,30 @@ const getKabupatenRank = (kabName) => {
 };
 
 // =====================================================================
-// PREMIUM PIE CHART COMPONENT (DENGAN POINTER & LABEL)
+// PENGELOMPOKAN JENJANG
+// =====================================================================
+const JENJANG_GROUPS = {
+  'SEMUA': [],
+  'PAUD': ['TK', 'KB', 'SPS', 'TPA', 'PAUD'],
+  'SD': ['SD', 'SPK SD'],
+  'SMP': ['SMP', 'SPK SMP'],
+  'SMA/SMK': ['SMA', 'SPK SMA', 'SMK'],
+  'SLB (Inklusif)': ['SLB'],
+  'NON FORMAL': ['PKBM', 'SKB']
+};
+
+const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'NON FORMAL'];
+
+const identifyJenjangGroup = (jenjangDb) => {
+  const j = String(jenjangDb).trim().toUpperCase();
+  for (const group of JENJANG_KEYS) {
+    if (JENJANG_GROUPS[group].includes(j)) return group;
+  }
+  return null;
+};
+
+// =====================================================================
+// PREMIUM PIE CHART COMPONENT
 // =====================================================================
 const PremiumPieChart = ({ segments, total }) => {
   const [hoveredIndex, setHoveredIndex] = useState(null);
@@ -52,14 +75,12 @@ const PremiumPieChart = ({ segments, total }) => {
 
   let cumulativePercent = 0;
   
-  // Fungsi untuk mendapatkan koordinat X,Y pada keliling lingkaran
   const getCoordinatesForPercent = (percent, radius = 1) => {
     const x = Math.cos(2 * Math.PI * percent) * radius;
     const y = Math.sin(2 * Math.PI * percent) * radius;
     return [x, y];
   };
 
-  // Persiapkan data drawing untuk setiap segmen
   const chartData = segments.map((s, i) => {
     if (s.value === 0) return null;
     
@@ -70,12 +91,10 @@ const PremiumPieChart = ({ segments, total }) => {
     
     cumulativePercent = endPercent;
 
-    // Koordinat untuk irisan pie (radius 1)
     const [startX, startY] = getCoordinatesForPercent(startPercent);
     const [endX, endY] = getCoordinatesForPercent(endPercent);
     const largeArcFlag = percentage > 0.5 ? 1 : 0;
     
-    // Path Pie
     let pathData;
     if (percentage === 1) {
       pathData = `M 1 0 A 1 1 0 1 1 -1 0 A 1 1 0 1 1 1 0`;
@@ -83,18 +102,15 @@ const PremiumPieChart = ({ segments, total }) => {
       pathData = `M 0 0 L ${startX} ${startY} A 1 1 0 ${largeArcFlag} 1 ${endX} ${endY} Z`;
     }
 
-    // --- LOGIKA POINTER & LABEL ---
     const [lineStartX, lineStartY] = getCoordinatesForPercent(midPercent, 1);
     const [lineMidX, lineMidY] = getCoordinatesForPercent(midPercent, 1.2);
     const isRightSide = lineMidX > 0;
     const lineEndX = isRightSide ? lineMidX + 0.2 : lineMidX - 0.2;
     const lineEndY = lineMidY;
 
-    // Posisi Text
     const textX = isRightSide ? lineEndX + 0.05 : lineEndX - 0.05;
     const textAnchor = isRightSide ? "start" : "end";
     
-    // Transformasi untuk efek pop-out saat hover
     const isHovered = hoveredIndex === i;
     const popOutOffset = 0.05;
     const [popX, popY] = getCoordinatesForPercent(midPercent, popOutOffset);
@@ -115,13 +131,9 @@ const PremiumPieChart = ({ segments, total }) => {
   }).filter(Boolean);
 
   return (
-    // Memperbaiki padding dan tinggi viewBox agar elemen saling merapat
     <div className="w-full max-w-[280px] md:max-w-[320px] aspect-square relative flex items-center justify-center mx-auto drop-shadow-xl hover:scale-105 transition-transform duration-300">
       <svg viewBox="-1.8 -1.5 3.6 3" className="w-full h-full max-h-[300px] overflow-visible drop-shadow-xl">
-        
-        {/* ROTASI GRUP UTAMA AGAR MULAI DARI ATAS (JAM 12) */}
         <g transform="rotate(-90)">
-          {/* RENDER IRISAN PIE */}
           {chartData.map((data) => (
             <path 
               key={`slice-${data.index}`} 
@@ -134,14 +146,11 @@ const PremiumPieChart = ({ segments, total }) => {
               style={{ transformOrigin: '0px 0px' }}
             />
           ))}
-          
-          {/* RENDER POINTERS & LABELS (Dirotasi balik text-nya) */}
           {chartData.map((data) => (
             <g 
               key={`label-${data.index}`}
               className={`transition-opacity duration-300 ${hoveredIndex !== null && hoveredIndex !== data.index ? 'opacity-30' : 'opacity-100'}`}
             >
-              {/* Garis Pointer Polyline */}
               <polyline 
                 points={`${data.lineStartX},${data.lineStartY} ${data.lineMidX},${data.lineMidY} ${data.lineEndX},${data.lineEndY}`}
                 fill="none"
@@ -149,10 +158,8 @@ const PremiumPieChart = ({ segments, total }) => {
                 strokeWidth="0.015"
                 strokeLinejoin="round"
               />
-              
               <circle cx={data.lineStartX} cy={data.lineStartY} r="0.04" fill={data.color} />
               <circle cx={data.lineEndX} cy={data.lineEndY} r="0.03" fill={data.color} />
-
               <g transform={`rotate(90 ${data.textX} ${data.lineEndY})`}>
                 <text 
                   x={data.textX} 
@@ -181,11 +188,10 @@ const PremiumPieChart = ({ segments, total }) => {
   );
 };
 
-
 // =====================================================================
-// MODAL RINCIAN SEKOLAH
+// MODAL RINCIAN SEKOLAH (REKAP PER WILAYAH/KECAMATAN)
 // =====================================================================
-const DapodikSekolahModal = ({ isOpen, onClose, data, jenjang, initialWilayah }) => {
+const DapodikSekolahModal = ({ isOpen, onClose, data, initialWilayah }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterWilayah, setFilterWilayah] = useState(initialWilayah);
   const [filterStatus, setFilterStatus] = useState('SEMUA');
@@ -209,73 +215,100 @@ const DapodikSekolahModal = ({ isOpen, onClose, data, jenjang, initialWilayah })
     return unik.filter(k => k !== '').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
   }, [data]);
 
+  const isModeSemua = filterWilayah === 'SEMUA';
+
   const processedData = useMemo(() => {
     if (!data) return [];
 
-    let result = data.filter(sekolah => {
-      // 1. Filter Jenjang
-      const jenjangDb = String(getVal(sekolah, 'bentuk_pendidikan') || getVal(sekolah, 'jenjang') || '').trim().toUpperCase();
-      if (jenjang !== 'SEMUA' && jenjangDb !== jenjang) return false;
-
-      // 2. Filter Wilayah
+    // Filter Awal
+    const validData = data.filter(sekolah => {
       const kabDb = String(getVal(sekolah, 'kabupaten') || getVal(sekolah, 'Kabupaten/Kota') || '').trim().toUpperCase();
-      if (filterWilayah !== 'SEMUA' && kabDb !== filterWilayah) return false;
+      if (!isModeSemua && kabDb !== filterWilayah) return false;
 
-      // 3. Filter Status Sekolah
       const statusDb = String(getVal(sekolah, 'status_sekolah') || '').trim().toUpperCase();
       if (filterStatus !== 'SEMUA' && statusDb !== filterStatus) return false;
-
-      // 4. Search NPSN / Nama
-      if (searchTerm) {
-        const nama = String(getVal(sekolah, 'nama_satuan_pendidikan') || getVal(sekolah, 'nama_sekolah') || '').toLowerCase();
-        const npsn = String(getVal(sekolah, 'npsn') || '').toLowerCase();
-        if (!nama.includes(searchTerm.toLowerCase()) && !npsn.includes(searchTerm.toLowerCase())) return false;
-      }
       return true;
     });
 
-    result.sort((a, b) => {
-      const namaA = String(getVal(a, 'nama_satuan_pendidikan') || getVal(a, 'nama_sekolah') || '').toUpperCase();
-      const namaB = String(getVal(b, 'nama_satuan_pendidikan') || getVal(b, 'nama_sekolah') || '').toUpperCase();
-      return namaA.localeCompare(namaB);
+    const mapAgg = new Map();
+
+    validData.forEach(sekolah => {
+      const group = identifyJenjangGroup(getVal(sekolah, 'bentuk_pendidikan') || getVal(sekolah, 'jenjang'));
+      if (!group) return; // Skip if not in our predefined groups
+
+      let keyId;
+      if (isModeSemua) {
+        keyId = String(getVal(sekolah, 'kabupaten') || getVal(sekolah, 'Kabupaten/Kota') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+      } else {
+        keyId = String(getVal(sekolah, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+      }
+
+      if (!mapAgg.has(keyId)) {
+        const initRow = { namaWilayah: keyId, total: 0 };
+        JENJANG_KEYS.forEach(k => initRow[k] = 0);
+        mapAgg.set(keyId, initRow);
+      }
+
+      const row = mapAgg.get(keyId);
+      row[group]++;
+      row.total++;
     });
 
-    return result;
-  }, [data, jenjang, filterWilayah, filterStatus, searchTerm]);
+    let resultArray = Array.from(mapAgg.values());
 
-  // FUNGSI UNDUH EXCEL RINCIAN
+    if (searchTerm) {
+      resultArray = resultArray.filter(r => r.namaWilayah.toLowerCase().includes(searchTerm.toLowerCase()));
+    }
+
+    if (isModeSemua) {
+      return resultArray.sort((a, b) => getKabupatenRank(a.namaWilayah) - getKabupatenRank(b.namaWilayah));
+    } else {
+      return resultArray.sort((a, b) => a.namaWilayah.localeCompare(b.namaWilayah));
+    }
+  }, [data, isModeSemua, filterWilayah, filterStatus, searchTerm]);
+
+  // HITUNG TOTAL KESELURUHAN (GRAND TOTAL UNTUK FOOTER TABEL)
+  const columnTotals = useMemo(() => {
+    const totals = { total: 0 };
+    JENJANG_KEYS.forEach(k => totals[k] = 0);
+
+    processedData.forEach(row => {
+      totals.total += row.total;
+      JENJANG_KEYS.forEach(k => totals[k] += row[k]);
+    });
+
+    return totals;
+  }, [processedData]);
+
   const downloadExcelRincian = async () => {
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet(`Rincian ${jenjang === 'SEMUA' ? 'Semua Jenjang' : jenjang}`);
+    const sheetName = isModeSemua ? 'Rekap Provinsi' : `Rekap ${filterWilayah}`;
+    const worksheet = workbook.addWorksheet(sheetName);
 
     worksheet.columns = [
-      { header: 'NPSN', key: 'npsn', width: 15 },
-      { header: 'Nama Sekolah', key: 'nama', width: 40 },
-      { header: 'Jenjang', key: 'jenjang', width: 15 }, // Tambah Kolom Jenjang
-      { header: 'Wilayah', key: 'wilayah', width: 25 },
-      { header: 'Kecamatan', key: 'kecamatan', width: 25 },
-      { header: 'Status', key: 'status', width: 15 },
+      { header: isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan', key: 'namaWilayah', width: 30 },
+      ...JENJANG_KEYS.map(k => ({ header: k, key: k, width: 15 })),
+      { header: 'Total Sekolah', key: 'total', width: 15 },
     ];
 
-    processedData.forEach(item => {
-      worksheet.addRow({
-        npsn: getVal(item, 'npsn'),
-        nama: getVal(item, 'nama_satuan_pendidikan') || getVal(item, 'nama_sekolah'),
-        jenjang: getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'),
-        wilayah: getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'),
-        kecamatan: getVal(item, 'kecamatan'),
-        status: getVal(item, 'status_sekolah'),
-      });
-    });
+    processedData.forEach(item => worksheet.addRow(item));
+
+    // Tambahkan Baris Total di Excel
+    const totalRowData = { namaWilayah: 'TOTAL KESELURUHAN', total: columnTotals.total };
+    JENJANG_KEYS.forEach(k => totalRowData[k] = columnTotals[k]);
+    const totalRow = worksheet.addRow(totalRowData);
 
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
     worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
+    
+    totalRow.font = { bold: true, color: { argb: 'FF1E3A8A' } };
+    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Rincian_Sekolah_${jenjang === 'SEMUA' ? 'Keseluruhan' : jenjang}_${filterWilayah}.xlsx`;
+    link.download = `Rekap_Sekolah_${isModeSemua ? 'Provinsi' : filterWilayah}_${filterStatus}.xlsx`;
     link.click();
   };
 
@@ -293,8 +326,12 @@ const DapodikSekolahModal = ({ isOpen, onClose, data, jenjang, initialWilayah })
           <div className="flex items-center gap-3 text-white">
             <div className="bg-white/20 p-2 rounded-xl"><School size={24} /></div>
             <div>
-              <h2 className="text-xl font-black uppercase tracking-tighter leading-none">Rincian Sekolah {jenjang === 'SEMUA' ? 'Keseluruhan' : jenjang}</h2>
-              <p className="text-blue-200 text-sm font-bold uppercase tracking-widest mt-1">Data Spesifik</p>
+              <h2 className="text-xl font-black uppercase tracking-tighter leading-none">
+                Rincian {isModeSemua ? 'Wilayah Provinsi' : 'Kecamatan'}
+              </h2>
+              <p className="text-blue-200 text-sm font-bold uppercase tracking-widest mt-1">
+                {isModeSemua ? 'Semua Kabupaten' : `Kab. ${filterWilayah}`}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -311,13 +348,13 @@ const DapodikSekolahModal = ({ isOpen, onClose, data, jenjang, initialWilayah })
           <div className="relative flex-1 min-w-[250px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input 
-              type="text" placeholder="Cari NPSN / Nama Sekolah..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+              type="text" placeholder={`Cari Nama ${isModeSemua ? 'Kabupaten' : 'Kecamatan'}...`} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-gray-200 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 font-bold text-gray-700"
             />
           </div>
           <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
             <MapPin size={16} className="text-gray-400 mr-2" />
-            <select value={filterWilayah} onChange={(e) => setFilterWilayah(e.target.value)} className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer">
+            <select value={filterWilayah} onChange={(e) => setFilterWilayah(e.target.value)} className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[150px]">
               <option value="SEMUA">Semua Wilayah</option>
               {listKabupaten.map(k => <option key={k} value={k}>{k}</option>)}
             </select>
@@ -333,48 +370,66 @@ const DapodikSekolahModal = ({ isOpen, onClose, data, jenjang, initialWilayah })
         </div>
 
         <div className="flex-1 overflow-auto bg-white p-4">
-          <table className="w-full text-left">
-            <thead className="sticky top-0 bg-white z-10 shadow-sm">
-              <tr className="text-xs font-black uppercase text-gray-400 bg-gray-50 border-b-2 border-gray-200">
-                <th className="px-4 py-3 text-center rounded-tl-xl w-16">No</th>
-                <th className="px-4 py-3">Nama Satuan Pendidikan</th>
-                <th className="px-4 py-3 text-center">Jenjang</th>
-                <th className="px-4 py-3 text-center">NPSN</th>
-                <th className="px-4 py-3 text-center">Wilayah</th>
-                <th className="px-4 py-3 rounded-tr-xl text-center">Status</th>
+          <table className="w-full text-center border-separate border-spacing-y-2">
+            <thead className="sticky top-0 bg-white z-10 shadow-sm rounded-xl">
+              <tr className="text-[10px] font-black uppercase text-gray-500">
+                <th className="px-4 py-3 text-center rounded-l-xl w-16">No</th>
+                <th className="px-4 py-3 text-left">{isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan'}</th>
+                {JENJANG_KEYS.map(k => (
+                  <th key={k} className="px-2 py-3 text-blue-700 whitespace-nowrap">{k}</th>
+                ))}
+                <th className="px-4 py-3 rounded-r-xl text-gray-800">Total</th>
               </tr>
             </thead>
             <tbody>
-              {currentRows.map((row, idx) => {
-                const statusSekolah = String(getVal(row, 'status_sekolah') || '-').toUpperCase();
-                const statusColor = statusSekolah === 'NEGERI' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800';
-                const jenjangDb = String(getVal(row, 'bentuk_pendidikan') || getVal(row, 'jenjang') || '-').toUpperCase();
-
-                return (
-                  <tr key={idx} className="border-b border-gray-100 hover:bg-blue-50/50 transition-colors">
-                    <td className="px-4 py-4 text-center font-bold text-gray-400 text-xs">{startIndex + idx + 1}</td>
-                    <td className="px-4 py-4 font-black text-gray-800 text-sm uppercase">
-                      {getVal(row, 'nama_satuan_pendidikan') || getVal(row, 'nama_sekolah') || '-'}
-                      <div className="text-[10px] text-gray-500 mt-1 font-bold">Kec. {getVal(row, 'kecamatan') || '-'}</div>
+              {currentRows.map((row, idx) => (
+                <tr key={idx} className="bg-white shadow-sm hover:shadow-md hover:scale-[1.01] transition-all group">
+                  <td className="px-4 py-3 text-center font-bold text-gray-400 text-xs rounded-l-2xl border-y border-l border-gray-100">{startIndex + idx + 1}</td>
+                  <td className="px-4 py-3 font-black text-gray-800 text-sm uppercase text-left border-y border-gray-100 whitespace-nowrap">
+                    {row.namaWilayah}
+                  </td>
+                  {JENJANG_KEYS.map(k => (
+                    <td key={k} className="px-2 py-3 font-bold text-gray-600 text-sm border-y border-gray-100 bg-blue-50/10">
+                      {row[k].toLocaleString()}
                     </td>
-                    <td className="px-4 py-4 text-center font-black text-sky-700 text-xs uppercase">{jenjangDb}</td>
-                    <td className="px-4 py-4 text-center font-black text-gray-600 text-xs tracking-widest">{getVal(row, 'npsn') || '-'}</td>
-                    <td className="px-4 py-4 text-center font-bold text-gray-600 text-xs uppercase">{getVal(row, 'kabupaten') || getVal(row, 'Kabupaten/Kota') || '-'}</td>
-                    <td className="px-4 py-4 text-center">
-                      <span className={`px-3 py-1.5 rounded-lg text-[10px] font-black tracking-widest uppercase ${statusColor}`}>
-                        {statusSekolah}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
+                  ))}
+                  <td className="px-4 py-3 font-black text-blue-800 text-base border-y border-r border-gray-100 bg-blue-50/50 rounded-r-2xl">
+                    {row.total.toLocaleString()}
+                  </td>
+                </tr>
+              ))}
             </tbody>
+            {/* TFOOT: BARIS TOTAL KESELURUHAN */}
+            {processedData.length > 0 && (
+              <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
+                <tr className="bg-blue-100 text-center font-black uppercase text-xs border-t-2 border-blue-200">
+                  <td colSpan="2" className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-blue-200 text-blue-900">
+                    TOTAL {isModeSemua ? 'KESELURUHAN' : 'KECAMATAN'}
+                  </td>
+                  {JENJANG_KEYS.map(k => (
+                    <td key={k} className="px-2 py-4 text-blue-800 border-y border-blue-200">
+                      {columnTotals[k].toLocaleString()}
+                    </td>
+                  ))}
+                  <td className="px-4 py-4 text-blue-900 text-base border-y border-r border-blue-200 rounded-r-2xl">
+                    {columnTotals.total.toLocaleString()}
+                  </td>
+                </tr>
+              </tfoot>
+            )}
           </table>
+          
+          {processedData.length === 0 && (
+             <div className="py-20 flex flex-col items-center opacity-30 text-gray-500">
+               <Search size={64} className="mb-4" />
+               <p className="font-black uppercase tracking-widest text-xl">Tidak Ada Data</p>
+             </div>
+          )}
         </div>
 
         <div className="bg-gray-50 p-4 border-t border-gray-200 flex items-center justify-between shrink-0 rounded-b-3xl">
           <p className="text-xs font-bold text-gray-500">
-            Menampilkan <span className="text-gray-800">{processedData.length === 0 ? 0 : startIndex + 1}</span> - <span className="text-gray-800">{Math.min(startIndex + rowsPerPage, processedData.length)}</span> dari <span className="text-blue-700 font-black">{processedData.length}</span> data
+            Menampilkan <span className="text-gray-800">{processedData.length === 0 ? 0 : startIndex + 1}</span> - <span className="text-gray-800">{Math.min(startIndex + rowsPerPage, processedData.length)}</span> dari <span className="text-blue-700 font-black">{processedData.length}</span> baris
           </p>
           <div className="flex items-center gap-2">
             <button disabled={currentPage === 1} onClick={() => goToPage(currentPage - 1)} className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-blue-50 disabled:opacity-50"><ChevronLeft size={16} /></button>
@@ -394,13 +449,13 @@ const DapodikSekolahModal = ({ isOpen, onClose, data, jenjang, initialWilayah })
 // MAIN COMPONENT: DAPODIK SEKOLAH
 // =====================================================================
 export default function DapodikSekolah({ data = [], selectedYear = '2026' }) {
-  const [activeTab, setActiveTab] = useState('SEMUA'); // DEFAULT TAB SEMUA JENJANG
+  const [activeTab, setActiveTab] = useState('SEMUA'); 
   
   // Modal State
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedWilayah, setSelectedWilayah] = useState('SEMUA');
 
-  // 1. Ekstrak daftar unik Kabupaten dari seluruh data (untuk skeleton tabel)
+  // 1. Ekstrak daftar unik Kabupaten dari seluruh data
   const listKabupaten = useMemo(() => {
     const unik = [...new Set(data.map(item => String(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota') || '').trim().toUpperCase()))];
     return unik.filter(k => k !== '').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
@@ -408,11 +463,12 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026' }) {
 
   // 2. Mesin Agregasi Utama berdasarkan Active Tab
   const aggregatedData = useMemo(() => {
-    // Saring data berdasarkan jenjang yang aktif
+    const validJenjangList = JENJANG_GROUPS[activeTab];
+
     const filteredData = data.filter(item => {
       if (activeTab === 'SEMUA') return true;
       const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
-      return jenjangDb === activeTab;
+      return validJenjangList.includes(jenjangDb);
     });
 
     const mapAgg = new Map();
@@ -457,14 +513,13 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026' }) {
     { name: 'Swasta', value: grandTotals.swasta, color: '#f97316' }  // Orange 500
   ];
 
-  // Hitung persentase untuk ditambahkan ke Legend
   const percentNegeri = grandTotals.total > 0 ? ((grandTotals.negeri / grandTotals.total) * 100).toFixed(1) : 0;
   const percentSwasta = grandTotals.total > 0 ? ((grandTotals.swasta / grandTotals.total) * 100).toFixed(1) : 0;
 
   // 4. Unduh Excel Tabel
   const downloadExcel = async () => {
     const workbook = new ExcelJS.Workbook();
-    const worksheetTitle = activeTab === 'SEMUA' ? 'Semua Jenjang' : activeTab;
+    const worksheetTitle = activeTab === 'SEMUA' ? 'Semua Jenjang' : activeTab.replace('/', '-'); // replace slashes for valid sheet name
     const worksheet = workbook.addWorksheet(`Rekap ${worksheetTitle}`);
 
     worksheet.columns = [
@@ -492,7 +547,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026' }) {
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Rekap_Sekolah_${activeTab === 'SEMUA' ? 'Keseluruhan' : activeTab}_${selectedYear}.xlsx`;
+    link.download = `Rekap_Sekolah_${activeTab === 'SEMUA' ? 'Keseluruhan' : activeTab.replace('/', '-')}_${selectedYear}.xlsx`;
     link.click();
   };
 
@@ -504,25 +559,25 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026' }) {
   return (
     <div className="h-full flex flex-col animate-in fade-in duration-500">
       
-      {/* 1. TABS HEADER */}
-      <div className="bg-white px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0 shadow-sm z-20 overflow-x-auto">
-        <div className="flex items-center gap-2 bg-gray-100 p-1.5 rounded-2xl min-w-max">
-          {['SEMUA', 'TK', 'SD', 'SMP', 'SMA'].map(tab => (
+      {/* 1. TABS HEADER (Dioptimalkan untuk layar 1366x768) */}
+      <div className="bg-white px-4 md:px-6 py-3 border-b border-gray-100 flex items-center justify-between shrink-0 shadow-sm z-20 overflow-x-auto">
+        <div className="flex items-center gap-1.5 md:gap-2 bg-gray-100 p-1 md:p-1.5 rounded-xl md:rounded-2xl min-w-max">
+          {Object.keys(JENJANG_GROUPS).map(tab => (
             <button 
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-6 md:px-8 py-2.5 rounded-xl font-black text-xs md:text-sm transition-all duration-300 ${activeTab === tab ? 'bg-blue-600 text-white shadow-md scale-105' : 'text-gray-500 hover:bg-gray-200'}`}
+              className={`px-3 md:px-5 lg:px-6 py-2 rounded-lg md:rounded-xl font-black text-[10px] md:text-xs transition-all duration-300 whitespace-nowrap ${activeTab === tab ? 'bg-blue-600 text-white shadow-md scale-[1.02]' : 'text-gray-500 hover:bg-gray-200'}`}
             >
-              {tab === 'SEMUA' ? 'SEMUA JENJANG' : `JENJANG ${tab}`}
+              {tab}
             </button>
           ))}
         </div>
         
         <button 
           onClick={downloadExcel}
-          className="flex items-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white px-5 py-2.5 rounded-xl font-black uppercase text-xs shadow-sm border border-blue-200 transition-all active:scale-95 shrink-0 ml-4"
+          className="flex items-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white px-4 py-2 rounded-lg font-black uppercase text-[10px] md:text-xs shadow-sm border border-blue-200 transition-all active:scale-95 shrink-0 ml-3 md:ml-4"
         >
-          <FileSpreadsheet size={16} /> Unduh Rekap
+          <FileSpreadsheet size={16} /> <span className="hidden sm:inline">Unduh Rekap</span><span className="sm:hidden">Unduh</span>
         </button>
       </div>
 
@@ -589,7 +644,6 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026' }) {
         {/* KOLOM KANAN: PREMIUM PIE CHART */}
         <div className="lg:w-1/3 flex flex-col bg-white border-l border-gray-100 relative">
           
-          {/* HEADER CHART */}
           <div className="text-center w-full px-4 pt-8 pb-4 shrink-0">
             <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">Proporsi Status Sekolah</h2>
             <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mt-1">
@@ -597,12 +651,10 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026' }) {
             </p>
           </div>
 
-          {/* AREA CHART (Tengah) */}
           <div className="flex-1 flex items-center justify-center min-h-0 relative">
              <PremiumPieChart segments={pieSegments} total={grandTotals.total} />
           </div>
 
-          {/* LEGEND (Bawah) */}
           <div className="px-6 pb-8 pt-4 w-full flex flex-col gap-3 shrink-0">
              <div className="flex items-center justify-between bg-blue-50 p-4 rounded-2xl border border-blue-100 transition-colors hover:bg-blue-100">
                 <div className="flex items-center gap-3">
@@ -640,7 +692,6 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026' }) {
         isOpen={modalOpen} 
         onClose={() => setModalOpen(false)}
         data={data}
-        jenjang={activeTab}
         initialWilayah={selectedWilayah}
       />
 

@@ -9,12 +9,12 @@ import { collection, getDocs, query, where, limit } from 'firebase/firestore';
 // IMPORT KOMPONEN
 import DapodikSekolah from './DapodikSekolah';
 import DapodikGuru from './DapodikGuru'; 
+import DapodikPesertaDidik from './DapodikPesertaDidik'; 
+import DapodikRasio from './DapodikRasio'; // <-- IMPORT DAPODIK RASIO
 
 // =====================================================================
 // PLACEHOLDER KOMPONEN (Nanti kita pisah ke file masing-masing)
 // =====================================================================
-const DapodikPesertaDidik = () => <div className="p-8 text-center text-gray-500 font-bold animate-in fade-in zoom-in-95">Tampilan Dapodik Peserta Didik (Segera Hadir)</div>;
-const DapodikRasio = () => <div className="p-8 text-center text-gray-500 font-bold animate-in fade-in zoom-in-95">Tampilan Rasio & Perbandingan (Segera Hadir)</div>;
 const DapodikRombel = () => <div className="p-8 text-center text-gray-500 font-bold animate-in fade-in zoom-in-95">Tampilan Dapodik Rombel (Segera Hadir)</div>;
 const DapodikSarpras = () => <div className="p-8 text-center text-gray-500 font-bold animate-in fade-in zoom-in-95">Tampilan Dapodik Sarpras (Segera Hadir)</div>;
 
@@ -193,8 +193,8 @@ export default function DapodikPage({ Header }) {
     switch (activeMenu) {
       case 'sekolah': return <DapodikSekolah data={sekolahData} selectedYear={selectedYear} />;
       case 'guru': return <DapodikGuru data={ptkData} selectedYear={selectedYear} />;
-      case 'peserta_didik': return <DapodikPesertaDidik />;
-      case 'rasio': return <DapodikRasio />;
+      case 'peserta_didik': return <DapodikPesertaDidik data={sekolahData} selectedYear={selectedYear} />; 
+      case 'rasio': return <DapodikRasio dataSekolah={sekolahData} dataGuru={ptkData} selectedYear={selectedYear} />; // <-- SUNTIKKAN KEDUA DATA KE SINI
       case 'rombel': return <DapodikRombel />;
       case 'sarpras': return <DapodikSarpras />;
       default: return <DapodikSekolah data={sekolahData} selectedYear={selectedYear} />;
@@ -282,7 +282,6 @@ export default function DapodikPage({ Header }) {
             </button>
           </div>
 
-          {/* Teks Navigasi Data Dihapus, Diganti Full Tombol Sinkronisasi + Tahun */}
           <div className="hidden md:flex px-5 py-5 border-b border-white/10 shrink-0 items-center justify-between gap-2">
             <button 
               onClick={() => loadData(true)} 

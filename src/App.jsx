@@ -97,65 +97,66 @@ export default function App() {
   const HomePage = () => (
     <div className="h-screen flex flex-col bg-gray-100 overflow-y-auto md:overflow-hidden">
       <Header />
-      <main className="flex-1 flex flex-col items-center justify-start md:justify-center p-4 md:p-6 text-center pt-8 md:pt-6">
+      <main className="flex-1 flex flex-col items-center justify-start md:justify-center p-4 md:p-6 text-center pt-8 md:pt-4">
         
         {/* HERO SECTION */}
-        <div className="mb-8 md:mb-12 flex flex-col items-center">
-          <div className="flex items-center justify-center gap-3 md:gap-6 mb-3 md:mb-4">
+        <div className="mb-6 md:mb-8 flex flex-col items-center">
+          <div className="flex items-center justify-center gap-3 md:gap-4 mb-2 md:mb-3">
              <div className="bg-blue-600 p-2.5 md:p-4 rounded-2xl md:rounded-3xl shadow-xl border-2 md:border-4 border-white">
-                <School className="w-10 h-10 md:w-20 md:h-20 text-white" />
+                <School className="w-10 h-10 md:w-16 md:h-16 text-white" />
              </div>
-             <h1 className="text-5xl sm:text-7xl md:text-9xl font-black text-gray-900 leading-none uppercase tracking-tighter">
+             <h1 className="text-5xl sm:text-7xl md:text-8xl font-black text-gray-900 leading-none uppercase tracking-tighter">
                SITAKA
              </h1>
           </div>
-          <h2 className="text-lg sm:text-xl md:text-3xl font-bold text-blue-600 tracking-[0.1em] md:tracking-[0.2em] px-2">
+          <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-blue-600 tracking-[0.1em] md:tracking-[0.2em] px-2">
             referenSI daTA pendidiKAn
           </h2>
-          <p className="text-gray-500 text-sm md:text-lg mt-3 md:mt-6 max-w-xl mx-auto font-medium italic px-4">
+          <p className="text-gray-500 text-sm md:text-base mt-2 md:mt-4 max-w-xl mx-auto font-medium italic px-4">
             Sistem Informasi Terpadu Kalimantan Barat. <br className="hidden md:block" /> Silakan pilih menu untuk memulai monitoring data.
           </p>
         </div>
 
-        {/* CARDS GRID */}
+        {/* CARDS GRID - Dioptimalkan tingginya agar muat di layar 1366x768 */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 w-full max-w-7xl px-2 md:px-4 text-center pb-12 md:pb-0">
-          <button onClick={() => navigateTo('dapodik')} className="group bg-white p-5 md:p-8 rounded-[2rem] md:rounded-[2.5rem] shadow-xl border-2 md:border-4 border-transparent hover:border-blue-500 transition-all active:scale-95 h-40 md:h-72 flex flex-col justify-between text-left">
-            <div className="bg-blue-600 text-white p-3 md:p-5 rounded-2xl md:rounded-3xl w-fit shadow-md md:shadow-lg group-hover:scale-110 transition-transform">
-              <Database className="w-6 h-6 md:w-10 md:h-10" />
+          
+          <button onClick={() => navigateTo('dapodik')} className="group bg-white p-5 md:p-6 lg:p-8 rounded-[2rem] md:rounded-[2rem] shadow-xl border-2 md:border-4 border-transparent hover:border-blue-500 transition-all active:scale-95 h-40 md:h-56 lg:h-64 flex flex-col justify-between text-left">
+            <div className="bg-blue-600 text-white p-3 md:p-4 rounded-2xl w-fit shadow-md md:shadow-lg group-hover:scale-110 transition-transform">
+              <Database className="w-6 h-6 md:w-8 md:h-8" />
             </div>
             <div>
               <h3 className="text-xl md:text-2xl font-black text-gray-800 mb-0.5 md:mb-1 uppercase">Dapodik</h3>
-              <p className="text-gray-400 font-bold uppercase tracking-wider text-[9px] md:text-[10px]">Data Pokok Pendidikan</p>
+              <p className="text-gray-400 font-bold uppercase tracking-wider text-[9px] md:text-[10px] leading-tight">Data Pokok Pendidikan</p>
             </div>
           </button>
           
-          <button onClick={() => navigateTo('rapor-pendidikan')} className="group bg-white p-5 md:p-8 rounded-[2rem] md:rounded-[2.5rem] shadow-xl border-2 md:border-4 border-transparent hover:border-emerald-500 transition-all active:scale-95 h-40 md:h-72 flex flex-col justify-between text-left">
-            <div className="bg-emerald-600 text-white p-3 md:p-5 rounded-2xl md:rounded-3xl w-fit shadow-md md:shadow-lg group-hover:scale-110 transition-transform">
-              <FileText className="w-6 h-6 md:w-10 md:h-10" />
+          <button onClick={() => navigateTo('rapor-pendidikan')} className="group bg-white p-5 md:p-6 lg:p-8 rounded-[2rem] md:rounded-[2rem] shadow-xl border-2 md:border-4 border-transparent hover:border-emerald-500 transition-all active:scale-95 h-40 md:h-56 lg:h-64 flex flex-col justify-between text-left">
+            <div className="bg-emerald-600 text-white p-3 md:p-4 rounded-2xl w-fit shadow-md md:shadow-lg group-hover:scale-110 transition-transform">
+              <FileText className="w-6 h-6 md:w-8 md:h-8" />
             </div>
             <div>
               <h3 className="text-xl md:text-2xl font-black text-gray-800 mb-0.5 md:mb-1 uppercase">Rapor Pendidikan</h3>
-              <p className="text-gray-400 font-bold uppercase tracking-wider text-[9px] md:text-[10px]">Evaluasi Mutu Pendidikan</p>
+              <p className="text-gray-400 font-bold uppercase tracking-wider text-[9px] md:text-[10px] leading-tight">Evaluasi Mutu Pendidikan</p>
             </div>
           </button>
 
-          <button onClick={() => navigateTo('data-ats')} className="group bg-white p-5 md:p-8 rounded-[2rem] md:rounded-[2.5rem] shadow-xl border-2 md:border-4 border-transparent hover:border-orange-500 transition-all active:scale-95 h-40 md:h-72 flex flex-col justify-between text-left">
-            <div className="bg-orange-600 text-white p-3 md:p-5 rounded-2xl md:rounded-3xl w-fit shadow-md md:shadow-lg group-hover:scale-110 transition-transform">
-              <Layers className="w-6 h-6 md:w-10 md:h-10" />
+          <button onClick={() => navigateTo('data-ats')} className="group bg-white p-5 md:p-6 lg:p-8 rounded-[2rem] md:rounded-[2rem] shadow-xl border-2 md:border-4 border-transparent hover:border-orange-500 transition-all active:scale-95 h-40 md:h-56 lg:h-64 flex flex-col justify-between text-left">
+            <div className="bg-orange-600 text-white p-3 md:p-4 rounded-2xl w-fit shadow-md md:shadow-lg group-hover:scale-110 transition-transform">
+              <Layers className="w-6 h-6 md:w-8 md:h-8" />
             </div>
             <div>
               <h3 className="text-xl md:text-2xl font-black text-gray-800 mb-0.5 md:mb-1 uppercase">Data ATS</h3>
-              <p className="text-gray-400 font-bold uppercase tracking-wider text-[9px] md:text-[10px]">Anak Tidak Sekolah</p>
+              <p className="text-gray-400 font-bold uppercase tracking-wider text-[9px] md:text-[10px] leading-tight">Anak Tidak Sekolah</p>
             </div>
           </button>
 
-          <button onClick={() => navigateTo('data-sarpras')} className="group bg-white p-5 md:p-8 rounded-[2rem] md:rounded-[2.5rem] shadow-xl border-2 md:border-4 border-transparent hover:border-purple-500 transition-all active:scale-95 h-40 md:h-72 flex flex-col justify-between text-left">
-            <div className="bg-purple-600 text-white p-3 md:p-5 rounded-2xl md:rounded-3xl w-fit shadow-md md:shadow-lg group-hover:scale-110 transition-transform">
-              <Building2 className="w-6 h-6 md:w-10 md:h-10" />
+          <button onClick={() => navigateTo('data-sarpras')} className="group bg-white p-5 md:p-6 lg:p-8 rounded-[2rem] md:rounded-[2rem] shadow-xl border-2 md:border-4 border-transparent hover:border-purple-500 transition-all active:scale-95 h-40 md:h-56 lg:h-64 flex flex-col justify-between text-left">
+            <div className="bg-purple-600 text-white p-3 md:p-4 rounded-2xl w-fit shadow-md md:shadow-lg group-hover:scale-110 transition-transform">
+              <Building2 className="w-6 h-6 md:w-8 md:h-8" />
             </div>
             <div>
               <h3 className="text-xl md:text-2xl font-black text-gray-800 mb-0.5 md:mb-1 uppercase">Data Sarpras</h3>
-              <p className="text-gray-400 font-bold uppercase tracking-wider text-[9px] md:text-[10px]">Sarana Prasarana Sekolah</p>
+              <p className="text-gray-400 font-bold uppercase tracking-wider text-[9px] md:text-[10px] leading-tight">Sarana Prasarana Sekolah</p>
             </div>
           </button>
         </div>

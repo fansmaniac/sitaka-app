@@ -1,24 +1,22 @@
 import React, { useState } from 'react';
 import { LineChart, ArrowRightLeft, Layers, Users, School, GraduationCap, AlertCircle } from 'lucide-react';
 
-// IMPORT KOMPONEN ANAK
+// IMPORT KOMPONEN ANAK ASLI
 import RasioSekolahVsPD from './RasioSekolahVsPD';
 import RasioSekolahVsGuru from './RasioSekolahVsGuru'; 
 import RasioRombelVsPD from './RasioRombelVsPD'; 
-import RasioSekolahVsRombel from './RasioSekolahVsRombel'; // <-- IMPORT MODUL BARU
+import RasioSekolahVsRombel from './RasioSekolahVsRombel'; 
+import RasioRombelVsGuru from './RasioRombelVsGuru'; 
 
 // =====================================================================
-// PLACEHOLDER KOMPONEN ANAK LAINNYA
+// PLACEHOLDER KOMPONEN ANAK YANG BELUM DIBUAT
 // =====================================================================
-const RasioRombelVsGuru = ({ dataSekolah, dataGuru }) => <div className="p-12 text-center text-gray-500 font-bold border-2 border-dashed border-blue-200 rounded-3xl bg-blue-50/30">Menampilkan Komponen: Rombel VS Guru</div>;
 const RasioGuruVsPD = ({ dataSekolah, dataGuru }) => <div className="p-12 text-center text-gray-500 font-bold border-2 border-dashed border-blue-200 rounded-3xl bg-blue-50/30">Menampilkan Komponen: Guru VS Peserta Didik</div>;
-const RasioGuruVsRombel = ({ dataSekolah, dataGuru }) => <div className="p-12 text-center text-gray-500 font-bold border-2 border-dashed border-blue-200 rounded-3xl bg-blue-50/30">Menampilkan Komponen: Guru VS Rombel</div>;
-
 
 // =====================================================================
 // MAIN COMPONENT: DAPODIK RASIO
 // =====================================================================
-export default function DapodikRasio({ dataSekolah = [], dataGuru = [], selectedYear = '2026' }) {
+export default function DapodikRasio({ selectedYear = '2026' }) {
   // State untuk Dropdown
   const [data1, setData1] = useState('SEKOLAH');
   const [data2, setData2] = useState('PESERTA DIDIK');
@@ -45,10 +43,21 @@ export default function DapodikRasio({ dataSekolah = [], dataGuru = [], selected
     setData1(newVal);
     setIsComparing(false); 
     
-    if (newVal === data2) {
+    // Logika Auto-Select untuk mencegah state terjebak di opsi yang disabled
+    let currentData2 = data2;
+
+    // 1. Cegah bentrok (Memilih Data 2 yang sama dengan Data 1)
+    if (newVal === currentData2) {
       const availableOption = OPTIONS_DATA_2.find(opt => opt.id !== newVal);
-      if (availableOption) setData2(availableOption.id);
+      if (availableOption) currentData2 = availableOption.id;
     }
+
+    // 2. Cegah Redudansi (Jika GURU dipilih di Data 1, ROMBEL di-disable, maka Data 2 tidak boleh nyangkut di ROMBEL)
+    if (newVal === 'GURU' && currentData2 === 'ROMBEL') {
+       currentData2 = 'PESERTA DIDIK'; // Paksa pindah ke opsi yang valid
+    }
+
+    setData2(currentData2);
   };
 
   const handleData2Change = (e) => {
@@ -77,15 +86,13 @@ export default function DapodikRasio({ dataSekolah = [], dataGuru = [], selected
       case 'SEKOLAH_VS_GURU':
         return <RasioSekolahVsGuru selectedYear={selectedYear} />;
       case 'SEKOLAH_VS_ROMBEL':
-        return <RasioSekolahVsRombel selectedYear={selectedYear} />; // <-- PANGGIL KOMPONEN BARU
+        return <RasioSekolahVsRombel selectedYear={selectedYear} />;
       case 'ROMBEL_VS_PESERTA DIDIK':
         return <RasioRombelVsPD selectedYear={selectedYear} />;
       case 'ROMBEL_VS_GURU':
-        return <RasioRombelVsGuru dataSekolah={dataSekolah} dataGuru={dataGuru} />;
+        return <RasioRombelVsGuru selectedYear={selectedYear} />; 
       case 'GURU_VS_PESERTA DIDIK':
-        return <RasioGuruVsPD dataSekolah={dataSekolah} dataGuru={dataGuru} />;
-      case 'GURU_VS_ROMBEL':
-        return <RasioGuruVsRombel dataSekolah={dataSekolah} dataGuru={dataGuru} />;
+        return <RasioGuruVsPD selectedYear={selectedYear} />;
       default:
         return (
           <div className="flex flex-col items-center justify-center p-20 bg-orange-50 rounded-3xl border-2 border-orange-200 border-dashed text-orange-600">
@@ -153,16 +160,33 @@ export default function DapodikRasio({ dataSekolah = [], dataGuru = [], selected
                   onChange={handleData2Change}
                   className="w-full appearance-none bg-white border-2 border-blue-200 text-blue-900 font-black text-lg px-6 py-4 rounded-2xl outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100 cursor-pointer transition-all shadow-sm"
                 >
-                  {OPTIONS_DATA_2.map(opt => (
-                    <option 
-                      key={opt.id} 
-                      value={opt.id} 
-                      disabled={opt.id === data1} 
-                      className={opt.id === data1 ? 'bg-gray-100 text-gray-400 italic' : ''}
-                    >
-                      {opt.label} {opt.id === data1 ? '(Terpilih di Data 1)' : ''}
-                    </option>
-                  ))}
+                  {OPTIONS_DATA_2.map(opt => {
+                    // LOGIKA CEGAH REDUDANSI:
+                    // 1. Disable jika ID sama dengan Data 1
+                    let isDisabled = opt.id === data1;
+                    let customLabel = opt.label;
+
+                    // 2. Disable opsi "ROMBEL" jika Data 1 adalah "GURU" 
+                    if (data1 === 'GURU' && opt.id === 'ROMBEL') {
+                      isDisabled = true;
+                    }
+
+                    if (isDisabled) {
+                      if (opt.id === data1) customLabel = `${opt.label} (Terpilih)`;
+                      else customLabel = `${opt.label} (Redudansi)`;
+                    }
+
+                    return (
+                      <option 
+                        key={opt.id} 
+                        value={opt.id} 
+                        disabled={isDisabled} 
+                        className={isDisabled ? 'bg-gray-100 text-gray-400 italic' : ''}
+                      >
+                        {customLabel}
+                      </option>
+                    )
+                  })}
                 </select>
                 <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-blue-400">▼</div>
               </div>

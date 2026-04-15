@@ -228,7 +228,7 @@ export default function AdminDashboard({ Header }) {
   };
 
   // =====================================================================
-  // MESIN PRE-CALCULATION RASIO (AGREGASI SERVER-SIDE)
+  // MESIN PRE-CALCULATION RASIO (METODOLOGI BARU: DIRECT COMPARISON)
   // =====================================================================
   
   // 1. SEKOLAH VS PD (PD / SEKOLAH)
@@ -386,6 +386,7 @@ export default function AdminDashboard({ Header }) {
         }
 
         const rowTab2 = mapWilayah.get(uniqueId);
+        
         rowTab2[`${group}_sek`]++;
         rowTab2[`${group}_guru`] += guruAktual;
         
@@ -530,6 +531,7 @@ export default function AdminDashboard({ Header }) {
     }
   };
 
+
   // 4. SEKOLAH VS ROMBEL (ROMBEL / SEKOLAH)
   const handleCalculateRasioSekolahRombel = async (year) => {
     setUploading(true);
@@ -567,10 +569,12 @@ export default function AdminDashboard({ Header }) {
             }
         });
 
+        // Update Tab 1 Global
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
         if (isNegeri) { rowTab1.sek_n++; rowTab1.rombel_n += rombelTotal; } 
         else { rowTab1.sek_s++; rowTab1.rombel_s += rombelTotal; }
 
+        // Update Tab 2
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
         const uniqueId = `${kabDb}_${keyKec}`;
@@ -617,8 +621,8 @@ export default function AdminDashboard({ Header }) {
       setUploading(false);
     }
   };
-  
-  // 5. ROMBEL VS PD (PD / ROMBEL) 
+
+  // 5. ROMBEL VS PD (PD / ROMBEL)
   const handleCalculateRasioRombelPD = async (year) => {
     setUploading(true);
     setProgressLabel(`Menghitung Rasio Rombel VS Peserta Didik ${year}...`);

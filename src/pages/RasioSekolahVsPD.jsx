@@ -57,6 +57,7 @@ export default function RasioSekolahVsPD({ selectedYear }) {
   const [tab2DataRaw, setTab2DataRaw] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(''); // State untuk tanggal update
 
   useEffect(() => {
     const fetchAgregasi = async () => {
@@ -69,6 +70,15 @@ export default function RasioSekolahVsPD({ selectedYear }) {
         if (docSnap.exists()) {
           const data = docSnap.data();
           setTab2DataRaw(data.tabel2 || []);
+          
+          // Format tanggal last_updated
+          if (data.last_updated) {
+            const d = new Date(data.last_updated);
+            const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+            setLastUpdated(`${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()}`);
+          } else {
+            setLastUpdated('Tidak Diketahui');
+          }
         } else {
           setError(`Data rasio tahun ${selectedYear} belum dikalkulasi oleh Admin.`);
         }
@@ -287,6 +297,12 @@ export default function RasioSekolahVsPD({ selectedYear }) {
               </tfoot>
             )}
           </table>
+          {/* INFO WAKTU UPDATE DAPODIK */}
+          {lastUpdated && (
+             <div className="mt-4 px-2 text-right text-xs font-bold italic text-gray-400">
+                Sumber : Data Dapodik Update Pada Tanggal : {lastUpdated}
+             </div>
+          )}
         </div>
       </div>
 
@@ -329,10 +345,15 @@ export default function RasioSekolahVsPD({ selectedYear }) {
               ))}
             </tbody>
           </table>
-          {tab2Data.length === 0 && (
+          
+          {tab2Data.length === 0 ? (
              <div className="py-20 flex flex-col items-center opacity-30 text-gray-500">
                <Search size={64} className="mb-4" />
                <p className="font-black uppercase tracking-widest text-xl">Tidak Ada Data</p>
+             </div>
+          ) : (
+             <div className="mt-4 px-2 text-right text-xs font-bold italic text-gray-400">
+                Sumber : Data Dapodik Update Pada Tanggal : {lastUpdated}
              </div>
           )}
         </div>

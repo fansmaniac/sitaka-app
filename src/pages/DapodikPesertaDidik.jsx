@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Download, GraduationCap, MapPin, Eye, FileSpreadsheet, 
-  Search, X, ChevronLeft, ChevronRight, Building2, Filter, Users
+  Search, X, ChevronLeft, ChevronRight, Building2
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
 
@@ -15,25 +15,23 @@ const getVal = (obj, keyName) => {
   return key ? obj[key] : '';
 };
 
-const getNum = (obj, keyName) => parseInt(getVal(obj, keyName)) || 0;
-
-const KABUPATEN_LIST = [
-  "BENGKAYANG", "KAPUAS HULU", "KAYONG UTARA", "KETAPANG", 
-  "KUBU RAYA", "LANDAK", "MELAWI", "MEMPAWAH", "PONTIANAK", 
-  "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
-];
-
-const cleanKabupatenName = (rawName) => {
-  if (!rawName) return "TIDAK DIKETAHUI";
-  let name = String(rawName).toUpperCase().replace(/^(KAB\.|KABUPATEN|KOTA)\s+/i, '').trim();
-  const found = KABUPATEN_LIST.find(kab => name.includes(kab));
-  if (found) return found;
-  return name; 
-};
-
 const getKabupatenRank = (kabName) => {
-  const idx = KABUPATEN_LIST.indexOf(kabName);
-  return idx !== -1 ? idx : 99;
+  const name = String(kabName).toUpperCase();
+  if (name.includes("BENGKAYANG")) return 1;
+  if (name.includes("KAPUAS HULU")) return 2;
+  if (name.includes("KAYONG UTARA")) return 3;
+  if (name.includes("KETAPANG")) return 4;
+  if (name.includes("KUBU RAYA")) return 5;
+  if (name.includes("LANDAK")) return 6;
+  if (name.includes("MELAWI")) return 7;
+  if (name.includes("MEMPAWAH")) return 8;
+  if (name.includes("SAMBAS")) return 9;
+  if (name.includes("SANGGAU")) return 10;
+  if (name.includes("SEKADAU")) return 11;
+  if (name.includes("SINTANG")) return 12;
+  if (name.includes("PONTIANAK")) return 13;
+  if (name.includes("SINGKAWANG")) return 14;
+  return 99;
 };
 
 // =====================================================================
@@ -41,12 +39,12 @@ const getKabupatenRank = (kabName) => {
 // =====================================================================
 const JENJANG_GROUPS = {
   'SEMUA': [],
-  'PAUD': ['TK', 'KB', 'PAUD'],
+  'PAUD': ['TK', 'KB', 'SPS', 'TPA', 'PAUD'],
   'SD': ['SD', 'SPK SD'],
   'SMP': ['SMP', 'SPK SMP'],
   'SMA/SMK': ['SMA', 'SPK SMA', 'SMK'],
   'SLB (Inklusif)': ['SLB'],
-  'NON FORMAL': ['PKBM', 'SKB', 'TPA', 'SPS']
+  'NON FORMAL': ['PKBM', 'SKB']
 };
 
 const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'NON FORMAL'];
@@ -60,17 +58,151 @@ const identifyJenjangGroup = (jenjangDb) => {
 };
 
 // =====================================================================
-// MODAL RINCIAN PESERTA DIDIK
+// PREMIUM PIE CHART COMPONENT
 // =====================================================================
-const DapodikPesertaDidikModal = ({ isOpen, onClose, data, activeJenjang, initialWilayah }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState('SEMUA'); 
-  const [filterGender, setFilterGender] = useState('SEMUA');
+const PremiumPieChart = ({ segments, total }) => {
+  const [hoveredIndex, setHoveredIndex] = useState(null);
+
+  if (total === 0) {
+    return (
+      <div className="w-full h-full flex items-center justify-center">
+        <div className="w-32 h-32 md:w-40 md:h-40 rounded-full bg-gray-50 flex items-center justify-center border-4 border-dashed border-gray-200">
+          <span className="text-gray-400 font-bold text-xs uppercase tracking-widest">Kosong</span>
+        </div>
+      </div>
+    );
+  }
+
+  let cumulativePercent = 0;
   
+  const getCoordinatesForPercent = (percent, radius = 1) => {
+    const x = Math.cos(2 * Math.PI * percent) * radius;
+    const y = Math.sin(2 * Math.PI * percent) * radius;
+    return [x, y];
+  };
+
+  const chartData = segments.map((s, i) => {
+    if (s.value === 0) return null;
+    
+    const percentage = s.value / total;
+    const startPercent = cumulativePercent;
+    const endPercent = cumulativePercent + percentage;
+    const midPercent = startPercent + (percentage / 2); 
+    
+    cumulativePercent = endPercent;
+
+    const [startX, startY] = getCoordinatesForPercent(startPercent);
+    const [endX, endY] = getCoordinatesForPercent(endPercent);
+    const largeArcFlag = percentage > 0.5 ? 1 : 0;
+    
+    let pathData;
+    if (percentage === 1) {
+      pathData = `M 1 0 A 1 1 0 1 1 -1 0 A 1 1 0 1 1 1 0`;
+    } else {
+      pathData = `M 0 0 L ${startX} ${startY} A 1 1 0 ${largeArcFlag} 1 ${endX} ${endY} Z`;
+    }
+
+    const [lineStartX, lineStartY] = getCoordinatesForPercent(midPercent, 1);
+    const [lineMidX, lineMidY] = getCoordinatesForPercent(midPercent, 1.2);
+    const isRightSide = lineMidX > 0;
+    const lineEndX = isRightSide ? lineMidX + 0.2 : lineMidX - 0.2;
+    const lineEndY = lineMidY;
+
+    const textX = isRightSide ? lineEndX + 0.05 : lineEndX - 0.05;
+    const textAnchor = isRightSide ? "start" : "end";
+    
+    const isHovered = hoveredIndex === i;
+    const popOutOffset = 0.05;
+    const [popX, popY] = getCoordinatesForPercent(midPercent, popOutOffset);
+    const transform = isHovered && percentage < 1 ? `translate(${popX}, ${popY}) scale(1.05)` : 'scale(1)';
+
+    return {
+      ...s,
+      index: i,
+      pathData,
+      percentage: (percentage * 100).toFixed(1),
+      lineStartX, lineStartY,
+      lineMidX, lineMidY,
+      lineEndX, lineEndY,
+      textX, textAnchor,
+      transform,
+      isRightSide
+    };
+  }).filter(Boolean);
+
+  return (
+    <div className="w-full max-w-[280px] md:max-w-[320px] aspect-square relative flex items-center justify-center mx-auto drop-shadow-xl hover:scale-105 transition-transform duration-300">
+      <svg viewBox="-1.8 -1.5 3.6 3" className="w-full h-full max-h-[300px] overflow-visible drop-shadow-xl">
+        <g transform="rotate(-90)">
+          {chartData.map((data) => (
+            <path 
+              key={`slice-${data.index}`} 
+              d={data.pathData} 
+              fill={data.color}
+              transform={data.transform}
+              onMouseEnter={() => setHoveredIndex(data.index)}
+              onMouseLeave={() => setHoveredIndex(null)}
+              className="cursor-pointer transition-all duration-300 stroke-white stroke-[0.015]"
+              style={{ transformOrigin: '0px 0px' }}
+            />
+          ))}
+          {chartData.map((data) => (
+            <g 
+              key={`label-${data.index}`}
+              className={`transition-opacity duration-300 ${hoveredIndex !== null && hoveredIndex !== data.index ? 'opacity-30' : 'opacity-100'}`}
+            >
+              <polyline 
+                points={`${data.lineStartX},${data.lineStartY} ${data.lineMidX},${data.lineMidY} ${data.lineEndX},${data.lineEndY}`}
+                fill="none"
+                stroke={data.color}
+                strokeWidth="0.015"
+                strokeLinejoin="round"
+              />
+              <circle cx={data.lineStartX} cy={data.lineStartY} r="0.04" fill={data.color} />
+              <circle cx={data.lineEndX} cy={data.lineEndY} r="0.03" fill={data.color} />
+              <g transform={`rotate(90 ${data.textX} ${data.lineEndY})`}>
+                <text 
+                  x={data.textX} 
+                  y={data.lineEndY - 0.04}
+                  textAnchor={data.textAnchor}
+                  fill={data.color}
+                  className="font-black text-[0.14px] uppercase"
+                >
+                  {data.percentage}%
+                </text>
+                <text 
+                  x={data.textX} 
+                  y={data.lineEndY + 0.12} 
+                  textAnchor={data.textAnchor}
+                  fill="#4B5563" 
+                  className="font-bold text-[0.1px] tracking-widest"
+                >
+                  {data.name} ({data.value.toLocaleString()})
+                </text>
+              </g>
+            </g>
+          ))}
+        </g>
+      </svg>
+    </div>
+  );
+};
+
+// =====================================================================
+// MODAL RINCIAN PESERTA DIDIK (REKAP PER WILAYAH/KECAMATAN)
+// =====================================================================
+const DapodikPesertaDidikModal = ({ isOpen, onClose, data, initialWilayah, displayLastUpdated }) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterWilayah, setFilterWilayah] = useState(initialWilayah);
+  const [filterStatus, setFilterStatus] = useState('SEMUA');
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 15;
 
-  useEffect(() => { setCurrentPage(1); }, [searchTerm, filterStatus, filterGender, activeJenjang]);
+  useEffect(() => {
+    if (isOpen) setFilterWilayah(initialWilayah);
+  }, [isOpen, initialWilayah]);
+
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, filterWilayah, filterStatus]);
 
   useEffect(() => {
     const handleEsc = (e) => { if (e.key === 'Escape') onClose(); };
@@ -78,289 +210,126 @@ const DapodikPesertaDidikModal = ({ isOpen, onClose, data, activeJenjang, initia
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen, onClose]);
 
-  const isModeSemuaWilayah = initialWilayah === 'SEMUA';
-  const needsStatusFilter = ['SEMUA', 'SD', 'SMP', 'SMA/SMK'].includes(activeJenjang);
-  const needsGenderFilter = ['PAUD', 'SLB (Inklusif)', 'NON FORMAL'].includes(activeJenjang);
+  const listKabupaten = useMemo(() => {
+    const unik = [...new Set(data.map(item => String(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota') || '').trim().toUpperCase()))];
+    return unik.filter(k => k !== '').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
+  }, [data]);
+
+  const isModeSemua = filterWilayah === 'SEMUA';
 
   const processedData = useMemo(() => {
     if (!data) return [];
-    const validJenjangList = JENJANG_GROUPS[activeJenjang];
 
-    // 1. Filter Data Mentah
-    const validData = data.filter(sekolah => {
-      // Filter Wilayah
-      const kabDb = cleanKabupatenName(getVal(sekolah, 'kabupaten') || getVal(sekolah, 'Kabupaten/Kota'));
-      if (!isModeSemuaWilayah && kabDb !== initialWilayah) return false;
+    // Filter Awal
+    const validData = data.filter(item => {
+      const kabDb = String(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota') || '').trim().toUpperCase();
+      if (!isModeSemua && kabDb !== filterWilayah) return false;
 
-      // Filter Jenjang
-      if (activeJenjang !== 'SEMUA') {
-        const jenjangDb = String(getVal(sekolah, 'bentuk_pendidikan') || getVal(sekolah, 'jenjang')).trim().toUpperCase();
-        if (!validJenjangList.includes(jenjangDb)) return false;
-      }
-
-      // Filter Status (jika berlaku)
-      if (needsStatusFilter && filterStatus !== 'SEMUA') {
-        const statusDb = String(getVal(sekolah, 'status_sekolah') || '').trim().toUpperCase();
-        if (statusDb !== filterStatus) return false;
-      }
-
+      const statusDb = String(getVal(item, 'status_sekolah') || '').trim().toUpperCase();
+      if (filterStatus !== 'SEMUA' && statusDb !== filterStatus) return false;
       return true;
     });
 
-    // 2. Agregasi per Kecamatan
     const mapAgg = new Map();
 
-    validData.forEach(sekolah => {
-      const kecRaw = String(getVal(sekolah, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
-      const kabClean = cleanKabupatenName(getVal(sekolah, 'kabupaten') || getVal(sekolah, 'Kabupaten/Kota'));
-      const keyId = `${kabClean}_${kecRaw}`;
+    validData.forEach(item => {
+      const group = identifyJenjangGroup(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'));
+      if (!group) return; 
+
+      let keyId;
+      if (isModeSemua) {
+        keyId = String(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+      } else {
+        keyId = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+      }
 
       if (!mapAgg.has(keyId)) {
-        mapAgg.set(keyId, { 
-          kecamatan: kecRaw, kabupaten: kabClean,
-          paud:0, sd:0, smp:0, sma:0, slb:0, nf:0,
-          k1:0, k2:0, k3:0, k4:0, k5:0, k6:0,
-          k7:0, k8:0, k9:0,
-          k10:0, k11:0, k12:0,
-          negeri:0, swasta:0,
-          total: 0 
-        });
+        const initRow = { namaWilayah: keyId, total: 0 };
+        JENJANG_KEYS.forEach(k => initRow[k] = 0);
+        mapAgg.set(keyId, initRow);
       }
 
       const row = mapAgg.get(keyId);
-      const group = identifyJenjangGroup(getVal(sekolah, 'bentuk_pendidikan') || getVal(sekolah, 'jenjang'));
-      const status = String(getVal(sekolah, 'status_sekolah')).toUpperCase();
-
-      const pdL = getNum(sekolah, 'pd_l');
-      const pdP = getNum(sekolah, 'pd_p');
-      let pdTotal = getNum(sekolah, 'pd_total') || (pdL + pdP);
-
-      // Logika Filter Gender
-      if (needsGenderFilter) {
-         if (filterGender === 'L') pdTotal = pdL;
-         else if (filterGender === 'P') pdTotal = pdP;
+      
+      // Ambil nilai PD
+      let pd = parseInt(getVal(item, 'pd_total'));
+      if (isNaN(pd)) {
+          let sum = 0;
+          const keys = ['tka_l','tka_p','tkb_l','tkb_p','t1_l','t1_p','t2_l','t2_p','t3_l','t3_p','t4_l','t4_p','t5_l','t5_p','t6_l','t6_p','t7_l','t7_p','t8_l','t8_p','t9_l','t9_p','t10_l','t10_p','t11_l','t11_p','t12_l','t12_p','t13_l','t13_p','paket_a_l','paket_a_p','paket_b_l','paket_b_p','paket_c_l','paket_c_p'];
+          keys.forEach(k => { sum += (parseInt(getVal(item, k)) || 0); });
+          pd = sum;
       }
 
-      // Hitung Kelas
-      const k1 = getNum(sekolah, 't1_l') + getNum(sekolah, 't1_p');
-      const k2 = getNum(sekolah, 't2_l') + getNum(sekolah, 't2_p');
-      const k3 = getNum(sekolah, 't3_l') + getNum(sekolah, 't3_p');
-      const k4 = getNum(sekolah, 't4_l') + getNum(sekolah, 't4_p');
-      const k5 = getNum(sekolah, 't5_l') + getNum(sekolah, 't5_p');
-      const k6 = getNum(sekolah, 't6_l') + getNum(sekolah, 't6_p');
-
-      const k7 = getNum(sekolah, 't7_l') + getNum(sekolah, 't7_p');
-      const k8 = getNum(sekolah, 't8_l') + getNum(sekolah, 't8_p');
-      const k9 = getNum(sekolah, 't9_l') + getNum(sekolah, 't9_p');
-
-      const k10 = getNum(sekolah, 't10_l') + getNum(sekolah, 't10_p');
-      const k11 = getNum(sekolah, 't11_l') + getNum(sekolah, 't11_p');
-      const k12 = getNum(sekolah, 't12_l') + getNum(sekolah, 't12_p');
-
-      if (activeJenjang === 'SEMUA' && group) {
-         if (group === 'PAUD') row.paud += pdTotal;
-         else if (group === 'SD') row.sd += pdTotal;
-         else if (group === 'SMP') row.smp += pdTotal;
-         else if (group === 'SMA/SMK') row.sma += pdTotal;
-         else if (group === 'SLB (Inklusif)') row.slb += pdTotal;
-         else if (group === 'NON FORMAL') row.nf += pdTotal;
-         row.total += pdTotal;
-      } 
-      else if (activeJenjang === 'SD') {
-         row.k1 += k1; row.k2 += k2; row.k3 += k3; row.k4 += k4; row.k5 += k5; row.k6 += k6;
-         row.total += (k1+k2+k3+k4+k5+k6);
-      } 
-      else if (activeJenjang === 'SMP') {
-         row.k7 += k7; row.k8 += k8; row.k9 += k9;
-         row.total += (k7+k8+k9);
-      } 
-      else if (activeJenjang === 'SMA/SMK') {
-         row.k10 += k10; row.k11 += k11; row.k12 += k12;
-         row.total += (k10+k11+k12);
-      } 
-      else if (needsGenderFilter) {
-         if (status === 'NEGERI') row.negeri += pdTotal;
-         else row.swasta += pdTotal;
-         row.total += pdTotal;
-      }
+      row[group] += pd;
+      row.total += pd;
     });
 
     let resultArray = Array.from(mapAgg.values());
 
     if (searchTerm) {
-       resultArray = resultArray.filter(r => r.kecamatan.toLowerCase().includes(searchTerm.toLowerCase()));
+      resultArray = resultArray.filter(r => r.namaWilayah.toLowerCase().includes(searchTerm.toLowerCase()));
     }
 
-    return resultArray.sort((a, b) => a.kecamatan.localeCompare(b.kecamatan));
+    if (isModeSemua) {
+      return resultArray.sort((a, b) => getKabupatenRank(a.namaWilayah) - getKabupatenRank(b.namaWilayah));
+    } else {
+      return resultArray.sort((a, b) => a.namaWilayah.localeCompare(b.namaWilayah));
+    }
+  }, [data, isModeSemua, filterWilayah, filterStatus, searchTerm]);
 
-  }, [data, activeJenjang, initialWilayah, isModeSemuaWilayah, filterStatus, filterGender, searchTerm, needsStatusFilter, needsGenderFilter]);
-
+  // HITUNG TOTAL KESELURUHAN (GRAND TOTAL UNTUK FOOTER TABEL)
   const columnTotals = useMemo(() => {
-    const totals = { 
-      paud:0, sd:0, smp:0, sma:0, slb:0, nf:0, 
-      k1:0, k2:0, k3:0, k4:0, k5:0, k6:0, k7:0, k8:0, k9:0, k10:0, k11:0, k12:0, 
-      negeri:0, swasta:0, total: 0 
-    };
+    const totals = { total: 0 };
+    JENJANG_KEYS.forEach(k => totals[k] = 0);
+
     processedData.forEach(row => {
-      Object.keys(totals).forEach(k => totals[k] += row[k]);
+      totals.total += row.total;
+      JENJANG_KEYS.forEach(k => totals[k] += row[k]);
     });
+
     return totals;
   }, [processedData]);
 
-  const getExcelColumns = () => {
-    let cols = [{ header: 'Kecamatan', key: 'kecamatan', width: 25 }, { header: 'Kabupaten/Kota', key: 'kabupaten', width: 25 }];
-    
-    if (activeJenjang === 'SEMUA') {
-       cols.push({ header:'PAUD', key:'paud', width:12 }, { header:'SD', key:'sd', width:12 }, { header:'SMP', key:'smp', width:12 }, { header:'SMA/SMK', key:'sma', width:15 }, { header:'SLB', key:'slb', width:12 }, { header:'NON FORMAL', key:'nf', width:15 });
-    } else if (activeJenjang === 'SD') {
-       cols.push({ header:'Kelas 1', key:'k1', width:12 }, { header:'Kelas 2', key:'k2', width:12 }, { header:'Kelas 3', key:'k3', width:12 }, { header:'Kelas 4', key:'k4', width:12 }, { header:'Kelas 5', key:'k5', width:12 }, { header:'Kelas 6', key:'k6', width:12 });
-    } else if (activeJenjang === 'SMP') {
-       cols.push({ header:'Kelas 7', key:'k7', width:15 }, { header:'Kelas 8', key:'k8', width:15 }, { header:'Kelas 9', key:'k9', width:15 });
-    } else if (activeJenjang === 'SMA/SMK') {
-       cols.push({ header:'Kelas 10', key:'k10', width:15 }, { header:'Kelas 11', key:'k11', width:15 }, { header:'Kelas 12', key:'k12', width:15 });
-    } else {
-       cols.push({ header:'Negeri', key:'negeri', width:15 }, { header:'Swasta', key:'swasta', width:15 });
-    }
-    cols.push({ header: 'Total PD', key: 'total', width: 15 });
-    return cols;
-  };
-
   const downloadExcelRincian = async () => {
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet(`Rincian PD ${initialWilayah}`);
+    const sheetName = isModeSemua ? 'Rekap Provinsi' : `Rekap ${filterWilayah}`;
+    const worksheet = workbook.addWorksheet(sheetName);
 
-    worksheet.columns = getExcelColumns();
+    worksheet.columns = [
+      { header: isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan', key: 'namaWilayah', width: 30 },
+      ...JENJANG_KEYS.map(k => ({ header: k, key: k, width: 15 })),
+      { header: 'Total PD', key: 'total', width: 15 },
+    ];
+
     processedData.forEach(item => worksheet.addRow(item));
 
-    const totalRowData = { kecamatan: 'TOTAL KESELURUHAN', ...columnTotals };
+    const totalRowData = { namaWilayah: 'TOTAL KESELURUHAN', total: columnTotals.total };
+    JENJANG_KEYS.forEach(k => totalRowData[k] = columnTotals[k]);
     const totalRow = worksheet.addRow(totalRowData);
 
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
-    totalRow.font = { bold: true, color: { argb: 'FF1E3A8A' } };
-    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0891B2' } }; // Teal 600
+    
+    totalRow.font = { bold: true, color: { argb: 'FF164E63' } };
+    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCFBF1' } };
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Rincian_PD_${activeJenjang.replace('/', '-')}_${initialWilayah}.xlsx`;
+    link.download = `Rekap_PD_${isModeSemua ? 'Provinsi' : filterWilayah}_${filterStatus}.xlsx`;
     link.click();
-  };
-
-  const renderTableHeaders = () => {
-    if (activeJenjang === 'SEMUA') {
-      return (
-        <>
-          <th className="px-2 py-3 text-blue-700">PAUD</th><th className="px-2 py-3 text-blue-700">SD</th>
-          <th className="px-2 py-3 text-blue-700">SMP</th><th className="px-2 py-3 text-blue-700">SMA/SMK</th>
-          <th className="px-2 py-3 text-blue-700">SLB (Inklusif)</th><th className="px-2 py-3 text-blue-700">NON FORMAL</th>
-        </>
-      );
-    }
-    if (activeJenjang === 'SD') {
-      return (
-        <>
-          <th className="px-2 py-3 text-blue-700">Kls 1</th><th className="px-2 py-3 text-blue-700">Kls 2</th>
-          <th className="px-2 py-3 text-blue-700">Kls 3</th><th className="px-2 py-3 text-blue-700">Kls 4</th>
-          <th className="px-2 py-3 text-blue-700">Kls 5</th><th className="px-2 py-3 text-blue-700">Kls 6</th>
-        </>
-      );
-    }
-    if (activeJenjang === 'SMP') {
-      return (
-        <><th className="px-4 py-3 text-blue-700">Kelas 7</th><th className="px-4 py-3 text-blue-700">Kelas 8</th><th className="px-4 py-3 text-blue-700">Kelas 9</th></>
-      );
-    }
-    if (activeJenjang === 'SMA/SMK') {
-      return (
-        <><th className="px-4 py-3 text-blue-700">Kelas 10</th><th className="px-4 py-3 text-blue-700">Kelas 11</th><th className="px-4 py-3 text-blue-700">Kelas 12</th></>
-      );
-    }
-    return (
-      <><th className="px-4 py-3 text-blue-600">Negeri</th><th className="px-4 py-3 text-orange-600">Swasta</th></>
-    );
-  };
-
-  const renderTableData = (row) => {
-    const tdClass = "px-2 py-3 font-bold text-gray-600 text-sm border-y border-gray-100 bg-blue-50/10";
-    if (activeJenjang === 'SEMUA') {
-      return (
-        <>
-          <td className={tdClass}>{row.paud.toLocaleString()}</td><td className={tdClass}>{row.sd.toLocaleString()}</td>
-          <td className={tdClass}>{row.smp.toLocaleString()}</td><td className={tdClass}>{row.sma.toLocaleString()}</td>
-          <td className={tdClass}>{row.slb.toLocaleString()}</td><td className={tdClass}>{row.nf.toLocaleString()}</td>
-        </>
-      );
-    }
-    if (activeJenjang === 'SD') {
-      return (
-        <>
-          <td className={tdClass}>{row.k1.toLocaleString()}</td><td className={tdClass}>{row.k2.toLocaleString()}</td>
-          <td className={tdClass}>{row.k3.toLocaleString()}</td><td className={tdClass}>{row.k4.toLocaleString()}</td>
-          <td className={tdClass}>{row.k5.toLocaleString()}</td><td className={tdClass}>{row.k6.toLocaleString()}</td>
-        </>
-      );
-    }
-    if (activeJenjang === 'SMP') {
-      return (
-        <><td className={tdClass}>{row.k7.toLocaleString()}</td><td className={tdClass}>{row.k8.toLocaleString()}</td><td className={tdClass}>{row.k9.toLocaleString()}</td></>
-      );
-    }
-    if (activeJenjang === 'SMA/SMK') {
-      return (
-        <><td className={tdClass}>{row.k10.toLocaleString()}</td><td className={tdClass}>{row.k11.toLocaleString()}</td><td className={tdClass}>{row.k12.toLocaleString()}</td></>
-      );
-    }
-    return (
-      <>
-        <td className="px-4 py-3 font-black text-blue-600 text-sm border-y border-gray-100 bg-blue-50/10">{row.negeri.toLocaleString()}</td>
-        <td className="px-4 py-3 font-black text-orange-600 text-sm border-y border-gray-100 bg-orange-50/10">{row.swasta.toLocaleString()}</td>
-      </>
-    );
-  };
-
-  const renderTableFooter = () => {
-    const tdClass = "px-2 py-4 text-blue-800 border-y border-blue-200";
-    if (activeJenjang === 'SEMUA') {
-      return (
-        <>
-          <td className={tdClass}>{columnTotals.paud.toLocaleString()}</td><td className={tdClass}>{columnTotals.sd.toLocaleString()}</td>
-          <td className={tdClass}>{columnTotals.smp.toLocaleString()}</td><td className={tdClass}>{columnTotals.sma.toLocaleString()}</td>
-          <td className={tdClass}>{columnTotals.slb.toLocaleString()}</td><td className={tdClass}>{columnTotals.nf.toLocaleString()}</td>
-        </>
-      );
-    }
-    if (activeJenjang === 'SD') {
-      return (
-        <>
-          <td className={tdClass}>{columnTotals.k1.toLocaleString()}</td><td className={tdClass}>{columnTotals.k2.toLocaleString()}</td>
-          <td className={tdClass}>{columnTotals.k3.toLocaleString()}</td><td className={tdClass}>{columnTotals.k4.toLocaleString()}</td>
-          <td className={tdClass}>{columnTotals.k5.toLocaleString()}</td><td className={tdClass}>{columnTotals.k6.toLocaleString()}</td>
-        </>
-      );
-    }
-    if (activeJenjang === 'SMP') {
-      return (
-        <><td className={tdClass}>{columnTotals.k7.toLocaleString()}</td><td className={tdClass}>{columnTotals.k8.toLocaleString()}</td><td className={tdClass}>{columnTotals.k9.toLocaleString()}</td></>
-      );
-    }
-    if (activeJenjang === 'SMA/SMK') {
-      return (
-        <><td className={tdClass}>{columnTotals.k10.toLocaleString()}</td><td className={tdClass}>{columnTotals.k11.toLocaleString()}</td><td className={tdClass}>{columnTotals.k12.toLocaleString()}</td></>
-      );
-    }
-    return (
-      <>
-        <td className="px-4 py-4 text-blue-700 border-y border-blue-200">{columnTotals.negeri.toLocaleString()}</td>
-        <td className="px-4 py-4 text-orange-700 border-y border-blue-200">{columnTotals.swasta.toLocaleString()}</td>
-      </>
-    );
   };
 
   const totalPages = Math.ceil(processedData.length / rowsPerPage) || 1;
   const startIndex = (currentPage - 1) * rowsPerPage;
   const currentRows = processedData.slice(startIndex, startIndex + rowsPerPage);
+  
+  const goToPage = (page) => {
+    if (page >= 1 && page <= totalPages) {
+      setCurrentPage(page);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -368,13 +337,16 @@ const DapodikPesertaDidikModal = ({ isOpen, onClose, data, activeJenjang, initia
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onClose}>
       <div className="bg-white w-full max-w-6xl h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-300" onClick={e => e.stopPropagation()}>
         
-        <div className="bg-blue-700 px-6 py-5 flex items-center justify-between shrink-0">
+        <div className="bg-cyan-700 px-6 py-5 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3 text-white">
             <div className="bg-white/20 p-2 rounded-xl"><GraduationCap size={24} /></div>
             <div>
-              <h2 className="text-xl font-black uppercase tracking-tighter leading-none">Rincian Peserta Didik</h2>
-              <p className="text-blue-200 text-sm font-bold uppercase tracking-widest mt-1">
-                {isModeSemuaWilayah ? 'Provinsi Kalimantan Barat' : `Kab. ${initialWilayah}`} • Jenjang {activeJenjang}
+              <h2 className="text-xl font-black uppercase tracking-tighter leading-none">
+                Rincian {isModeSemua ? 'Wilayah Provinsi' : 'Kecamatan'}
+              </h2>
+              {/* Teks Kab. sudah dihilangkan agar tidak double */}
+              <p className="text-cyan-100 text-sm font-bold uppercase tracking-widest mt-1">
+                {isModeSemua ? 'Semua Kabupaten' : filterWilayah}
               </p>
             </div>
           </div>
@@ -389,35 +361,28 @@ const DapodikPesertaDidikModal = ({ isOpen, onClose, data, activeJenjang, initia
         </div>
 
         <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex flex-wrap gap-4 items-center shrink-0">
-          <div className="relative flex-1 min-w-[200px]">
+          <div className="relative flex-1 min-w-[250px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input 
-              type="text" placeholder="Cari Nama Kecamatan..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 font-bold text-gray-700 text-sm"
+              type="text" placeholder={`Cari Nama ${isModeSemua ? 'Kabupaten' : 'Kecamatan'}...`} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-gray-200 outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200 font-bold text-gray-700"
             />
           </div>
-          
-          {needsStatusFilter && (
-            <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
-              <Building2 size={16} className="text-gray-400 mr-2" />
-              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer">
-                <option value="SEMUA">Semua Status</option>
-                <option value="NEGERI">Negeri</option>
-                <option value="SWASTA">Swasta</option>
-              </select>
-            </div>
-          )}
-
-          {needsGenderFilter && (
-            <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
-              <Users size={16} className="text-gray-400 mr-2" />
-              <select value={filterGender} onChange={(e) => setFilterGender(e.target.value)} className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer">
-                <option value="SEMUA">Semua Gender</option>
-                <option value="L">Laki-Laki</option>
-                <option value="P">Perempuan</option>
-              </select>
-            </div>
-          )}
+          <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
+            <MapPin size={16} className="text-gray-400 mr-2" />
+            <select value={filterWilayah} onChange={(e) => setFilterWilayah(e.target.value)} className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[150px]">
+              <option value="SEMUA">Semua Wilayah</option>
+              {listKabupaten.map(k => <option key={k} value={k}>{k}</option>)}
+            </select>
+          </div>
+          <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
+            <Building2 size={16} className="text-gray-400 mr-2" />
+            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer">
+              <option value="SEMUA">Semua Status</option>
+              <option value="NEGERI">Negeri</option>
+              <option value="SWASTA">Swasta</option>
+            </select>
+          </div>
         </div>
 
         <div className="flex-1 overflow-auto bg-white p-4">
@@ -425,8 +390,10 @@ const DapodikPesertaDidikModal = ({ isOpen, onClose, data, activeJenjang, initia
             <thead className="sticky top-0 bg-white z-10 shadow-sm rounded-xl">
               <tr className="text-[10px] font-black uppercase text-gray-500">
                 <th className="px-4 py-3 text-center rounded-l-xl w-16">No</th>
-                <th className="px-4 py-3 text-left">Kecamatan</th>
-                {renderTableHeaders()}
+                <th className="px-4 py-3 text-left">{isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan'}</th>
+                {JENJANG_KEYS.map(k => (
+                  <th key={k} className="px-2 py-3 text-cyan-700 whitespace-nowrap">{k}</th>
+                ))}
                 <th className="px-4 py-3 rounded-r-xl text-gray-800">Total PD</th>
               </tr>
             </thead>
@@ -435,11 +402,14 @@ const DapodikPesertaDidikModal = ({ isOpen, onClose, data, activeJenjang, initia
                 <tr key={idx} className="bg-white shadow-sm hover:shadow-md hover:scale-[1.01] transition-all group">
                   <td className="px-4 py-3 text-center font-bold text-gray-400 text-xs rounded-l-2xl border-y border-l border-gray-100">{startIndex + idx + 1}</td>
                   <td className="px-4 py-3 font-black text-gray-800 text-sm uppercase text-left border-y border-gray-100 whitespace-nowrap">
-                    {row.kecamatan}
-                    <div className="text-[10px] font-bold text-gray-400 mt-0.5">{row.kabupaten}</div>
+                    {row.namaWilayah}
                   </td>
-                  {renderTableData(row)}
-                  <td className="px-4 py-3 font-black text-blue-800 text-base border-y border-r border-gray-100 bg-blue-50/50 rounded-r-2xl">
+                  {JENJANG_KEYS.map(k => (
+                    <td key={k} className="px-2 py-3 font-bold text-gray-600 text-sm border-y border-gray-100 bg-cyan-50/10">
+                      {row[k].toLocaleString()}
+                    </td>
+                  ))}
+                  <td className="px-4 py-3 font-black text-cyan-800 text-base border-y border-r border-gray-100 bg-cyan-50/50 rounded-r-2xl">
                     {row.total.toLocaleString()}
                   </td>
                 </tr>
@@ -447,18 +417,23 @@ const DapodikPesertaDidikModal = ({ isOpen, onClose, data, activeJenjang, initia
             </tbody>
             {processedData.length > 0 && (
               <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
-                <tr className="bg-blue-100 text-center font-black uppercase text-xs border-t-2 border-blue-200">
-                  <td colSpan="2" className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-blue-200 text-blue-900">
-                    TOTAL {isModeSemuaWilayah ? 'PROVINSI' : 'KECAMATAN'}
+                <tr className="bg-cyan-100 text-center font-black uppercase text-xs border-t-2 border-cyan-200">
+                  <td colSpan="2" className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-cyan-200 text-cyan-900">
+                    TOTAL {isModeSemua ? 'KESELURUHAN' : 'KECAMATAN'}
                   </td>
-                  {renderTableFooter()}
-                  <td className="px-4 py-4 text-blue-900 text-base border-y border-r border-blue-200 rounded-r-2xl">
+                  {JENJANG_KEYS.map(k => (
+                    <td key={k} className="px-2 py-4 text-cyan-800 border-y border-cyan-200">
+                      {columnTotals[k].toLocaleString()}
+                    </td>
+                  ))}
+                  <td className="px-4 py-4 text-cyan-900 text-base border-y border-r border-cyan-200 rounded-r-2xl">
                     {columnTotals.total.toLocaleString()}
                   </td>
                 </tr>
               </tfoot>
             )}
           </table>
+          
           {processedData.length === 0 && (
              <div className="py-20 flex flex-col items-center opacity-30 text-gray-500">
                <Search size={64} className="mb-4" />
@@ -469,12 +444,12 @@ const DapodikPesertaDidikModal = ({ isOpen, onClose, data, activeJenjang, initia
 
         <div className="bg-gray-50 p-4 border-t border-gray-200 flex items-center justify-between shrink-0 rounded-b-3xl">
           <p className="text-xs font-bold text-gray-500">
-            Menampilkan <span className="text-gray-800">{processedData.length === 0 ? 0 : startIndex + 1}</span> - <span className="text-gray-800">{Math.min(startIndex + rowsPerPage, processedData.length)}</span> dari <span className="text-blue-700 font-black">{processedData.length}</span> baris
+            Menampilkan <span className="text-gray-800">{processedData.length === 0 ? 0 : startIndex + 1}</span> - <span className="text-gray-800">{Math.min(startIndex + rowsPerPage, processedData.length)}</span> dari <span className="text-cyan-700 font-black">{processedData.length}</span> baris
           </p>
           <div className="flex items-center gap-2">
-            <button disabled={currentPage === 1} onClick={() => goToPage(currentPage - 1)} className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-blue-50 disabled:opacity-50"><ChevronLeft size={16} /></button>
+            <button disabled={currentPage === 1} onClick={() => goToPage(currentPage - 1)} className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-cyan-50 disabled:opacity-50"><ChevronLeft size={16} /></button>
             <span className="text-xs font-black text-gray-600 px-2">Hal {currentPage} / {totalPages}</span>
-            <button disabled={currentPage === totalPages || totalPages === 0} onClick={() => goToPage(currentPage + 1)} className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-blue-50 disabled:opacity-50"><ChevronRight size={16} /></button>
+            <button disabled={currentPage === totalPages || totalPages === 0} onClick={() => goToPage(currentPage + 1)} className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-cyan-50 disabled:opacity-50"><ChevronRight size={16} /></button>
           </div>
         </div>
 
@@ -484,339 +459,184 @@ const DapodikPesertaDidikModal = ({ isOpen, onClose, data, activeJenjang, initia
   );
 };
 
+
 // =====================================================================
 // MAIN COMPONENT: DAPODIK PESERTA DIDIK
 // =====================================================================
-export default function DapodikPesertaDidik({ data = [], selectedYear = '2026' }) {
+export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', lastUpdatedDate }) {
   const [activeTab, setActiveTab] = useState('SEMUA'); 
-  const [subTab, setSubTab] = useState('SEMUA'); 
   
+  // Modal State
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedWilayah, setSelectedWilayah] = useState('SEMUA');
 
-  useEffect(() => { setSubTab('SEMUA'); }, [activeTab]);
+  // Menangkap tanggal update (Jika tidak ada props, gunakan fallback)
+  const displayLastUpdated = lastUpdatedDate || 'Sesuai Database Terkini';
 
+  // 1. Ekstrak daftar unik Kabupaten
+  const listKabupaten = useMemo(() => {
+    const unik = [...new Set(data.map(item => String(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota') || '').trim().toUpperCase()))];
+    return unik.filter(k => k !== '').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
+  }, [data]);
+
+  // 2. Mesin Agregasi Utama
   const aggregatedData = useMemo(() => {
     const validJenjangList = JENJANG_GROUPS[activeTab];
-    const isModeKelas = ['SD', 'SMP', 'SMA/SMK'].includes(activeTab);
 
-    const mapAgg = new Map();
-    KABUPATEN_LIST.forEach(kab => {
-      mapAgg.set(kab, { 
-        wilayah: kab, 
-        paud:0, sd:0, smp:0, sma:0, slb:0, nf:0,
-        negeri:0, swasta:0,
-        t1:0, t2:0, t3:0, t4:0, t5:0, t6:0, 
-        t7:0, t8:0, t9:0, t10:0, t11:0, t12:0, 
-        pd_total:0 
-      });
+    const filteredData = data.filter(item => {
+      if (activeTab === 'SEMUA') return true;
+      const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+      return validJenjangList.includes(jenjangDb);
     });
 
-    data.forEach(sekolah => {
-       const group = identifyJenjangGroup(getVal(sekolah, 'bentuk_pendidikan') || getVal(sekolah, 'jenjang'));
-       if (!group) return;
+    const mapAgg = new Map();
+    listKabupaten.forEach(kab => {
+      mapAgg.set(kab, { wilayah: kab, negeri: 0, swasta: 0, total: 0 });
+    });
 
-       if (activeTab !== 'SEMUA' && group !== activeTab) return;
-
-       const status = String(getVal(sekolah, 'status_sekolah') || '').trim().toUpperCase();
-       if (isModeKelas && subTab !== 'SEMUA' && status !== subTab) return;
-
-       const kab = cleanKabupatenName(getVal(sekolah, 'kabupaten') || getVal(sekolah, 'Kabupaten/Kota'));
-       if (!mapAgg.has(kab)) return; 
+    filteredData.forEach(item => {
+       const kab = String(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+       
+       if (!mapAgg.has(kab)) {
+           mapAgg.set(kab, { wilayah: kab, negeri: 0, swasta: 0, total: 0 });
+       }
 
        const row = mapAgg.get(kab);
-       const getNumCol = (k) => parseInt(getVal(sekolah, k)) || 0;
+       const status = String(getVal(item, 'status_sekolah') || '').trim().toUpperCase();
        
-       const pdL = getNumCol('pd_l');
-       const pdP = getNumCol('pd_p');
-       const pdTotal = getNumCol('pd_total') || (pdL + pdP);
-
-       const k1 = getNumCol('t1_l') + getNumCol('t1_p');
-       const k2 = getNumCol('t2_l') + getNumCol('t2_p');
-       const k3 = getNumCol('t3_l') + getNumCol('t3_p');
-       const k4 = getNumCol('t4_l') + getNumCol('t4_p');
-       const k5 = getNumCol('t5_l') + getNumCol('t5_p');
-       const k6 = getNumCol('t6_l') + getNumCol('t6_p');
-       const k7 = getNumCol('t7_l') + getNumCol('t7_p');
-       const k8 = getNumCol('t8_l') + getNumCol('t8_p');
-       const k9 = getNumCol('t9_l') + getNumCol('t9_p');
-       const k10 = getNumCol('t10_l') + getNumCol('t10_p');
-       const k11 = getNumCol('t11_l') + getNumCol('t11_p');
-       const k12 = getNumCol('t12_l') + getNumCol('t12_p');
-
-       if (activeTab === 'SEMUA') {
-           if (group === 'PAUD') row.paud += pdTotal;
-           else if (group === 'SD') row.sd += pdTotal;
-           else if (group === 'SMP') row.smp += pdTotal;
-           else if (group === 'SMA/SMK') row.sma += pdTotal;
-           else if (group === 'SLB (Inklusif)') row.slb += pdTotal;
-           else if (group === 'NON FORMAL') row.nf += pdTotal;
-           row.pd_total += pdTotal;
-       } 
-       else if (isModeKelas) {
-           if (activeTab === 'SD') {
-               row.t1 += k1; row.t2 += k2; row.t3 += k3; row.t4 += k4; row.t5 += k5; row.t6 += k6;
-               row.pd_total += (k1+k2+k3+k4+k5+k6);
-           } else if (activeTab === 'SMP') {
-               row.t7 += k7; row.t8 += k8; row.t9 += k9;
-               row.pd_total += (k7+k8+k9);
-           } else if (activeTab === 'SMA/SMK') {
-               row.t10 += k10; row.t11 += k11; row.t12 += k12;
-               row.pd_total += (k10+k11+k12);
-           }
-       } 
-       else {
-           if (status === 'NEGERI') row.negeri += pdTotal;
-           else row.swasta += pdTotal;
-           row.pd_total += pdTotal;
+       // Logika perhitungan total PD
+       let pd = parseInt(getVal(item, 'pd_total'));
+       if (isNaN(pd)) {
+           let sum = 0;
+           const keys = ['tka_l','tka_p','tkb_l','tkb_p','t1_l','t1_p','t2_l','t2_p','t3_l','t3_p','t4_l','t4_p','t5_l','t5_p','t6_l','t6_p','t7_l','t7_p','t8_l','t8_p','t9_l','t9_p','t10_l','t10_p','t11_l','t11_p','t12_l','t12_p','t13_l','t13_p','paket_a_l','paket_a_p','paket_b_l','paket_b_p','paket_c_l','paket_c_p'];
+           keys.forEach(k => { sum += (parseInt(getVal(item, k)) || 0); });
+           pd = sum;
        }
+       
+       if (status === 'NEGERI') row.negeri += pd;
+       else if (status === 'SWASTA') row.swasta += pd;
+       else row.swasta += pd; 
+       
+       row.total += pd;
     });
 
     return Array.from(mapAgg.values()).sort((a, b) => getKabupatenRank(a.wilayah) - getKabupatenRank(b.wilayah));
-  }, [data, activeTab, subTab]);
+  }, [data, activeTab, listKabupaten]);
 
+  // 3. Hitung Grand Total & Data Chart
   const grandTotals = useMemo(() => {
-    const res = { 
-      paud:0, sd:0, smp:0, sma:0, slb:0, nf:0, 
-      t1:0, t2:0, t3:0, t4:0, t5:0, t6:0, t7:0, t8:0, t9:0, t10:0, t11:0, t12:0, 
-      negeri:0, swasta:0, pd_total:0 
-    };
-    aggregatedData.forEach(curr => {
-      Object.keys(res).forEach(k => res[k] += curr[k]);
-    });
-    return res;
+    return aggregatedData.reduce((acc, curr) => {
+      acc.negeri += curr.negeri;
+      acc.swasta += curr.swasta;
+      acc.total += curr.total;
+      return acc;
+    }, { negeri: 0, swasta: 0, total: 0 });
   }, [aggregatedData]);
 
-  const getExcelColumns = () => {
-    let cols = [{ header: 'Wilayah (Kabupaten/Kota)', key: 'wilayah', width: 30 }];
-    
-    if (activeTab === 'SEMUA') {
-       cols.push({ header:'PAUD', key:'paud', width:12 }, { header:'SD', key:'sd', width:12 }, { header:'SMP', key:'smp', width:12 }, { header:'SMA/SMK', key:'sma', width:15 }, { header:'SLB', key:'slb', width:12 }, { header:'NON FORMAL', key:'nf', width:15 });
-    } else if (activeTab === 'SD') {
-       cols.push({ header: 'Kelas 1', key: 't1', width: 12 }, { header: 'Kelas 2', key: 't2', width: 12 }, { header: 'Kelas 3', key: 't3', width: 12 }, { header: 'Kelas 4', key: 't4', width: 12 }, { header: 'Kelas 5', key: 't5', width: 12 }, { header: 'Kelas 6', key: 't6', width: 12 });
-    } else if (activeTab === 'SMP') {
-       cols.push({ header: 'Kelas 7', key: 't7', width: 15 }, { header: 'Kelas 8', key: 't8', width: 15 }, { header: 'Kelas 9', key: 't9', width: 15 });
-    } else if (activeTab === 'SMA/SMK') {
-       cols.push({ header: 'Kelas 10', key: 't10', width: 15 }, { header: 'Kelas 11', key: 't11', width: 15 }, { header: 'Kelas 12', key: 't12', width: 15 });
-    } else {
-       cols.push({ header: 'Negeri', key: 'negeri', width: 15 }, { header: 'Swasta', key: 'swasta', width: 15 });
-    }
-    cols.push({ header: 'Total PD', key: 'pd_total', width: 15 });
-    return cols;
-  };
+  // Data Pie Chart
+  const pieSegments = [
+    { name: 'Negeri', value: grandTotals.negeri, color: '#0284c7' }, // Cyan 600
+    { name: 'Swasta', value: grandTotals.swasta, color: '#f97316' }  // Orange 500
+  ];
 
+  const percentNegeri = grandTotals.total > 0 ? ((grandTotals.negeri / grandTotals.total) * 100).toFixed(1) : 0;
+  const percentSwasta = grandTotals.total > 0 ? ((grandTotals.swasta / grandTotals.total) * 100).toFixed(1) : 0;
+
+  // 4. Unduh Excel Tabel
   const downloadExcel = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheetTitle = activeTab === 'SEMUA' ? 'Semua Jenjang' : activeTab.replace('/', '-'); 
-    const worksheet = workbook.addWorksheet(`Rekap PD ${worksheetTitle}`);
+    const worksheet = workbook.addWorksheet(`Rekap ${worksheetTitle}`);
 
-    worksheet.columns = getExcelColumns();
+    worksheet.columns = [
+      { header: 'Wilayah (Kabupaten/Kota)', key: 'wilayah', width: 30 },
+      { header: 'Negeri', key: 'negeri', width: 15 },
+      { header: 'Swasta', key: 'swasta', width: 15 },
+      { header: 'Jumlah Peserta Didik', key: 'total', width: 25 },
+    ];
+
     aggregatedData.forEach(item => worksheet.addRow(item));
 
-    const totalRowData = { wilayah: 'TOTAL KESELURUHAN', ...grandTotals };
-    const totalRow = worksheet.addRow(totalRowData);
+    const totalRow = worksheet.addRow({
+      wilayah: 'TOTAL KESELURUHAN',
+      negeri: grandTotals.negeri,
+      swasta: grandTotals.swasta,
+      total: grandTotals.total
+    });
 
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
-    totalRow.font = { bold: true, color: { argb: 'FF1E3A8A' } };
-    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0891B2' } };
+    totalRow.font = { bold: true, color: { argb: 'FF164E63' } };
+    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCFBF1' } };
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Rekap_PD_${activeTab === 'SEMUA' ? 'Keseluruhan' : activeTab.replace('/', '-')}_${selectedYear}.xlsx`;
+    link.download = `Rekap_Peserta_Didik_${activeTab === 'SEMUA' ? 'Keseluruhan' : activeTab.replace('/', '-')}_${selectedYear}.xlsx`;
     link.click();
   };
 
-  const renderTableHeaders = () => {
-    if (activeTab === 'SEMUA') {
-      return (
-        <>
-          <th className="px-2 py-3 text-blue-700">PAUD</th><th className="px-2 py-3 text-blue-700">SD</th>
-          <th className="px-2 py-3 text-blue-700">SMP</th><th className="px-2 py-3 text-blue-700">SMA/SMK</th>
-          <th className="px-2 py-3 text-blue-700">SLB (Inklusif)</th><th className="px-2 py-3 text-blue-700">NON FORMAL</th>
-        </>
-      );
-    }
-    if (activeTab === 'SD') {
-      return (
-        <>
-          <th className="px-2 py-3 text-blue-700">Kls 1</th><th className="px-2 py-3 text-blue-700">Kls 2</th>
-          <th className="px-2 py-3 text-blue-700">Kls 3</th><th className="px-2 py-3 text-blue-700">Kls 4</th>
-          <th className="px-2 py-3 text-blue-700">Kls 5</th><th className="px-2 py-3 text-blue-700">Kls 6</th>
-        </>
-      );
-    }
-    if (activeTab === 'SMP') {
-      return (
-        <><th className="px-4 py-3 text-blue-700">Kelas 7</th><th className="px-4 py-3 text-blue-700">Kelas 8</th><th className="px-4 py-3 text-blue-700">Kelas 9</th></>
-      );
-    }
-    if (activeTab === 'SMA/SMK') {
-      return (
-        <><th className="px-4 py-3 text-blue-700">Kelas 10</th><th className="px-4 py-3 text-blue-700">Kelas 11</th><th className="px-4 py-3 text-blue-700">Kelas 12</th></>
-      );
-    }
-    return (
-      <><th className="px-4 py-3 text-blue-600">Negeri</th><th className="px-4 py-3 text-orange-600">Swasta</th></>
-    );
-  };
-
-  const renderTableData = (row) => {
-    const tdClass = "px-2 py-3 font-bold text-gray-600 text-sm border-y border-gray-100 bg-blue-50/10";
-    if (activeTab === 'SEMUA') {
-      return (
-        <>
-          <td className={tdClass}>{row.paud.toLocaleString()}</td><td className={tdClass}>{row.sd.toLocaleString()}</td>
-          <td className={tdClass}>{row.smp.toLocaleString()}</td><td className={tdClass}>{row.sma.toLocaleString()}</td>
-          <td className={tdClass}>{row.slb.toLocaleString()}</td><td className={tdClass}>{row.nf.toLocaleString()}</td>
-        </>
-      );
-    }
-    if (activeTab === 'SD') {
-      return (
-        <>
-          <td className={tdClass}>{row.t1.toLocaleString()}</td><td className={tdClass}>{row.t2.toLocaleString()}</td>
-          <td className={tdClass}>{row.t3.toLocaleString()}</td><td className={tdClass}>{row.t4.toLocaleString()}</td>
-          <td className={tdClass}>{row.t5.toLocaleString()}</td><td className={tdClass}>{row.t6.toLocaleString()}</td>
-        </>
-      );
-    }
-    if (activeTab === 'SMP') {
-      return (
-        <><td className={tdClass}>{row.t7.toLocaleString()}</td><td className={tdClass}>{row.t8.toLocaleString()}</td><td className={tdClass}>{row.t9.toLocaleString()}</td></>
-      );
-    }
-    if (activeTab === 'SMA/SMK') {
-      return (
-        <><td className={tdClass}>{row.t10.toLocaleString()}</td><td className={tdClass}>{row.t11.toLocaleString()}</td><td className={tdClass}>{row.t12.toLocaleString()}</td></>
-      );
-    }
-    return (
-      <>
-        <td className="px-4 py-3 font-black text-blue-600 text-sm border-y border-gray-100 bg-blue-50/10">{row.negeri.toLocaleString()}</td>
-        <td className="px-4 py-3 font-black text-orange-600 text-sm border-y border-gray-100 bg-orange-50/10">{row.swasta.toLocaleString()}</td>
-      </>
-    );
-  };
-
-  const renderTableFooter = () => {
-    const tdClass = "px-2 py-4 text-blue-800 border-y border-blue-200";
-    if (activeTab === 'SEMUA') {
-      return (
-        <>
-          <td className={tdClass}>{grandTotals.paud.toLocaleString()}</td><td className={tdClass}>{grandTotals.sd.toLocaleString()}</td>
-          <td className={tdClass}>{grandTotals.smp.toLocaleString()}</td><td className={tdClass}>{grandTotals.sma.toLocaleString()}</td>
-          <td className={tdClass}>{grandTotals.slb.toLocaleString()}</td><td className={tdClass}>{grandTotals.nf.toLocaleString()}</td>
-        </>
-      );
-    }
-    if (activeTab === 'SD') {
-      return (
-        <>
-          <td className={tdClass}>{grandTotals.t1.toLocaleString()}</td><td className={tdClass}>{grandTotals.t2.toLocaleString()}</td>
-          <td className={tdClass}>{grandTotals.t3.toLocaleString()}</td><td className={tdClass}>{grandTotals.t4.toLocaleString()}</td>
-          <td className={tdClass}>{grandTotals.t5.toLocaleString()}</td><td className={tdClass}>{grandTotals.t6.toLocaleString()}</td>
-        </>
-      );
-    }
-    if (activeTab === 'SMP') {
-      return (
-        <><td className={tdClass}>{grandTotals.t7.toLocaleString()}</td><td className={tdClass}>{grandTotals.t8.toLocaleString()}</td><td className={tdClass}>{grandTotals.t9.toLocaleString()}</td></>
-      );
-    }
-    if (activeTab === 'SMA/SMK') {
-      return (
-        <><td className={tdClass}>{grandTotals.t10.toLocaleString()}</td><td className={tdClass}>{grandTotals.t11.toLocaleString()}</td><td className={tdClass}>{grandTotals.t12.toLocaleString()}</td></>
-      );
-    }
-    return (
-      <>
-        <td className="px-4 py-4 text-blue-700 border-y border-blue-200">{grandTotals.negeri.toLocaleString()}</td>
-        <td className="px-4 py-4 text-orange-700 border-y border-blue-200">{grandTotals.swasta.toLocaleString()}</td>
-      </>
-    );
+  const handleBukaRincian = (wilayah) => {
+    setSelectedWilayah(wilayah);
+    setModalOpen(true);
   };
 
   return (
     <div className="h-full flex flex-col animate-in fade-in duration-500">
       
       {/* 1. TABS HEADER */}
-      <div className="bg-white px-4 md:px-6 py-3 border-b border-gray-100 flex items-center justify-start gap-2 overflow-x-auto scrollbar-hide shadow-sm z-30 shrink-0">
-        <div className="flex items-center gap-2 bg-gray-100 p-1.5 rounded-2xl min-w-max">
+      <div className="bg-white px-4 md:px-6 py-3 border-b border-gray-100 flex items-center justify-between shrink-0 shadow-sm z-20 overflow-x-auto">
+        <div className="flex items-center gap-1.5 md:gap-2 bg-gray-100 p-1 md:p-1.5 rounded-xl md:rounded-2xl min-w-max">
           {Object.keys(JENJANG_GROUPS).map(tab => (
             <button 
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-3 md:px-6 py-2.5 rounded-xl font-black text-xs md:text-sm transition-all duration-300 whitespace-nowrap ${activeTab === tab ? 'bg-blue-600 text-white shadow-md scale-105' : 'text-gray-500 hover:bg-gray-200'}`}
+              className={`px-3 md:px-5 lg:px-6 py-2 rounded-lg md:rounded-xl font-black text-[10px] md:text-xs transition-all duration-300 whitespace-nowrap ${activeTab === tab ? 'bg-cyan-600 text-white shadow-md scale-[1.02]' : 'text-gray-500 hover:bg-gray-200'}`}
             >
               {tab}
             </button>
           ))}
         </div>
-      </div>
-
-      {/* 2. SUB-TABS & INFO */}
-      <div className="bg-gray-50/50 px-4 md:px-6 py-3 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3 shrink-0 z-20">
         
-        <div className="flex items-center flex-1 min-w-max">
-          {['SD', 'SMP', 'SMA/SMK'].includes(activeTab) && (
-             <div className="flex items-center gap-2 bg-white p-1 border border-gray-200 rounded-lg">
-               {['SEMUA', 'NEGERI', 'SWASTA'].map(st => (
-                  <button 
-                    key={st} onClick={() => setSubTab(st)}
-                    className={`px-3 md:px-4 py-1.5 rounded-md font-bold text-[10px] md:text-xs transition-all whitespace-nowrap ${subTab === st ? 'bg-blue-100 text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
-                  >
-                    {st === 'SEMUA' ? 'SEMUA STATUS' : st}
-                  </button>
-               ))}
-             </div>
-          )}
-
-          {['PAUD', 'NON FORMAL'].includes(activeTab) && (
-             <p className="text-[10px] md:text-xs font-bold text-blue-700 uppercase tracking-widest flex items-center gap-2">
-               <GraduationCap size={16} /> 
-               {activeTab === 'PAUD' ? 'Jenjang formal ini terdiri dari PAUD, KB, dan TK' : 'Jenjang non formal ini terdiri dari PKBM, TPA, SPS, dan SKB'}
-             </p>
-          )}
-        </div>
-
         <button 
           onClick={downloadExcel}
-          className="flex items-center gap-2 bg-white text-blue-700 hover:bg-blue-50 px-4 py-2 rounded-lg font-black uppercase text-[10px] shadow-sm border border-blue-200 transition-all active:scale-95 shrink-0"
+          className="flex items-center gap-2 bg-cyan-50 text-cyan-700 hover:bg-cyan-600 hover:text-white px-4 py-2 rounded-lg font-black uppercase text-[10px] md:text-xs shadow-sm border border-cyan-200 transition-all active:scale-95 shrink-0 ml-3 md:ml-4"
         >
-          <FileSpreadsheet size={14} /> Unduh Rekap
+          <FileSpreadsheet size={16} /> <span className="hidden sm:inline">Unduh Rekap</span><span className="sm:hidden">Unduh</span>
         </button>
       </div>
 
-      {/* 3. AREA KONTEN */}
-      <div className="flex-1 flex flex-col min-h-0 bg-gray-50/50 p-4 md:p-6">
-          <div className="bg-white rounded-3xl shadow-sm border border-gray-100 flex-1 flex flex-col overflow-hidden">
+      {/* 2. DUA KOLOM LAYOUT */}
+      <div className="flex-1 flex flex-col lg:flex-row min-h-0 bg-gray-50/50">
+        
+        {/* KOLOM KIRI: TABEL REKAPITULASI */}
+        <div className="flex-1 lg:w-2/3 p-4 md:p-6 flex flex-col min-h-0 overflow-hidden border-r border-gray-200">
+          <div className="bg-white rounded-3xl shadow-sm border border-gray-100 flex-1 flex flex-col overflow-hidden relative">
             <div className="flex-1 overflow-auto p-4">
               <table className="w-full text-center border-separate border-spacing-y-2">
-                <thead className="sticky top-0 bg-white z-10 shadow-sm rounded-xl">
-                  <tr className="text-[10px] font-black uppercase text-gray-500 bg-gray-50 border-b-2 border-gray-200">
-                    <th className="px-4 py-3 text-center rounded-l-xl w-16">No</th>
-                    <th className="px-4 py-3 text-left">Wilayah</th>
-                    {renderTableHeaders()}
-                    <th className="px-4 py-3 text-gray-800">Total PD</th>
+                <thead className="sticky top-0 bg-gray-50 z-10 shadow-sm rounded-xl">
+                  <tr className="text-[10px] font-black uppercase text-gray-500">
+                    <th className="px-4 py-3 text-left rounded-l-xl">Wilayah</th>
+                    <th className="px-4 py-3 text-cyan-600">Negeri</th>
+                    <th className="px-4 py-3 text-orange-600">Swasta</th>
+                    <th className="px-4 py-3 text-gray-800">Jumlah Peserta Didik</th>
                     <th className="px-4 py-3 rounded-r-xl">Aksi</th>
                   </tr>
                 </thead>
                 <tbody>
                   {aggregatedData.map((row, idx) => (
                     <tr key={idx} className="bg-white shadow-sm hover:shadow-md hover:scale-[1.01] transition-all group">
-                      <td className="px-4 py-3 text-center font-bold text-gray-400 text-xs rounded-l-2xl border-y border-l border-gray-100">{idx + 1}</td>
-                      <td className="px-4 py-3 font-black text-gray-800 uppercase text-left border-y border-gray-100 whitespace-nowrap">
+                      <td className="px-4 py-3 rounded-l-2xl font-black text-gray-800 uppercase text-left border-y border-l border-gray-100 whitespace-nowrap">
                         {row.wilayah}
                       </td>
-                      {renderTableData(row)}
-                      <td className="px-4 py-3 font-black text-gray-800 text-lg border-y border-gray-100 bg-gray-50/50">{row.pd_total.toLocaleString()}</td>
+                      <td className="px-4 py-3 font-black text-cyan-600 text-base border-y border-gray-100 bg-cyan-50/30">{row.negeri.toLocaleString()}</td>
+                      <td className="px-4 py-3 font-black text-orange-600 text-base border-y border-gray-100 bg-orange-50/30">{row.swasta.toLocaleString()}</td>
+                      <td className="px-4 py-3 font-black text-gray-800 text-lg border-y border-gray-100 bg-gray-50/50">{row.total.toLocaleString()}</td>
                       <td className="px-4 py-3 rounded-r-2xl border-y border-r border-gray-100">
                          <button 
-                            onClick={() => { setSelectedWilayah(row.wilayah); setModalOpen(true); }}
-                            className="flex items-center justify-center gap-2 bg-blue-50 text-blue-600 px-4 py-1.5 rounded-xl text-[10px] font-black uppercase hover:bg-blue-600 hover:text-white transition-colors mx-auto"
+                            onClick={() => handleBukaRincian(row.wilayah)}
+                            className="flex items-center justify-center gap-2 bg-cyan-50 text-cyan-600 px-4 py-1.5 rounded-xl text-[10px] font-black uppercase hover:bg-cyan-600 hover:text-white transition-colors mx-auto"
                          >
                            <Eye size={14} /> Rincian
                          </button>
@@ -825,25 +645,76 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026' }
                   ))}
                 </tbody>
                 <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
-                  <tr className="bg-blue-100 text-center font-black uppercase text-xs border-t-2 border-blue-200">
-                    <td colSpan="2" className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-blue-200 text-blue-900">
+                  <tr className="bg-cyan-50 text-center font-black uppercase text-sm border-t-2 border-cyan-200">
+                    <td className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-cyan-200 text-cyan-900">
                       TOTAL KALIMANTAN BARAT
                     </td>
-                    {renderTableFooter()}
-                    <td className="px-4 py-4 text-gray-900 border-y border-blue-200 text-lg bg-blue-200/50">{grandTotals.pd_total.toLocaleString()}</td>
-                    <td className="px-4 py-4 rounded-r-2xl border-y border-r border-blue-200">
+                    <td className="px-4 py-4 text-cyan-700 border-y border-cyan-200">{grandTotals.negeri.toLocaleString()}</td>
+                    <td className="px-4 py-4 text-orange-700 border-y border-cyan-200">{grandTotals.swasta.toLocaleString()}</td>
+                    <td className="px-4 py-4 text-gray-900 border-y border-cyan-200 text-lg bg-cyan-100/50">{grandTotals.total.toLocaleString()}</td>
+                    <td className="px-4 py-4 rounded-r-2xl border-y border-r border-cyan-200">
                        <button 
-                            onClick={() => { setSelectedWilayah('SEMUA'); setModalOpen(true); }}
-                            className="flex items-center justify-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-xl text-[10px] font-black uppercase hover:bg-blue-800 transition-colors mx-auto shadow-md"
+                            onClick={() => handleBukaRincian('SEMUA')}
+                            className="flex items-center justify-center gap-2 bg-cyan-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-cyan-800 transition-colors mx-auto shadow-md"
                          >
-                           <Search size={14} /> Semua
+                           <Search size={14} /> Rincian Semua
                          </button>
                     </td>
                   </tr>
                 </tfoot>
               </table>
+              {/* TEKS SUMBER UPDATE DAPODIK */}
+              <div className="mt-4 px-2 text-right text-xs font-bold italic text-gray-400 pb-2">
+                 Sumber : Data Dapodik Update Pada Tanggal : {displayLastUpdated}
+              </div>
             </div>
           </div>
+        </div>
+
+        {/* KOLOM KANAN: PREMIUM PIE CHART */}
+        <div className="lg:w-1/3 flex flex-col bg-white border-l border-gray-100 relative">
+          
+          <div className="text-center w-full px-4 pt-8 pb-4 shrink-0">
+            <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">Proporsi Peserta Didik</h2>
+            <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mt-1">
+              {activeTab === 'SEMUA' ? 'Semua Jenjang' : `Jenjang ${activeTab}`}
+            </p>
+          </div>
+
+          <div className="flex-1 flex items-center justify-center min-h-0 relative">
+             <PremiumPieChart segments={pieSegments} total={grandTotals.total} />
+          </div>
+
+          <div className="px-6 pb-8 pt-4 w-full flex flex-col gap-3 shrink-0">
+             <div className="flex items-center justify-between bg-cyan-50 p-4 rounded-2xl border border-cyan-100 transition-colors hover:bg-cyan-100">
+                <div className="flex items-center gap-3">
+                   <div className="w-4 h-4 rounded-full bg-cyan-600 shadow-inner"></div>
+                   <div className="flex flex-col">
+                     <span className="font-black text-sm text-cyan-900 uppercase">PD Sekolah Negeri</span>
+                   </div>
+                </div>
+                <div className="text-right">
+                   <span className="font-black text-xl text-cyan-700">{grandTotals.negeri.toLocaleString()}</span>
+                   <span className="ml-2 font-bold text-sm text-cyan-500">({percentNegeri}%)</span>
+                </div>
+             </div>
+             
+             <div className="flex items-center justify-between bg-orange-50 p-4 rounded-2xl border border-orange-100 transition-colors hover:bg-orange-100">
+                <div className="flex items-center gap-3">
+                   <div className="w-4 h-4 rounded-full bg-orange-500 shadow-inner"></div>
+                   <div className="flex flex-col">
+                     <span className="font-black text-sm text-orange-900 uppercase">PD Sekolah Swasta</span>
+                   </div>
+                </div>
+                <div className="text-right">
+                   <span className="font-black text-xl text-orange-600">{grandTotals.swasta.toLocaleString()}</span>
+                   <span className="ml-2 font-bold text-sm text-orange-400">({percentSwasta}%)</span>
+                </div>
+             </div>
+          </div>
+
+        </div>
+
       </div>
 
       {/* 3. MODAL COMPONENT */}
@@ -851,8 +722,8 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026' }
         isOpen={modalOpen} 
         onClose={() => setModalOpen(false)}
         data={data}
-        activeJenjang={activeTab}
         initialWilayah={selectedWilayah}
+        displayLastUpdated={displayLastUpdated}
       />
 
     </div>

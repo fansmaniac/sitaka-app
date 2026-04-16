@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Download, School, MapPin, Eye, FileSpreadsheet, 
-  Search, X, ChevronLeft, ChevronRight, Filter, Building2
+  Search, X, ChevronLeft, ChevronRight, Filter, Building2, Info
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
 
@@ -315,6 +315,12 @@ const DapodikSekolahModal = ({ isOpen, onClose, data, initialWilayah }) => {
   const totalPages = Math.ceil(processedData.length / rowsPerPage) || 1;
   const startIndex = (currentPage - 1) * rowsPerPage;
   const currentRows = processedData.slice(startIndex, startIndex + rowsPerPage);
+  
+  const goToPage = (page) => {
+    if (page >= 1 && page <= totalPages) {
+      setCurrentPage(page);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -329,8 +335,9 @@ const DapodikSekolahModal = ({ isOpen, onClose, data, initialWilayah }) => {
               <h2 className="text-xl font-black uppercase tracking-tighter leading-none">
                 Rincian {isModeSemua ? 'Wilayah Provinsi' : 'Kecamatan'}
               </h2>
+              {/* PERBAIKAN: Hapus kata 'Kab.' yang di-hardcode agar tidak double */}
               <p className="text-blue-200 text-sm font-bold uppercase tracking-widest mt-1">
-                {isModeSemua ? 'Semua Kabupaten' : `Kab. ${filterWilayah}`}
+                {isModeSemua ? 'Semua Kabupaten' : filterWilayah}
               </p>
             </div>
           </div>
@@ -448,12 +455,15 @@ const DapodikSekolahModal = ({ isOpen, onClose, data, initialWilayah }) => {
 // =====================================================================
 // MAIN COMPONENT: DAPODIK SEKOLAH
 // =====================================================================
-export default function DapodikSekolah({ data = [], selectedYear = '2026' }) {
+export default function DapodikSekolah({ data = [], selectedYear = '2026', lastUpdatedDate }) {
   const [activeTab, setActiveTab] = useState('SEMUA'); 
   
   // Modal State
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedWilayah, setSelectedWilayah] = useState('SEMUA');
+
+  // Menangkap tanggal update (Jika tidak ada props, gunakan fallback)
+  const displayLastUpdated = lastUpdatedDate || 'Sesuai Database Terkini';
 
   // 1. Ekstrak daftar unik Kabupaten dari seluruh data
   const listKabupaten = useMemo(() => {
@@ -586,7 +596,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026' }) {
         
         {/* KOLOM KIRI: TABEL REKAPITULASI */}
         <div className="flex-1 lg:w-2/3 p-4 md:p-6 flex flex-col min-h-0 overflow-hidden border-r border-gray-200">
-          <div className="bg-white rounded-3xl shadow-sm border border-gray-100 flex-1 flex flex-col overflow-hidden">
+          <div className="bg-white rounded-3xl shadow-sm border border-gray-100 flex-1 flex flex-col overflow-hidden relative">
             <div className="flex-1 overflow-auto p-4">
               <table className="w-full text-center border-separate border-spacing-y-2">
                 <thead className="sticky top-0 bg-gray-50 z-10 shadow-sm rounded-xl">
@@ -637,6 +647,10 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026' }) {
                   </tr>
                 </tfoot>
               </table>
+              {/* TEKS SUMBER UPDATE DAPODIK */}
+              <div className="mt-4 px-2 text-right text-xs font-bold italic text-gray-400 pb-2">
+                 Sumber : Data Dapodik Update Pada Tanggal : {displayLastUpdated}
+              </div>
             </div>
           </div>
         </div>

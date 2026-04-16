@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { MapPin, Info, School, Activity, Scale, Loader2, Search, Download } from 'lucide-react';
+import { MapPin, Info, School, Activity, Search, Download, Loader2, Users } from 'lucide-react';
 import { db } from '../firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
 import ExcelJS from 'exceljs';
 
 // =====================================================================
-// UTILITY FUNCTIONS
+// UTILITY FUNCTIONS & STANDAR REGULASI
 // =====================================================================
 const KABUPATEN_LIST = [
   "BENGKAYANG", "KAPUAS HULU", "KAYONG UTARA", "KETAPANG", 
@@ -15,17 +15,17 @@ const KABUPATEN_LIST = [
 
 const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'NON FORMAL'];
 
-// KEBUTUHAN GURU IDEAL MINIMAL PER SEKOLAH
-const IDEAL_GURU_PER_SEKOLAH = {
+// Standar Minimal Guru per Sekolah (Acuan Dasar)
+const MIN_GURU_PER_SEKOLAH = {
   'PAUD': 2,
-  'SD': 8,
-  'SMP': 10,
-  'SMA/SMK': 13,
-  'SLB (Inklusif)': 10,
-  'NON FORMAL': 8
+  'SD': 6,
+  'SMP': 5,
+  'SMA/SMK': 7,
+  'SLB (Inklusif)': 4,
+  'NON FORMAL': 3
 };
 
-// Fungsi hitung angka rasio mentah (Guru per Sekolah)
+// Fungsi hitung angka rasio mentah (Jumlah Guru / Jumlah Sekolah)
 const getRawRatio = (sekCount, guruCount) => {
   if (sekCount === 0) return 0;
   return (guruCount / sekCount);
@@ -37,18 +37,16 @@ const renderRatio = (sekCount, guruCount, jenjang) => {
   if (sekCount === 0 && guruCount > 0) return <span className="text-red-500 font-bold text-[10px]">Error (0 Sek)</span>;
   
   const ratio = getRawRatio(sekCount, guruCount);
-  const idealMin = IDEAL_GURU_PER_SEKOLAH[jenjang];
-  const excessMax = idealMin * 1.5; // Kita tentukan ambang batas berlebih jika guru > 1.5x kebutuhan minimal
-
+  const minGuru = MIN_GURU_PER_SEKOLAH[jenjang];
+  
   let colorClass = 'text-emerald-600'; // IDEAL
   
-  if (ratio < idealMin) {
-    colorClass = 'text-red-600'; // KEKURANGAN GURU
-  } else if (ratio > excessMax) {
-    colorClass = 'text-blue-600'; // SURPLUS / BERLEBIH GURU
+  if (ratio < minGuru) {
+    colorClass = 'text-red-600'; // KURANG GURU
+  } else if (ratio > minGuru * 4) {
+    colorClass = 'text-blue-600'; // SURPLUS GURU (Sangat banyak guru menumpuk di satu sekolah)
   }
 
-  // Menggunakan pembulatan 1 angka di belakang koma untuk kemudahan membaca (misal 1 : 8.5)
   return <span className={`font-black ${colorClass} tracking-wider`}>1 : {ratio.toFixed(1)}</span>;
 };
 
@@ -61,6 +59,7 @@ export default function RasioSekolahVsGuru({ selectedYear }) {
   const [tab2DataRaw, setTab2DataRaw] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(''); // State untuk tanggal update
 
   // --- FETCH DATA PRE-CALCULATED DARI FIREBASE ---
   useEffect(() => {
@@ -74,6 +73,15 @@ export default function RasioSekolahVsGuru({ selectedYear }) {
         if (docSnap.exists()) {
           const data = docSnap.data();
           setTab2DataRaw(data.tabel2 || []);
+          
+          // Format tanggal last_updated
+          if (data.last_updated) {
+            const d = new Date(data.last_updated);
+            const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+            setLastUpdated(`${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()}`);
+          } else {
+            setLastUpdated('Tidak Diketahui');
+          }
         } else {
           setError(`Data rasio Sekolah VS Guru tahun ${selectedYear} belum dikalkulasi oleh Admin.`);
         }
@@ -110,7 +118,7 @@ export default function RasioSekolahVsGuru({ selectedYear }) {
         agg.guru_s += (row[`${k}_guru_s`] || 0);
         
         agg.total_sek += (row[`${k}_sek`] || 0);
-        agg.total_guru += (row[`${k}_guru`] || 0); 
+        agg.total_guru += (row[`${k}_guru`] || 0);
       });
     });
 
@@ -166,7 +174,7 @@ export default function RasioSekolahVsGuru({ selectedYear }) {
   // =====================================================================
   const handleUnduhTab1 = async () => {
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Ketersediaan Data Utama');
+    const worksheet = workbook.addWorksheet('Ketersediaan Sekolah vs Guru');
 
     worksheet.columns = [
       { header: 'Jenjang', key: 'jenjang', width: 20 },
@@ -180,7 +188,6 @@ export default function RasioSekolahVsGuru({ selectedYear }) {
 
     tab1Data.forEach(row => worksheet.addRow(row));
 
-    // Tambahkan Baris Total di Excel
     const totalRow = worksheet.addRow({
       jenjang: 'TOTAL KESELURUHAN',
       ...grandTotalTab1
@@ -188,7 +195,7 @@ export default function RasioSekolahVsGuru({ selectedYear }) {
 
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
     worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF10B981' } }; // Emerald 500
-    
+
     totalRow.font = { bold: true, color: { argb: 'FF064E3B' } }; // Emerald 900
     totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } }; // Emerald 100
 
@@ -196,13 +203,13 @@ export default function RasioSekolahVsGuru({ selectedYear }) {
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Ketersediaan_Data_Guru_${filterWilayah}_${selectedYear}.xlsx`;
+    link.download = `Ketersediaan_Sekolah_Guru_${filterWilayah}_${selectedYear}.xlsx`;
     link.click();
   };
 
   const handleUnduhTab2 = async () => {
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Analisa Rasio Formasi Guru');
+    const worksheet = workbook.addWorksheet('Analisa Rasio Guru per Sekolah');
 
     worksheet.columns = [
       { header: isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan', key: 'wilayah_label', width: 30 },
@@ -216,7 +223,7 @@ export default function RasioSekolahVsGuru({ selectedYear }) {
         const guruCount = row[`${k}_guru`];
         
         if (sekCount === 0 && guruCount === 0) excelRow[k] = '-';
-        else if (sekCount === 0 && guruCount > 0) excelRow[k] = 'Error (0 Sek)';
+        else if (sekCount === 0 && guruCount > 0) excelRow[k] = 'Error (0 Sekolah)';
         else {
           const ratio = getRawRatio(sekCount, guruCount);
           excelRow[k] = `1 : ${ratio.toFixed(1)}`;
@@ -232,7 +239,7 @@ export default function RasioSekolahVsGuru({ selectedYear }) {
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Analisa_Rasio_Formasi_Guru_${filterWilayah}_${selectedYear}.xlsx`;
+    link.download = `Analisa_Rasio_Guru_per_Sekolah_${filterWilayah}_${selectedYear}.xlsx`;
     link.click();
   };
 
@@ -243,7 +250,7 @@ export default function RasioSekolahVsGuru({ selectedYear }) {
     return (
       <div className="flex flex-col items-center justify-center p-20 opacity-60">
          <Loader2 size={64} className="text-emerald-500 mb-4 animate-spin" />
-         <p className="font-black text-xl text-emerald-800 uppercase tracking-widest">Menarik Data Rasio Guru...</p>
+         <p className="font-black text-xl text-emerald-800 uppercase tracking-widest">Menarik Data Rasio...</p>
       </div>
     );
   }
@@ -252,7 +259,7 @@ export default function RasioSekolahVsGuru({ selectedYear }) {
     return (
       <div className="flex flex-col items-center justify-center p-20 bg-orange-50 rounded-3xl border-2 border-orange-200 border-dashed text-orange-600">
          <p className="font-black text-lg uppercase tracking-widest text-center">{error}</p>
-         <p className="text-sm mt-2 font-bold">Harap minta Admin untuk menjalankan Mesin Kalkulasi Guru di Admin Dashboard.</p>
+         <p className="text-sm mt-2 font-bold">Harap minta Admin untuk menjalankan Mesin Kalkulasi di Admin Dashboard.</p>
       </div>
     );
   }
@@ -264,7 +271,7 @@ export default function RasioSekolahVsGuru({ selectedYear }) {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100">
         <div>
           <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">Sekolah <span className="text-emerald-500">VS</span> Guru</h2>
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mt-1">Modul Analisa Pemenuhan Formasi Guru</p>
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mt-1">Modul Analisa Pemenuhan Tenaga Pendidik</p>
         </div>
         <div className="flex items-center bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2 shadow-sm">
           <MapPin size={18} className="text-emerald-600 mr-3" />
@@ -335,15 +342,21 @@ export default function RasioSekolahVsGuru({ selectedYear }) {
               </tfoot>
             )}
           </table>
+          {/* INFO WAKTU UPDATE DAPODIK */}
+          {lastUpdated && (
+             <div className="mt-4 px-2 text-right text-xs font-bold italic text-gray-400">
+                Sumber : Data Dapodik Update Pada Tanggal : {lastUpdated}
+             </div>
+          )}
         </div>
       </div>
 
       {/* TABEL 2: ANALISA RASIO */}
       <div className="bg-white rounded-3xl shadow-md border border-gray-100 overflow-hidden">
-        <div className="bg-emerald-900 px-6 py-5 border-b border-emerald-800 flex items-center justify-between gap-3">
+        <div className="bg-emerald-700 px-6 py-5 border-b border-emerald-800 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <Activity className="text-emerald-200" size={24} />
-            <h3 className="font-black text-lg text-white uppercase tracking-tighter">Tabel 2: Hasil Analisa Pemenuhan Guru</h3>
+            <Activity className="text-emerald-100" size={24} />
+            <h3 className="font-black text-lg text-white uppercase tracking-tighter">Tabel 2: Hasil Analisa Rasio Guru per Sekolah</h3>
           </div>
           <button onClick={handleUnduhTab2} className="flex items-center gap-2 text-xs font-black uppercase text-emerald-900 bg-white px-4 py-2 rounded-xl hover:bg-emerald-50 transition-colors">
             <Download size={14} /> Unduh
@@ -380,34 +393,38 @@ export default function RasioSekolahVsGuru({ selectedYear }) {
             </tbody>
           </table>
           
-          {tab2Data.length === 0 && (
+          {tab2Data.length === 0 ? (
              <div className="py-20 flex flex-col items-center opacity-30 text-gray-500">
                <Search size={64} className="mb-4" />
                <p className="font-black uppercase tracking-widest text-xl">Tidak Ada Data</p>
+             </div>
+          ) : (
+             <div className="mt-4 px-2 text-right text-xs font-bold italic text-gray-400">
+                Sumber : Data Dapodik Update Pada Tanggal : {lastUpdated}
              </div>
           )}
         </div>
       </div>
 
-      {/* INFO BOX RUMUS KAPASITAS */}
+      {/* INFO BOX */}
       <div className="bg-emerald-50 border border-emerald-200 p-6 rounded-3xl flex flex-col md:flex-row items-start gap-6 shadow-sm mb-12">
-        <div className="bg-emerald-600 text-white p-3 rounded-2xl shrink-0 shadow-md"><Scale size={28}/></div>
+        <div className="bg-emerald-600 text-white p-3 rounded-2xl shrink-0 shadow-md"><Users size={28}/></div>
         <div className="text-sm text-emerald-900 leading-relaxed w-full">
-          <strong className="font-black text-base uppercase tracking-widest block mb-3 text-emerald-800">Acuan Standar Minimum Formasi Guru</strong>
+          <strong className="font-black text-base uppercase tracking-widest block mb-3 text-emerald-800">Acuan Standar Pemenuhan Guru</strong>
           <p className="font-medium opacity-90 mb-3">
-            Jumlah minimum guru yang wajib dimiliki oleh 1 sekolah berdasarkan rombel & mapel wajib:
+            Berdasarkan pedoman umum ketersediaan pendidik, rasio minimal guru yang harus ada dalam satu satuan pendidikan (sekolah) adalah:
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-3 font-bold opacity-90">
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> PAUD: Min. 2 Guru / Sekolah</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SD: Min. 8 Guru / Sekolah</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SMP: Min. 10 Guru / Sekolah</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SMA/SMK: Min. 13 Guru / Sekolah</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SLB: Min. 10 Guru / Sekolah</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> NON FORMAL: Min. 8 Guru / Sekolah</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SD: Min. 6 Guru / Sekolah</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SMP: Min. 5 Guru / Sekolah</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SMA/SMK: Min. 7 Guru / Sekolah</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SLB: Min. 4 Guru / Sekolah</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> NON FORMAL: Min. 3 Guru / Sekolah</div>
           </div>
           <div className="mt-4 pt-4 border-t border-emerald-200/50 text-xs italic opacity-80 font-bold">
-            * Format Rasio <span className="text-emerald-700 font-black">1 : X</span>. Angka <span className="text-emerald-700 font-black">1</span> mewakili 1 Sekolah, dan <span className="text-emerald-700 font-black">X</span> adalah rata-rata jumlah guru yang ada per sekolah.<br/>
-            Warna <span className="text-red-600 font-black">Merah</span> = Kekurangan Guru (Di bawah standar minimum). Warna <span className="text-emerald-600 font-black">Hijau</span> = Ideal. Warna <span className="text-blue-600 font-black">Biru</span> = Surplus/Berlebih Guru.
+            * Format Rasio <span className="text-emerald-700 font-black">1 : X</span>. Angka <span className="text-emerald-700 font-black">1</span> mewakili 1 Sekolah, dan <span className="text-emerald-700 font-black">X</span> adalah Rata-rata Guru Aktual yang tersedia.<br/>
+            Warna <span className="text-red-600 font-black">Merah</span> = Sekolah Kekurangan Guru (Di bawah standar minimal). Warna <span className="text-emerald-600 font-black">Hijau</span> = Ideal. Warna <span className="text-blue-600 font-black">Biru</span> = Guru menumpuk (sangat berlebih).
           </div>
         </div>
       </div>

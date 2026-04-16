@@ -7,7 +7,8 @@ import RasioSekolahVsGuru from './RasioSekolahVsGuru';
 import RasioRombelVsPD from './RasioRombelVsPD'; 
 import RasioSekolahVsRombel from './RasioSekolahVsRombel'; 
 import RasioRombelVsGuru from './RasioRombelVsGuru'; 
-import RasioRombelVsKelas from './RasioRombelVsKelas'; // <-- IMPORT BARU
+import RasioRombelVsKelas from './RasioRombelVsKelas';
+import RasioGuruVsPD from './RasioGuruVsPD'; // <-- IMPORT MODUL GURU VS PD
 
 // =====================================================================
 // MAIN COMPONENT: DAPODIK RASIO
@@ -27,12 +28,12 @@ export default function DapodikRasio({ selectedYear = '2026' }) {
     { id: 'GURU', label: 'Guru', icon: Users },
   ];
 
-  // Opsi Data 2 (Ditambah Ruang Kelas)
+  // Opsi Data 2
   const OPTIONS_DATA_2 = [
     { id: 'PESERTA DIDIK', label: 'Peserta Didik', icon: GraduationCap },
     { id: 'GURU', label: 'Guru', icon: Users },
     { id: 'ROMBEL', label: 'Rombel', icon: Layers },
-    { id: 'RUANG KELAS', label: 'Ruang Kelas', icon: Building }, // <-- OPSI BARU
+    { id: 'RUANG KELAS', label: 'Ruang Kelas', icon: Building }, 
   ];
 
   // Handler saat Data 1 berubah
@@ -43,12 +44,19 @@ export default function DapodikRasio({ selectedYear = '2026' }) {
     
     let currentData2 = data2;
 
+    // 1. Cegah ID sama
     if (newVal === currentData2) {
       const availableOption = OPTIONS_DATA_2.find(opt => opt.id !== newVal);
       if (availableOption) currentData2 = availableOption.id;
     }
 
+    // 2. Cegah Redudansi (Guru vs Rombel)
     if (newVal === 'GURU' && currentData2 === 'ROMBEL') {
+       currentData2 = 'PESERTA DIDIK'; 
+    }
+    
+    // 3. Cegah Sekolah/Guru vs Ruang Kelas (Karena Ruang Kelas hanya untuk Rombel)
+    if ((newVal === 'SEKOLAH' || newVal === 'GURU') && currentData2 === 'RUANG KELAS') {
        currentData2 = 'PESERTA DIDIK'; 
     }
 
@@ -86,8 +94,10 @@ export default function DapodikRasio({ selectedYear = '2026' }) {
         return <RasioRombelVsPD selectedYear={selectedYear} />;
       case 'ROMBEL_VS_GURU':
         return <RasioRombelVsGuru selectedYear={selectedYear} />; 
-      case 'ROMBEL_VS_RUANG KELAS': // <-- ROUTING BARU
+      case 'ROMBEL_VS_RUANG KELAS':
         return <RasioRombelVsKelas selectedYear={selectedYear} />; 
+      case 'GURU_VS_PESERTA DIDIK': // <-- MEMANGGIL KOMPONEN ASLI
+        return <RasioGuruVsPD selectedYear={selectedYear} />;
       default:
         return (
           <div className="flex flex-col items-center justify-center p-20 bg-orange-50 rounded-3xl border-2 border-orange-200 border-dashed text-orange-600">

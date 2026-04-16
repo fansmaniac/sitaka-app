@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { MapPin, Info, Layers, Activity, Search, Download, Loader2, Building } from 'lucide-react';
+import { MapPin, Info, Search, Download, Loader2, Building, Activity } from 'lucide-react';
 import { db } from '../firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
 import ExcelJS from 'exceljs';
@@ -28,12 +28,12 @@ const renderRatio = (rombelCount, kelasCount) => {
   
   const ratio = getRawRatio(rombelCount, kelasCount);
   
-  let colorClass = 'text-emerald-600'; // IDEAL (1 Rombel = 1 Kelas, rasio >= 1.0)
+  let colorClass = 'text-emerald-600'; // IDEAL (1 Rombel = 1 Kelas)
   
   if (ratio < 1.0) {
     colorClass = 'text-red-600'; // KURANG RUANG KELAS (Kelas lebih sedikit dari Rombel)
   } else if (ratio > 1.2) {
-    colorClass = 'text-blue-600'; // SURPLUS KELAS (Sangat berlebih)
+    colorClass = 'text-blue-600'; // SURPLUS KELAS
   }
 
   return <span className={`font-black ${colorClass} tracking-wider`}>1 : {ratio.toFixed(1)}</span>;
@@ -48,7 +48,7 @@ export default function RasioRombelVsKelas({ selectedYear }) {
   const [tab2DataRaw, setTab2DataRaw] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [lastUpdated, setLastUpdated] = useState('');
+  const [lastUpdated, setLastUpdated] = useState(''); // State untuk tanggal update
 
   // --- FETCH DATA PRE-CALCULATED DARI FIREBASE ---
   useEffect(() => {
@@ -63,7 +63,7 @@ export default function RasioRombelVsKelas({ selectedYear }) {
           const data = docSnap.data();
           setTab2DataRaw(data.tabel2 || []);
           
-          // Mengambil dan memformat waktu update
+          // Format tanggal last_updated
           if (data.last_updated) {
             const d = new Date(data.last_updated);
             const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
@@ -329,6 +329,7 @@ export default function RasioRombelVsKelas({ selectedYear }) {
               </tfoot>
             )}
           </table>
+          {/* INFO WAKTU UPDATE DAPODIK */}
           {lastUpdated && (
              <div className="mt-4 px-2 text-right text-xs font-bold italic text-gray-400">
                 Sumber : Data Dapodik Update Pada Tanggal : {lastUpdated}

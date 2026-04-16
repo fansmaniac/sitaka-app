@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { MapPin, Info, Layers, Activity, Search, Download, Loader2 } from 'lucide-react';
+import { MapPin, Info, Layers, Activity, Search, Download, Loader2, GraduationCap } from 'lucide-react';
 import { db } from '../firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
 import ExcelJS from 'exceljs';
@@ -15,7 +15,7 @@ const KABUPATEN_LIST = [
 
 const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'NON FORMAL'];
 
-// KAPASITAS MAKSIMAL PD PER 1 ROMBEL
+// BEBAN MAKSIMAL PESERTA DIDIK PER 1 ROMBEL (Permendikdasmen No.14/2026)
 const MAX_PD_PER_ROMBEL = {
   'PAUD': 15,          
   'SD': 28,            
@@ -25,7 +25,7 @@ const MAX_PD_PER_ROMBEL = {
   'NON FORMAL': 30     
 };
 
-// Fungsi hitung angka rasio mentah
+// Fungsi hitung angka rasio mentah (Jumlah PD / Jumlah Rombel)
 const getRawRatio = (rombelCount, pdCount) => {
   if (rombelCount === 0) return 0;
   return (pdCount / rombelCount);
@@ -34,21 +34,20 @@ const getRawRatio = (rombelCount, pdCount) => {
 // Fungsi render UI rasio dengan logika warna
 const renderRatio = (rombelCount, pdCount, jenjang) => {
   if (rombelCount === 0 && pdCount === 0) return <span className="text-gray-300 font-normal">-</span>;
-  if (rombelCount === 0 && pdCount > 0) return <span className="text-red-500 font-bold text-[10px]">Overload (0 Rombel)</span>;
+  if (rombelCount === 0 && pdCount > 0) return <span className="text-red-500 font-bold text-[10px]">Error (0 Rombel)</span>;
   
   const ratio = getRawRatio(rombelCount, pdCount);
   const maxCapacity = MAX_PD_PER_ROMBEL[jenjang];
-  const minCapacity = maxCapacity * 0.4; // Kita anggap kelas sepi jika kurang dari 40% kapasitas
+  const minCapacity = maxCapacity * 0.3; // Ambang batas bawah (Kelas terlalu sepi)
   
   let colorClass = 'text-emerald-600'; // IDEAL
   
   if (ratio > maxCapacity) {
-    colorClass = 'text-red-600'; // OVERLOAD (Terlalu padat)
+    colorClass = 'text-red-600'; // OVERLOAD (Kelebihan Kapasitas)
   } else if (ratio < minCapacity) {
-    colorClass = 'text-blue-600'; // KELAS SEPI
+    colorClass = 'text-blue-600'; // KURANG MURID (Kelas tidak efisien)
   }
 
-  // Menggunakan pembulatan 0 angka di belakang koma untuk kemudahan membaca (misal 1 : 28)
   return <span className={`font-black ${colorClass} tracking-wider`}>1 : {ratio.toFixed(0)}</span>;
 };
 
@@ -61,6 +60,7 @@ export default function RasioRombelVsPD({ selectedYear }) {
   const [tab2DataRaw, setTab2DataRaw] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(''); // State untuk tanggal update
 
   // --- FETCH DATA PRE-CALCULATED DARI FIREBASE ---
   useEffect(() => {
@@ -74,6 +74,15 @@ export default function RasioRombelVsPD({ selectedYear }) {
         if (docSnap.exists()) {
           const data = docSnap.data();
           setTab2DataRaw(data.tabel2 || []);
+          
+          // Format tanggal last_updated
+          if (data.last_updated) {
+            const d = new Date(data.last_updated);
+            const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+            setLastUpdated(`${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()}`);
+          } else {
+            setLastUpdated('Tidak Diketahui');
+          }
         } else {
           setError(`Data rasio Rombel VS Peserta Didik tahun ${selectedYear} belum dikalkulasi oleh Admin.`);
         }
@@ -117,7 +126,7 @@ export default function RasioRombelVsPD({ selectedYear }) {
     return Array.from(resMap.values());
   }, [tab2DataRaw, filterWilayah, isModeSemua]);
 
-  // HITUNG GRAND TOTAL TABEL 1
+  // --- LOGIKA GRAND TOTAL TABEL 1 ---
   const grandTotalTab1 = useMemo(() => {
     return tab1Data.reduce((acc, curr) => {
       acc.rombel_n += curr.rombel_n;
@@ -129,7 +138,6 @@ export default function RasioRombelVsPD({ selectedYear }) {
       return acc;
     }, { rombel_n: 0, pd_n: 0, rombel_s: 0, pd_s: 0, total_rombel: 0, total_pd: 0 });
   }, [tab1Data]);
-
 
   // =====================================================================
   // DATA ENGINE (TABEL 2)
@@ -167,7 +175,7 @@ export default function RasioRombelVsPD({ selectedYear }) {
   // =====================================================================
   const handleUnduhTab1 = async () => {
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Ketersediaan Data Rombel');
+    const worksheet = workbook.addWorksheet('Ketersediaan Rombel vs PD');
 
     worksheet.columns = [
       { header: 'Jenjang', key: 'jenjang', width: 20 },
@@ -181,17 +189,16 @@ export default function RasioRombelVsPD({ selectedYear }) {
 
     tab1Data.forEach(row => worksheet.addRow(row));
 
-    // Tambahkan Baris Total di Excel
     const totalRow = worksheet.addRow({
       jenjang: 'TOTAL KESELURUHAN',
       ...grandTotalTab1
     });
 
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF9333EA' } };
-    
-    totalRow.font = { bold: true, color: { argb: 'FF581C87' } }; // Purple 900
-    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3E8FF' } }; // Purple 100
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF97316' } }; // Orange 500
+
+    totalRow.font = { bold: true, color: { argb: 'FF7C2D12' } }; // Orange 900
+    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEDD5' } }; // Orange 100
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -203,7 +210,7 @@ export default function RasioRombelVsPD({ selectedYear }) {
 
   const handleUnduhTab2 = async () => {
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Analisa Rasio Kepadatan');
+    const worksheet = workbook.addWorksheet('Analisa Rasio PD per Rombel');
 
     worksheet.columns = [
       { header: isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan', key: 'wilayah_label', width: 30 },
@@ -217,9 +224,9 @@ export default function RasioRombelVsPD({ selectedYear }) {
         const pdCount = row[`${k}_pd`];
         
         if (rombelCount === 0 && pdCount === 0) excelRow[k] = '-';
-        else if (rombelCount === 0 && pdCount > 0) excelRow[k] = 'Overload (0 Rombel)';
+        else if (rombelCount === 0 && pdCount > 0) excelRow[k] = 'Error (0 Rombel)';
         else {
-          const ratio = getRawRatio(rombelCount, pdCount, k);
+          const ratio = getRawRatio(rombelCount, pdCount);
           excelRow[k] = `1 : ${ratio.toFixed(0)}`;
         }
       });
@@ -227,21 +234,21 @@ export default function RasioRombelVsPD({ selectedYear }) {
     });
 
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF9333EA' } };
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF97316' } };
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Analisa_Rasio_Kepadatan_Rombel_${filterWilayah}_${selectedYear}.xlsx`;
+    link.download = `Analisa_Rasio_PD_per_Rombel_${filterWilayah}_${selectedYear}.xlsx`;
     link.click();
   };
 
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center p-20 opacity-60">
-         <Loader2 size={64} className="text-purple-500 mb-4 animate-spin" />
-         <p className="font-black text-xl text-purple-800 uppercase tracking-widest">Menarik Data Rasio Kepadatan...</p>
+         <Loader2 size={64} className="text-orange-500 mb-4 animate-spin" />
+         <p className="font-black text-xl text-orange-800 uppercase tracking-widest">Menarik Data Rasio Kapasitas...</p>
       </div>
     );
   }
@@ -262,7 +269,7 @@ export default function RasioRombelVsPD({ selectedYear }) {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100">
         <div>
           <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">Rombel <span className="text-orange-500">VS</span> Peserta Didik</h2>
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mt-1">Modul Analisa Kepadatan Kelas</p>
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mt-1">Modul Analisa Kepadatan & Kapasitas Kelas</p>
         </div>
         <div className="flex items-center bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2 shadow-sm">
           <MapPin size={18} className="text-orange-600 mr-3" />
@@ -277,14 +284,14 @@ export default function RasioRombelVsPD({ selectedYear }) {
         </div>
       </div>
 
-      {/* TABEL 1 */}
+      {/* TABEL 1: REKAPITULASI JUMLAH */}
       <div className="bg-white rounded-3xl shadow-md border border-gray-100 overflow-hidden">
         <div className="bg-gray-50 px-6 py-5 border-b border-gray-200 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <Layers className="text-purple-600" size={24} />
-            <h3 className="font-black text-lg text-gray-800 uppercase tracking-tighter">Tabel 1: Ketersediaan Data Rombel</h3>
+            <Layers className="text-orange-600" size={24} />
+            <h3 className="font-black text-lg text-gray-800 uppercase tracking-tighter">Tabel 1: Ketersediaan Data Utama</h3>
           </div>
-          <button onClick={handleUnduhTab1} className="flex items-center gap-2 text-xs font-black uppercase text-purple-600 bg-purple-50 px-4 py-2 rounded-xl hover:bg-purple-100 transition-colors">
+          <button onClick={handleUnduhTab1} className="flex items-center gap-2 text-xs font-black uppercase text-orange-600 bg-orange-50 px-4 py-2 rounded-xl hover:bg-orange-100 transition-colors">
             <Download size={14} /> Unduh
           </button>
         </div>
@@ -294,10 +301,10 @@ export default function RasioRombelVsPD({ selectedYear }) {
               <tr className="text-[10px] font-black uppercase text-gray-500 bg-gray-50">
                 <th className="px-4 py-4 rounded-l-xl w-12">No</th>
                 <th className="px-4 py-4 text-left">Jenjang</th>
-                <th className="px-4 py-4 text-purple-600 border-l border-gray-200">Rombel (Negeri)</th>
-                <th className="px-4 py-4 text-purple-600">PD (Negeri)</th>
-                <th className="px-4 py-4 text-orange-600 border-l border-gray-200">Rombel (Swasta)</th>
-                <th className="px-4 py-4 text-orange-600">PD (Swasta)</th>
+                <th className="px-4 py-4 text-orange-600 border-l border-gray-200">Rombel (Negeri)</th>
+                <th className="px-4 py-4 text-orange-600">PD (Negeri)</th>
+                <th className="px-4 py-4 text-amber-600 border-l border-gray-200">Rombel (Swasta)</th>
+                <th className="px-4 py-4 text-amber-600">PD (Swasta)</th>
                 <th className="px-4 py-4 text-gray-800 border-l border-gray-200 bg-gray-100">Total Rombel</th>
                 <th className="px-4 py-4 text-gray-800 rounded-r-xl bg-gray-100">Total PD</th>
               </tr>
@@ -307,41 +314,47 @@ export default function RasioRombelVsPD({ selectedYear }) {
                 <tr key={idx} className="bg-white shadow-sm hover:shadow-md transition-all group">
                   <td className="px-4 py-3 rounded-l-xl font-bold text-gray-400 text-xs border-y border-l border-gray-100">{idx + 1}</td>
                   <td className="px-4 py-3 font-black text-gray-800 text-sm uppercase text-left border-y border-gray-100">{row.jenjang}</td>
-                  <td className="px-4 py-3 font-bold text-purple-700 bg-purple-50/30 border-y border-l border-gray-100">{row.rombel_n.toLocaleString()}</td>
-                  <td className="px-4 py-3 font-black text-purple-700 bg-purple-50/30 border-y border-gray-100">{row.pd_n.toLocaleString()}</td>
-                  <td className="px-4 py-3 font-bold text-orange-700 bg-orange-50/20 border-y border-l border-gray-100">{row.rombel_s.toLocaleString()}</td>
-                  <td className="px-4 py-3 font-black text-orange-700 bg-orange-50/20 border-y border-gray-100">{row.pd_s.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-bold text-orange-700 bg-orange-50/30 border-y border-l border-gray-100">{row.rombel_n.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-black text-orange-700 bg-orange-50/30 border-y border-gray-100">{row.pd_n.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-bold text-amber-700 bg-amber-50/20 border-y border-l border-gray-100">{row.rombel_s.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-black text-amber-700 bg-amber-50/20 border-y border-gray-100">{row.pd_s.toLocaleString()}</td>
                   <td className="px-4 py-3 font-bold text-gray-700 bg-gray-50 border-y border-l border-gray-100">{row.total_rombel.toLocaleString()}</td>
                   <td className="px-4 py-3 font-black text-gray-800 text-base bg-gray-100 border-y border-r border-gray-100 rounded-r-xl">{row.total_pd.toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>
-            {/* BARIS TOTAL KESELURUHAN */}
+            {/* TFOOT: BARIS GRAND TOTAL */}
             {tab1Data.length > 0 && (
               <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
-                <tr className="bg-purple-100 text-center font-black uppercase text-xs border-t-2 border-purple-200">
-                  <td colSpan="2" className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-purple-200 text-purple-900">
-                    TOTAL KESELURUHAN
+                <tr className="bg-orange-100 text-center font-black uppercase text-xs border-t-2 border-orange-200">
+                  <td colSpan="2" className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-orange-200 text-orange-900">
+                    TOTAL {isModeSemua ? 'KAL-BAR' : filterWilayah}
                   </td>
-                  <td className="px-4 py-4 text-purple-800 border-y border-purple-200">{grandTotalTab1.rombel_n.toLocaleString()}</td>
-                  <td className="px-4 py-4 text-purple-900 border-y border-purple-200">{grandTotalTab1.pd_n.toLocaleString()}</td>
-                  <td className="px-4 py-4 text-orange-800 border-y border-purple-200">{grandTotalTab1.rombel_s.toLocaleString()}</td>
-                  <td className="px-4 py-4 text-orange-900 border-y border-purple-200">{grandTotalTab1.pd_s.toLocaleString()}</td>
-                  <td className="px-4 py-4 text-purple-900 border-y border-purple-200">{grandTotalTab1.total_rombel.toLocaleString()}</td>
-                  <td className="px-4 py-4 text-purple-900 text-base border-y border-r border-purple-200 rounded-r-2xl">{grandTotalTab1.total_pd.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-orange-800 border-y border-orange-200">{grandTotalTab1.rombel_n.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-orange-900 border-y border-orange-200">{grandTotalTab1.pd_n.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-amber-800 border-y border-orange-200">{grandTotalTab1.rombel_s.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-amber-900 border-y border-orange-200">{grandTotalTab1.pd_s.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-orange-950 border-y border-orange-200">{grandTotalTab1.total_rombel.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-orange-950 text-base border-y border-r border-orange-200 rounded-r-2xl bg-orange-200/50">{grandTotalTab1.total_pd.toLocaleString()}</td>
                 </tr>
               </tfoot>
             )}
           </table>
+          {/* INFO WAKTU UPDATE DAPODIK */}
+          {lastUpdated && (
+             <div className="mt-4 px-2 text-right text-xs font-bold italic text-gray-400">
+                Sumber : Data Dapodik Update Pada Tanggal : {lastUpdated}
+             </div>
+          )}
         </div>
       </div>
 
-      {/* TABEL 2 */}
+      {/* TABEL 2: ANALISA RASIO */}
       <div className="bg-white rounded-3xl shadow-md border border-gray-100 overflow-hidden">
-        <div className="bg-orange-600 px-6 py-5 border-b border-orange-800 flex items-center justify-between gap-3">
+        <div className="bg-orange-600 px-6 py-5 border-b border-orange-700 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <Activity className="text-orange-200" size={24} />
-            <h3 className="font-black text-lg text-white uppercase tracking-tighter">Tabel 2: Hasil Analisa Kepadatan per Kelas</h3>
+            <Activity className="text-orange-100" size={24} />
+            <h3 className="font-black text-lg text-white uppercase tracking-tighter">Tabel 2: Hasil Analisa Kepadatan Kelas</h3>
           </div>
           <button onClick={handleUnduhTab2} className="flex items-center gap-2 text-xs font-black uppercase text-orange-900 bg-white px-4 py-2 rounded-xl hover:bg-orange-50 transition-colors">
             <Download size={14} /> Unduh
@@ -378,34 +391,38 @@ export default function RasioRombelVsPD({ selectedYear }) {
             </tbody>
           </table>
           
-          {tab2Data.length === 0 && (
+          {tab2Data.length === 0 ? (
              <div className="py-20 flex flex-col items-center opacity-30 text-gray-500">
                <Search size={64} className="mb-4" />
                <p className="font-black uppercase tracking-widest text-xl">Tidak Ada Data</p>
+             </div>
+          ) : (
+             <div className="mt-4 px-2 text-right text-xs font-bold italic text-gray-400">
+                Sumber : Data Dapodik Update Pada Tanggal : {lastUpdated}
              </div>
           )}
         </div>
       </div>
 
-      {/* INFO BOX */}
+      {/* INFO BOX RUMUS KAPASITAS */}
       <div className="bg-orange-50 border border-orange-200 p-6 rounded-3xl flex flex-col md:flex-row items-start gap-6 shadow-sm mb-12">
-        <div className="bg-orange-500 text-white p-3 rounded-2xl shrink-0 shadow-md"><Info size={28}/></div>
+        <div className="bg-orange-500 text-white p-3 rounded-2xl shrink-0 shadow-md"><GraduationCap size={28}/></div>
         <div className="text-sm text-orange-900 leading-relaxed w-full">
           <strong className="font-black text-base uppercase tracking-widest block mb-3 text-orange-800">Acuan Permendikdasmen No. 14 Tahun 2026</strong>
           <p className="font-medium opacity-90 mb-3">
-            Batas maksimal kepadatan jumlah siswa dalam 1 Rombongan Belajar:
+            Batas maksimal kepadatan / jumlah peserta didik dalam 1 Rombongan Belajar (Rombel):
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-3 font-bold opacity-90">
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> PAUD: Max 15 Siswa / Rombel</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> SD: Max 28 Siswa / Rombel</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> SMP: Max 32 Siswa / Rombel</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> SMA/SMK: Max 36 Siswa / Rombel</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> SLB: Max 8 Siswa / Rombel</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> NON FORMAL: Max 30 Siswa / Rombel</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> PAUD: Max 15 PD / Rombel</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> SD: Max 28 PD / Rombel</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> SMP: Max 32 PD / Rombel</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> SMA/SMK: Max 36 PD / Rombel</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> SLB: Max 8 PD / Rombel</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> NON FORMAL: Max 30 PD / Rombel</div>
           </div>
           <div className="mt-4 pt-4 border-t border-orange-200/50 text-xs italic opacity-80 font-bold">
-            * Format Rasio <span className="text-orange-700 font-black">1 : X</span>. Angka <span className="text-orange-700 font-black">1</span> adalah 1 Rombel, dan <span className="text-red-600 font-black">X</span> adalah Jumlah Rata-rata Peserta Didik. <br/>
-            Warna <span className="text-emerald-600 font-black">Hijau</span> = Ideal. Warna <span className="text-red-600 font-black">Merah</span> = Overload (Kelebihan Kapasitas Siswa dalam 1 kelas). Warna <span className="text-blue-600 font-black">Biru</span> = Kelas Sepi.
+            * Format Rasio <span className="text-orange-700 font-black">1 : X</span>. Angka <span className="text-orange-700 font-black">1</span> mewakili 1 Rombel, dan <span className="text-orange-700 font-black">X</span> adalah Rata-rata Peserta Didik aktual.<br/>
+            Warna <span className="text-red-600 font-black">Merah</span> = Overload / Kelebihan Kapasitas (Di atas batas maksimal). Warna <span className="text-emerald-600 font-black">Hijau</span> = Ideal. Warna <span className="text-blue-600 font-black">Biru</span> = Kelas sangat sepi (Kurang efisien).
           </div>
         </div>
       </div>

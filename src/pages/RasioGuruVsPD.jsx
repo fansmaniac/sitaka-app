@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { MapPin, Info, Layers, Activity, Search, Download, Loader2, Users } from 'lucide-react';
+import { MapPin, Info, Users, Activity, Search, Download, Loader2, GraduationCap } from 'lucide-react';
 import { db } from '../firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
 import ExcelJS from 'exceljs';
@@ -15,42 +15,52 @@ const KABUPATEN_LIST = [
 
 const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'NON FORMAL'];
 
-// Fungsi hitung angka rasio mentah (Jumlah Guru / Jumlah Rombel)
-const getRawRatio = (rombelCount, guruCount) => {
-  if (rombelCount === 0) return 0;
-  return (guruCount / rombelCount);
+// BEBAN MAKSIMAL PESERTA DIDIK PER 1 GURU (Permendikdasmen No.14/2026)
+const MAX_PD_PER_GURU = {
+  'PAUD': 15,          
+  'SD': 28,            
+  'SMP': 32,           
+  'SMA/SMK': 36,       
+  'SLB (Inklusif)': 8, 
+  'NON FORMAL': 30     
+};
+
+// Fungsi hitung angka rasio mentah (Jumlah PD / Jumlah Guru)
+const getRawRatio = (guruCount, pdCount) => {
+  if (guruCount === 0) return 0;
+  return (pdCount / guruCount);
 };
 
 // Fungsi render UI rasio dengan logika warna
-const renderRatio = (rombelCount, guruCount) => {
-  if (rombelCount === 0 && guruCount === 0) return <span className="text-gray-300 font-normal">-</span>;
-  if (rombelCount === 0 && guruCount > 0) return <span className="text-red-500 font-bold text-[10px]">Error (0 Rombel)</span>;
+const renderRatio = (guruCount, pdCount, jenjang) => {
+  if (guruCount === 0 && pdCount === 0) return <span className="text-gray-300 font-normal">-</span>;
+  if (guruCount === 0 && pdCount > 0) return <span className="text-red-500 font-bold text-[10px]">Error (0 Guru)</span>;
   
-  // Mencari tahu rata-rata guru per 1 rombel
-  const ratio = getRawRatio(rombelCount, guruCount);
+  const ratio = getRawRatio(guruCount, pdCount);
+  const maxCapacity = MAX_PD_PER_GURU[jenjang];
+  const minCapacity = maxCapacity * 0.3; // Ambang batas bawah (Guru mengajar terlalu sedikit siswa)
   
-  let colorClass = 'text-emerald-600'; // IDEAL (Minimal 1 Guru per Rombel)
+  let colorClass = 'text-emerald-600'; // IDEAL
   
-  if (ratio < 1.0) {
-    colorClass = 'text-red-600'; // KURANG GURU (Rombel lebih banyak dari Guru)
-  } else if (ratio > 2.0) {
-    colorClass = 'text-blue-600'; // SURPLUS (Sangat berlebih, > 2 guru per rombel)
+  if (ratio > maxCapacity) {
+    colorClass = 'text-red-600'; // OVERLOAD (Beban mengajar guru terlalu tinggi / Kurang Guru)
+  } else if (ratio < minCapacity) {
+    colorClass = 'text-blue-600'; // SURPLUS GURU (Siswa sangat sedikit per guru)
   }
 
-  // Menggunakan pembulatan 1 angka di belakang koma untuk kemudahan membaca (misal 1 : 1.2)
-  return <span className={`font-black ${colorClass} tracking-wider`}>1 : {ratio.toFixed(1)}</span>;
+  return <span className={`font-black ${colorClass} tracking-wider`}>1 : {ratio.toFixed(0)}</span>;
 };
 
 // =====================================================================
 // MAIN COMPONENT
 // =====================================================================
-export default function RasioRombelVsGuru({ selectedYear }) {
+export default function RasioGuruVsPD({ selectedYear }) {
   const [filterWilayah, setFilterWilayah] = useState('SEMUA');
   
   const [tab2DataRaw, setTab2DataRaw] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [lastUpdated, setLastUpdated] = useState(''); // State untuk tanggal update
+  const [lastUpdated, setLastUpdated] = useState('');
 
   // --- FETCH DATA PRE-CALCULATED DARI FIREBASE ---
   useEffect(() => {
@@ -58,15 +68,13 @@ export default function RasioRombelVsGuru({ selectedYear }) {
       setLoading(true);
       setError(null);
       try {
-        // Mengambil data yang digenerate oleh handleCalculateRasioRombelGuru
-        const docRef = doc(db, 'dapodik_agregasi', `rasio_rombel_guru_${selectedYear}`);
+        const docRef = doc(db, 'dapodik_agregasi', `rasio_guru_pd_${selectedYear}`);
         const docSnap = await getDoc(docRef);
 
         if (docSnap.exists()) {
           const data = docSnap.data();
           setTab2DataRaw(data.tabel2 || []);
           
-          // Format tanggal last_updated
           if (data.last_updated) {
             const d = new Date(data.last_updated);
             const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
@@ -75,7 +83,7 @@ export default function RasioRombelVsGuru({ selectedYear }) {
             setLastUpdated('Tidak Diketahui');
           }
         } else {
-          setError(`Data rasio Rombel VS Guru tahun ${selectedYear} belum dikalkulasi oleh Admin.`);
+          setError(`Data rasio Guru VS Peserta Didik tahun ${selectedYear} belum dikalkulasi oleh Admin.`);
         }
       } catch (err) {
         console.error(err);
@@ -97,20 +105,20 @@ export default function RasioRombelVsGuru({ selectedYear }) {
     if (!tab2DataRaw || tab2DataRaw.length === 0) return [];
 
     const resMap = new Map();
-    JENJANG_KEYS.forEach(k => resMap.set(k, { jenjang: k, rombel_n: 0, guru_n: 0, rombel_s: 0, guru_s: 0, total_rombel: 0, total_guru: 0 }));
+    JENJANG_KEYS.forEach(k => resMap.set(k, { jenjang: k, guru_n: 0, pd_n: 0, guru_s: 0, pd_s: 0, total_guru: 0, total_pd: 0 }));
 
     tab2DataRaw.forEach(row => {
       if (!isModeSemua && row.wilayah !== filterWilayah) return;
 
       JENJANG_KEYS.forEach(k => {
         const agg = resMap.get(k);
-        agg.rombel_n += (row[`${k}_rombel_n`] || 0);
         agg.guru_n += (row[`${k}_guru_n`] || 0);
-        agg.rombel_s += (row[`${k}_rombel_s`] || 0);
+        agg.pd_n += (row[`${k}_pd_n`] || 0);
         agg.guru_s += (row[`${k}_guru_s`] || 0);
+        agg.pd_s += (row[`${k}_pd_s`] || 0);
         
-        agg.total_rombel += (row[`${k}_rombel`] || 0);
         agg.total_guru += (row[`${k}_guru`] || 0);
+        agg.total_pd += (row[`${k}_pd`] || 0);
       });
     });
 
@@ -120,14 +128,14 @@ export default function RasioRombelVsGuru({ selectedYear }) {
   // --- LOGIKA GRAND TOTAL TABEL 1 ---
   const grandTotalTab1 = useMemo(() => {
     return tab1Data.reduce((acc, curr) => {
-      acc.rombel_n += curr.rombel_n;
       acc.guru_n += curr.guru_n;
-      acc.rombel_s += curr.rombel_s;
+      acc.pd_n += curr.pd_n;
       acc.guru_s += curr.guru_s;
-      acc.total_rombel += curr.total_rombel;
+      acc.pd_s += curr.pd_s;
       acc.total_guru += curr.total_guru;
+      acc.total_pd += curr.total_pd;
       return acc;
-    }, { rombel_n: 0, guru_n: 0, rombel_s: 0, guru_s: 0, total_rombel: 0, total_guru: 0 });
+    }, { guru_n: 0, pd_n: 0, guru_s: 0, pd_s: 0, total_guru: 0, total_pd: 0 });
   }, [tab1Data]);
 
 
@@ -143,13 +151,13 @@ export default function RasioRombelVsGuru({ selectedYear }) {
          const kab = row.wilayah;
          if(!mapKab.has(kab)) {
              const init = { wilayah: kab, kecamatan: kab }; 
-             JENJANG_KEYS.forEach(k => { init[`${k}_rombel`] = 0; init[`${k}_guru`] = 0; });
+             JENJANG_KEYS.forEach(k => { init[`${k}_guru`] = 0; init[`${k}_pd`] = 0; });
              mapKab.set(kab, init);
          }
          const aggRow = mapKab.get(kab);
          JENJANG_KEYS.forEach(k => { 
-             aggRow[`${k}_rombel`] += (row[`${k}_rombel`] || 0); 
              aggRow[`${k}_guru`] += (row[`${k}_guru`] || 0); 
+             aggRow[`${k}_pd`] += (row[`${k}_pd`] || 0); 
          });
       });
       return Array.from(mapKab.values()).sort((a, b) => {
@@ -167,43 +175,42 @@ export default function RasioRombelVsGuru({ selectedYear }) {
   // =====================================================================
   const handleUnduhTab1 = async () => {
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Ketersediaan Rombel vs Guru');
+    const worksheet = workbook.addWorksheet('Ketersediaan Guru vs PD');
 
     worksheet.columns = [
       { header: 'Jenjang', key: 'jenjang', width: 20 },
-      { header: 'Rombel (Negeri)', key: 'rombel_n', width: 18 },
-      { header: 'Guru (Negeri)', key: 'guru_n', width: 15 },
-      { header: 'Rombel (Swasta)', key: 'rombel_s', width: 18 },
-      { header: 'Guru (Swasta)', key: 'guru_s', width: 15 },
-      { header: 'Total Rombel', key: 'total_rombel', width: 18 },
+      { header: 'Guru (Negeri)', key: 'guru_n', width: 18 },
+      { header: 'PD (Negeri)', key: 'pd_n', width: 15 },
+      { header: 'Guru (Swasta)', key: 'guru_s', width: 18 },
+      { header: 'PD (Swasta)', key: 'pd_s', width: 15 },
       { header: 'Total Guru', key: 'total_guru', width: 18 },
+      { header: 'Total PD', key: 'total_pd', width: 18 },
     ];
 
     tab1Data.forEach(row => worksheet.addRow(row));
 
-    // Tambahkan Baris Total di Excel
     const totalRow = worksheet.addRow({
       jenjang: 'TOTAL KESELURUHAN',
       ...grandTotalTab1
     });
 
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF9333EA' } }; // Purple 600
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } }; // Indigo 600
 
-    totalRow.font = { bold: true, color: { argb: 'FF581C87' } }; // Purple 900
-    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3E8FF' } }; // Purple 100
+    totalRow.font = { bold: true, color: { argb: 'FF312E81' } }; // Indigo 900
+    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E7FF' } }; // Indigo 100
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Ketersediaan_Rombel_Guru_${filterWilayah}_${selectedYear}.xlsx`;
+    link.download = `Ketersediaan_Guru_PD_${filterWilayah}_${selectedYear}.xlsx`;
     link.click();
   };
 
   const handleUnduhTab2 = async () => {
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Analisa Rasio Guru per Rombel');
+    const worksheet = workbook.addWorksheet('Analisa Beban Mengajar Guru');
 
     worksheet.columns = [
       { header: isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan', key: 'wilayah_label', width: 30 },
@@ -213,38 +220,35 @@ export default function RasioRombelVsGuru({ selectedYear }) {
     tab2Data.forEach(row => {
       const excelRow = { wilayah_label: isModeSemua ? row.wilayah : row.kecamatan };
       JENJANG_KEYS.forEach(k => {
-        const rombelCount = row[`${k}_rombel`];
         const guruCount = row[`${k}_guru`];
+        const pdCount = row[`${k}_pd`];
         
-        if (rombelCount === 0 && guruCount === 0) excelRow[k] = '-';
-        else if (rombelCount === 0 && guruCount > 0) excelRow[k] = 'Error (0 Rombel)';
+        if (guruCount === 0 && pdCount === 0) excelRow[k] = '-';
+        else if (guruCount === 0 && pdCount > 0) excelRow[k] = 'Error (0 Guru)';
         else {
-          const ratio = getRawRatio(rombelCount, guruCount);
-          excelRow[k] = `1 : ${ratio.toFixed(1)}`;
+          const ratio = getRawRatio(guruCount, pdCount);
+          excelRow[k] = `1 : ${ratio.toFixed(0)}`;
         }
       });
       worksheet.addRow(excelRow);
     });
 
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF9333EA' } };
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Analisa_Rasio_Guru_per_Rombel_${filterWilayah}_${selectedYear}.xlsx`;
+    link.download = `Analisa_Beban_Mengajar_Guru_${filterWilayah}_${selectedYear}.xlsx`;
     link.click();
   };
 
-  // =====================================================================
-  // UI RENDER
-  // =====================================================================
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center p-20 opacity-60">
-         <Loader2 size={64} className="text-purple-500 mb-4 animate-spin" />
-         <p className="font-black text-xl text-purple-800 uppercase tracking-widest">Menarik Data Rasio...</p>
+         <Loader2 size={64} className="text-indigo-500 mb-4 animate-spin" />
+         <p className="font-black text-xl text-indigo-800 uppercase tracking-widest">Menarik Data Rasio Beban Mengajar...</p>
       </div>
     );
   }
@@ -264,11 +268,11 @@ export default function RasioRombelVsGuru({ selectedYear }) {
       {/* HEADER & FILTER */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100">
         <div>
-          <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">Rombel <span className="text-purple-500">VS</span> Guru</h2>
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mt-1">Modul Analisa Kebutuhan Tenaga Pengajar</p>
+          <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">Guru <span className="text-indigo-500">VS</span> Peserta Didik</h2>
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mt-1">Modul Analisa Beban Kerja & Kapasitas Mengajar</p>
         </div>
         <div className="flex items-center bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2 shadow-sm">
-          <MapPin size={18} className="text-purple-600 mr-3" />
+          <MapPin size={18} className="text-indigo-600 mr-3" />
           <select 
             value={filterWilayah} 
             onChange={(e) => setFilterWilayah(e.target.value)} 
@@ -284,10 +288,10 @@ export default function RasioRombelVsGuru({ selectedYear }) {
       <div className="bg-white rounded-3xl shadow-md border border-gray-100 overflow-hidden">
         <div className="bg-gray-50 px-6 py-5 border-b border-gray-200 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <Layers className="text-purple-600" size={24} />
+            <Users className="text-indigo-600" size={24} />
             <h3 className="font-black text-lg text-gray-800 uppercase tracking-tighter">Tabel 1: Ketersediaan Data Utama</h3>
           </div>
-          <button onClick={handleUnduhTab1} className="flex items-center gap-2 text-xs font-black uppercase text-purple-600 bg-purple-50 px-4 py-2 rounded-xl hover:bg-purple-100 transition-colors">
+          <button onClick={handleUnduhTab1} className="flex items-center gap-2 text-xs font-black uppercase text-indigo-600 bg-indigo-50 px-4 py-2 rounded-xl hover:bg-indigo-100 transition-colors">
             <Download size={14} /> Unduh
           </button>
         </div>
@@ -297,12 +301,12 @@ export default function RasioRombelVsGuru({ selectedYear }) {
               <tr className="text-[10px] font-black uppercase text-gray-500 bg-gray-50">
                 <th className="px-4 py-4 rounded-l-xl w-12">No</th>
                 <th className="px-4 py-4 text-left">Jenjang</th>
-                <th className="px-4 py-4 text-purple-600 border-l border-gray-200">Rombel (Negeri)</th>
-                <th className="px-4 py-4 text-purple-600">Guru (Negeri)</th>
-                <th className="px-4 py-4 text-orange-600 border-l border-gray-200">Rombel (Swasta)</th>
-                <th className="px-4 py-4 text-orange-600">Guru (Swasta)</th>
-                <th className="px-4 py-4 text-gray-800 border-l border-gray-200 bg-gray-100">Total Rombel</th>
-                <th className="px-4 py-4 text-gray-800 rounded-r-xl bg-gray-100">Total Guru</th>
+                <th className="px-4 py-4 text-indigo-600 border-l border-gray-200">Guru (Negeri)</th>
+                <th className="px-4 py-4 text-indigo-600">PD (Negeri)</th>
+                <th className="px-4 py-4 text-orange-600 border-l border-gray-200">Guru (Swasta)</th>
+                <th className="px-4 py-4 text-orange-600">PD (Swasta)</th>
+                <th className="px-4 py-4 text-gray-800 border-l border-gray-200 bg-gray-100">Total Guru</th>
+                <th className="px-4 py-4 text-gray-800 rounded-r-xl bg-gray-100">Total PD</th>
               </tr>
             </thead>
             <tbody>
@@ -310,28 +314,28 @@ export default function RasioRombelVsGuru({ selectedYear }) {
                 <tr key={idx} className="bg-white shadow-sm hover:shadow-md transition-all group">
                   <td className="px-4 py-3 rounded-l-xl font-bold text-gray-400 text-xs border-y border-l border-gray-100">{idx + 1}</td>
                   <td className="px-4 py-3 font-black text-gray-800 text-sm uppercase text-left border-y border-gray-100">{row.jenjang}</td>
-                  <td className="px-4 py-3 font-bold text-purple-700 bg-purple-50/30 border-y border-l border-gray-100">{row.rombel_n.toLocaleString()}</td>
-                  <td className="px-4 py-3 font-black text-purple-700 bg-purple-50/30 border-y border-gray-100">{row.guru_n.toLocaleString()}</td>
-                  <td className="px-4 py-3 font-bold text-orange-700 bg-orange-50/20 border-y border-l border-gray-100">{row.rombel_s.toLocaleString()}</td>
-                  <td className="px-4 py-3 font-black text-orange-700 bg-orange-50/20 border-y border-gray-100">{row.guru_s.toLocaleString()}</td>
-                  <td className="px-4 py-3 font-bold text-gray-700 bg-gray-50 border-y border-l border-gray-100">{row.total_rombel.toLocaleString()}</td>
-                  <td className="px-4 py-3 font-black text-gray-800 text-base bg-gray-100 border-y border-r border-gray-100 rounded-r-xl">{row.total_guru.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-bold text-indigo-700 bg-indigo-50/30 border-y border-l border-gray-100">{row.guru_n.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-black text-indigo-700 bg-indigo-50/30 border-y border-gray-100">{row.pd_n.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-bold text-orange-700 bg-orange-50/20 border-y border-l border-gray-100">{row.guru_s.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-black text-orange-700 bg-orange-50/20 border-y border-gray-100">{row.pd_s.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-bold text-gray-700 bg-gray-50 border-y border-l border-gray-100">{row.total_guru.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-black text-gray-800 text-base bg-gray-100 border-y border-r border-gray-100 rounded-r-xl">{row.total_pd.toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>
             {/* TFOOT: BARIS GRAND TOTAL */}
             {tab1Data.length > 0 && (
               <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
-                <tr className="bg-purple-100 text-center font-black uppercase text-xs border-t-2 border-purple-200">
-                  <td colSpan="2" className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-purple-200 text-purple-900">
+                <tr className="bg-indigo-100 text-center font-black uppercase text-xs border-t-2 border-indigo-200">
+                  <td colSpan="2" className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-indigo-200 text-indigo-900">
                     TOTAL {isModeSemua ? 'KAL-BAR' : filterWilayah}
                   </td>
-                  <td className="px-4 py-4 text-purple-800 border-y border-purple-200">{grandTotalTab1.rombel_n.toLocaleString()}</td>
-                  <td className="px-4 py-4 text-purple-900 border-y border-purple-200">{grandTotalTab1.guru_n.toLocaleString()}</td>
-                  <td className="px-4 py-4 text-orange-800 border-y border-purple-200">{grandTotalTab1.rombel_s.toLocaleString()}</td>
-                  <td className="px-4 py-4 text-orange-900 border-y border-purple-200">{grandTotalTab1.guru_s.toLocaleString()}</td>
-                  <td className="px-4 py-4 text-purple-950 border-y border-purple-200">{grandTotalTab1.total_rombel.toLocaleString()}</td>
-                  <td className="px-4 py-4 text-purple-950 text-base border-y border-r border-purple-200 rounded-r-2xl bg-purple-200/50">{grandTotalTab1.total_guru.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-indigo-800 border-y border-indigo-200">{grandTotalTab1.guru_n.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-indigo-900 border-y border-indigo-200">{grandTotalTab1.pd_n.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-orange-800 border-y border-indigo-200">{grandTotalTab1.guru_s.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-orange-900 border-y border-indigo-200">{grandTotalTab1.pd_s.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-indigo-950 border-y border-indigo-200">{grandTotalTab1.total_guru.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-indigo-950 text-base border-y border-r border-indigo-200 rounded-r-2xl bg-indigo-200/50">{grandTotalTab1.total_pd.toLocaleString()}</td>
                 </tr>
               </tfoot>
             )}
@@ -347,23 +351,23 @@ export default function RasioRombelVsGuru({ selectedYear }) {
 
       {/* TABEL 2: ANALISA RASIO */}
       <div className="bg-white rounded-3xl shadow-md border border-gray-100 overflow-hidden">
-        <div className="bg-purple-900 px-6 py-5 border-b border-purple-800 flex items-center justify-between gap-3">
+        <div className="bg-indigo-600 px-6 py-5 border-b border-indigo-700 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <Activity className="text-purple-200" size={24} />
-            <h3 className="font-black text-lg text-white uppercase tracking-tighter">Tabel 2: Hasil Analisa Ketercukupan Guru</h3>
+            <Activity className="text-indigo-100" size={24} />
+            <h3 className="font-black text-lg text-white uppercase tracking-tighter">Tabel 2: Hasil Analisa Beban Mengajar Guru</h3>
           </div>
-          <button onClick={handleUnduhTab2} className="flex items-center gap-2 text-xs font-black uppercase text-purple-900 bg-white px-4 py-2 rounded-xl hover:bg-purple-50 transition-colors">
+          <button onClick={handleUnduhTab2} className="flex items-center gap-2 text-xs font-black uppercase text-indigo-900 bg-white px-4 py-2 rounded-xl hover:bg-indigo-50 transition-colors">
             <Download size={14} /> Unduh
           </button>
         </div>
         <div className="overflow-x-auto p-4">
           <table className="w-full text-center border-separate border-spacing-y-2">
             <thead className="sticky top-0 bg-white z-10 shadow-sm rounded-xl">
-              <tr className="text-[10px] font-black uppercase text-gray-500 bg-purple-50/50">
+              <tr className="text-[10px] font-black uppercase text-gray-500 bg-indigo-50/50">
                 <th className="px-4 py-4 rounded-l-xl w-12">No</th>
                 <th className="px-4 py-4 text-left">{isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan'}</th>
                 {JENJANG_KEYS.map(k => (
-                  <th key={k} className="px-2 py-4 text-purple-800 border-l border-purple-100 whitespace-nowrap">{k}</th>
+                  <th key={k} className="px-2 py-4 text-indigo-800 border-l border-indigo-100 whitespace-nowrap">{k}</th>
                 ))}
               </tr>
             </thead>
@@ -378,7 +382,7 @@ export default function RasioRombelVsGuru({ selectedYear }) {
                     const isLast = kIdx === JENJANG_KEYS.length - 1;
                     return (
                       <td key={k} className={`px-2 py-4 border-y border-l border-gray-100 bg-gray-50/30 text-sm ${isLast ? 'rounded-r-xl border-r' : ''}`}>
-                        {renderRatio(row[`${k}_rombel`], row[`${k}_guru`], k)}
+                        {renderRatio(row[`${k}_guru`], row[`${k}_pd`], k)}
                       </td>
                     );
                   })}
@@ -400,25 +404,25 @@ export default function RasioRombelVsGuru({ selectedYear }) {
         </div>
       </div>
 
-      {/* INFO BOX RUMUS KAPASITAS */}
-      <div className="bg-purple-50 border border-purple-200 p-6 rounded-3xl flex flex-col md:flex-row items-start gap-6 shadow-sm mb-12">
-        <div className="bg-purple-600 text-white p-3 rounded-2xl shrink-0 shadow-md"><Users size={28}/></div>
-        <div className="text-sm text-purple-900 leading-relaxed w-full">
-          <strong className="font-black text-base uppercase tracking-widest block mb-3 text-purple-800">Acuan Standar Minimum Jumlah Guru</strong>
+      {/* INFO BOX */}
+      <div className="bg-indigo-50 border border-indigo-200 p-6 rounded-3xl flex flex-col md:flex-row items-start gap-6 shadow-sm mb-12">
+        <div className="bg-indigo-600 text-white p-3 rounded-2xl shrink-0 shadow-md"><GraduationCap size={28}/></div>
+        <div className="text-sm text-indigo-900 leading-relaxed w-full">
+          <strong className="font-black text-base uppercase tracking-widest block mb-3 text-indigo-800">Acuan Permendikdasmen No. 14 Tahun 2026</strong>
           <p className="font-medium opacity-90 mb-3">
-            Berdasarkan rentang minimal dan maksimal Rombongan Belajar per sekolah, idealnya 1 Rombel setidaknya diampu oleh 1 orang Guru:
+            Batas maksimal daya tampung mengajar peserta didik per 1 orang guru:
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-3 font-bold opacity-90">
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> PAUD: Min. 2 Guru</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> SD: Min. 6 Guru</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> SMP: Min. 3 Guru</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> SMA: Min. 3 Guru</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> SLB: Min. 3 Guru</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> NON FORMAL: Min. 3 Guru</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-indigo-500"></div> PAUD: Max 15 PD / Guru</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-indigo-500"></div> SD: Max 28 PD / Guru</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-indigo-500"></div> SMP: Max 32 PD / Guru</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-indigo-500"></div> SMA/SMK: Max 36 PD / Guru</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-indigo-500"></div> SLB: Max 8 PD / Guru</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-indigo-500"></div> NON FORMAL: Max 30 PD / Guru</div>
           </div>
-          <div className="mt-4 pt-4 border-t border-purple-200/50 text-xs italic opacity-80 font-bold">
-            * Format Rasio <span className="text-purple-700 font-black">1 : X</span>. Angka <span className="text-purple-700 font-black">1</span> mewakili 1 Rombel, dan <span className="text-purple-700 font-black">X</span> adalah rasio ketersediaan Guru.<br/>
-            Warna <span className="text-red-600 font-black">Merah</span> = Tidak Ideal / Kurang Guru (Jumlah rombel lebih besar dari jumlah guru). Warna <span className="text-emerald-600 font-black">Hijau</span> = Ideal (Minimal 1 Guru per Rombel).
+          <div className="mt-4 pt-4 border-t border-indigo-200/50 text-xs italic opacity-80 font-bold">
+            * Format Rasio <span className="text-indigo-700 font-black">1 : X</span>. Angka <span className="text-indigo-700 font-black">1</span> mewakili 1 Guru, dan <span className="text-indigo-700 font-black">X</span> adalah rasio Peserta Didik yang diampu.<br/>
+            Warna <span className="text-red-600 font-black">Merah</span> = Overload (Satu guru mengajar melebihi standar maksimal). Warna <span className="text-emerald-600 font-black">Hijau</span> = Ideal. Warna <span className="text-blue-600 font-black">Biru</span> = Guru mengajar sangat sedikit siswa.
           </div>
         </div>
       </div>

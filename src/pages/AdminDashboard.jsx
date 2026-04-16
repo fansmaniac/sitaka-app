@@ -60,9 +60,11 @@ export default function AdminDashboard({ Header }) {
   const [progressLabel, setProgressLabel] = useState('Sedang Memproses...');
   const [activeTarget, setActiveTarget] = useState(null);
   const [dbStatus, setDbStatus] = useState({}); 
+  const [calcStatus, setCalcStatus] = useState({});
 
   const fileInputRef = useRef(null);
 
+  // --- CEK STATUS MASTER DATA ---
   const checkDatabaseStatus = async () => {
     const categories = [
       { id: 'dapodik_sekolah' }, { id: 'dapodik_ptk' }, 
@@ -81,7 +83,38 @@ export default function AdminDashboard({ Header }) {
     setDbStatus(newStatus);
   };
 
-  useEffect(() => { if (adminView === 'input') checkDatabaseStatus(); }, [adminView]);
+  // --- CEK STATUS MESIN KALKULASI ---
+  const checkCalcStatus = async () => {
+    const calcTypes = [
+      'rasio_sekolah_pd', 'rasio_sekolah_guru', 'rasio_rombel_guru', 
+      'rasio_sekolah_rombel', 'rasio_rombel_pd', 'rasio_rombel_kelas', 'rasio_guru_pd'
+    ];
+    const years = ['2024', '2025', '2026'];
+    let newStatus = {};
+    
+    for (const type of calcTypes) {
+      for (const year of years) {
+        const docSnap = await getDocs(query(collection(db, 'dapodik_agregasi'), where("__name__", "==", `${type}_${year}`)));
+        if (!docSnap.empty) {
+           const data = docSnap.docs[0].data();
+           if (data.last_updated) {
+              const d = new Date(data.last_updated);
+              newStatus[`${type}_${year}`] = `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+           } else {
+              newStatus[`${type}_${year}`] = 'Selesai';
+           }
+        }
+      }
+    }
+    setCalcStatus(newStatus);
+  };
+
+
+  useEffect(() => { 
+     if (adminView === 'input') checkDatabaseStatus(); 
+     if (adminView === 'kalkulasi') checkCalcStatus(); 
+  }, [adminView]);
+
 
   const handleDeleteData = async (target) => {
     const confirmDelete = window.confirm(`PERINGATAN KERAS!\n\nYakin Menghapus Database ${target.label} Tahun ${target.year}?\nData yang dihapus tidak bisa dikembalikan.`);
@@ -188,6 +221,9 @@ export default function AdminDashboard({ Header }) {
 
       const CHUNK_SIZE = 150; 
       const totalChunks = Math.ceil(totalRowsInExcel / CHUNK_SIZE);
+      
+      // CATAT WAKTU UPLOAD SAAT INI
+      const currentTime = new Date().toISOString();
 
       for (let i = 0; i < totalChunks; i++) {
         const chunkData = jsonData.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE).map(item => {
@@ -209,7 +245,14 @@ export default function AdminDashboard({ Header }) {
         });
 
         const docRef = doc(collection(db, collectionName));
-        await setDoc(docRef, { tahun_data: cleanTahun, data: chunkData });
+        
+        // PERBAIKAN: TAMBAHKAN last_updated SAAT SETDOC
+        await setDoc(docRef, { 
+          tahun_data: cleanTahun, 
+          data: chunkData,
+          last_updated: currentTime 
+        });
+        
         setUploadProgress(Math.round(((i + 1) / totalChunks) * 100));
       }
 
@@ -427,6 +470,7 @@ export default function AdminDashboard({ Header }) {
 
       setUploadProgress(100);
       alert(`KALKULASI SUKSES!\n\nHasil rasio Sekolah VS Peserta Didik tahun ${year} berhasil disimpan.`);
+      checkCalcStatus();
     } catch (error) {
       console.error(error);
       alert("Terjadi kesalahan saat melakukan kalkulasi rasio.");
@@ -533,7 +577,7 @@ export default function AdminDashboard({ Header }) {
 
       setUploadProgress(100);
       alert(`KALKULASI SUKSES!\n\nHasil rasio Sekolah VS Guru tahun ${year} berhasil dihitung dan disimpan.`);
-
+      checkCalcStatus();
     } catch (error) {
       console.error(error);
       alert("Terjadi kesalahan saat melakukan kalkulasi rasio Guru.");
@@ -645,7 +689,7 @@ export default function AdminDashboard({ Header }) {
 
       setUploadProgress(100);
       alert(`KALKULASI SUKSES!\n\nHasil rasio Rombel VS Guru tahun ${year} berhasil dihitung dan disimpan.`);
-
+      checkCalcStatus();
     } catch (error) {
       console.error(error);
       alert("Terjadi kesalahan saat melakukan kalkulasi rasio Rombel VS Guru.");
@@ -735,7 +779,7 @@ export default function AdminDashboard({ Header }) {
 
       setUploadProgress(100);
       alert(`KALKULASI SUKSES!\n\nHasil rasio Sekolah VS Rombel tahun ${year} berhasil dihitung dan disimpan.`);
-
+      checkCalcStatus();
     } catch (error) {
       console.error(error);
       alert("Terjadi kesalahan saat melakukan kalkulasi rasio Sekolah VS Rombel.");
@@ -854,7 +898,7 @@ export default function AdminDashboard({ Header }) {
 
       setUploadProgress(100);
       alert(`KALKULASI SUKSES!\n\nHasil rasio Rombel VS Peserta Didik tahun ${year} berhasil dihitung dan disimpan.`);
-
+      checkCalcStatus();
     } catch (error) {
       console.error(error);
       alert("Terjadi kesalahan saat melakukan kalkulasi rasio Rombel VS PD.");
@@ -890,7 +934,6 @@ export default function AdminDashboard({ Header }) {
       setUploadProgress(40);
 
       // Map Sarpras untuk mencari Ruang Kelas per NPSN.
-      // Menjumlahkan semua kondisi kelas sebagai total kapasitas fisik kelas yang bisa difungsikan
       const mapSarpras = new Map();
       allSarprasData.forEach(s => {
          const npsn = String(getVal(s, 'npsn')).trim();
@@ -971,7 +1014,7 @@ export default function AdminDashboard({ Header }) {
 
       setUploadProgress(100);
       alert(`KALKULASI SUKSES!\n\nHasil rasio Rombel VS Ruang Kelas tahun ${year} berhasil dihitung dan disimpan.`);
-
+      checkCalcStatus();
     } catch (error) {
       console.error(error);
       alert("Terjadi kesalahan saat melakukan kalkulasi rasio Rombel VS Kelas.");
@@ -979,6 +1022,139 @@ export default function AdminDashboard({ Header }) {
       setUploading(false);
     }
   };
+
+  // 7. GURU VS PD (PD / GURU)
+  const handleCalculateRasioGuruPD = async (year) => {
+    setUploading(true);
+    setProgressLabel(`Menghitung Rasio Guru VS Peserta Didik ${year}...`);
+    setUploadProgress(10);
+
+    try {
+      const qSek = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", year));
+      const snapSek = await getDocs(qSek);
+      const qPtk = query(collection(db, 'dapodik_ptk_chunks'), where("tahun_data", "==", year));
+      const snapPtk = await getDocs(qPtk);
+
+      if (snapSek.empty || snapPtk.empty) {
+        alert("Data Sekolah atau Guru Kosong! Pastikan kedua data sudah diunggah untuk tahun ini.");
+        setUploading(false); return;
+      }
+
+      let allSekolahData = [];
+      snapSek.forEach(doc => { if(doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data); });
+      let allPtkData = [];
+      snapPtk.forEach(doc => { if(doc.data().data) allPtkData = allPtkData.concat(doc.data().data); });
+
+      setUploadProgress(40);
+
+      const mapSekolah = new Map();
+      allSekolahData.forEach(s => {
+         const npsn = String(getVal(s, 'npsn')).trim();
+         if(npsn) {
+             let pd = parseInt(getVal(s, 'pd_total'));
+             if (isNaN(pd)) {
+               const totalLaki = (parseInt(getVal(s, 'tka_l')) || 0) + (parseInt(getVal(s, 'tkb_l')) || 0) +
+                 (parseInt(getVal(s, 't1_l')) || 0) + (parseInt(getVal(s, 't2_l')) || 0) +
+                 (parseInt(getVal(s, 't3_l')) || 0) + (parseInt(getVal(s, 't4_l')) || 0) +
+                 (parseInt(getVal(s, 't5_l')) || 0) + (parseInt(getVal(s, 't6_l')) || 0) +
+                 (parseInt(getVal(s, 't7_l')) || 0) + (parseInt(getVal(s, 't8_l')) || 0) +
+                 (parseInt(getVal(s, 't9_l')) || 0) + (parseInt(getVal(s, 't10_l')) || 0) +
+                 (parseInt(getVal(s, 't11_l')) || 0) + (parseInt(getVal(s, 't12_l')) || 0) +
+                 (parseInt(getVal(s, 't13_l')) || 0) + (parseInt(getVal(s, 'paket_a_l')) || 0) +
+                 (parseInt(getVal(s, 'paket_b_l')) || 0) + (parseInt(getVal(s, 'paket_c_l')) || 0);
+
+               const totalPerempuan = (parseInt(getVal(s, 'tka_p')) || 0) + (parseInt(getVal(s, 'tkb_p')) || 0) +
+                 (parseInt(getVal(s, 't1_p')) || 0) + (parseInt(getVal(s, 't2_p')) || 0) +
+                 (parseInt(getVal(s, 't3_p')) || 0) + (parseInt(getVal(s, 't4_p')) || 0) +
+                 (parseInt(getVal(s, 't5_p')) || 0) + (parseInt(getVal(s, 't6_p')) || 0) +
+                 (parseInt(getVal(s, 't7_p')) || 0) + (parseInt(getVal(s, 't8_p')) || 0) +
+                 (parseInt(getVal(s, 't9_p')) || 0) + (parseInt(getVal(s, 't10_p')) || 0) +
+                 (parseInt(getVal(s, 't11_p')) || 0) + (parseInt(getVal(s, 't12_p')) || 0) +
+                 (parseInt(getVal(s, 't13_p')) || 0) + (parseInt(getVal(s, 'paket_a_p')) || 0) +
+                 (parseInt(getVal(s, 'paket_b_p')) || 0) + (parseInt(getVal(s, 'paket_c_p')) || 0);
+
+               pd = totalLaki + totalPerempuan;
+             }
+             mapSekolah.set(npsn, { ...s, pd_total: pd, guru_aktual: 0 });
+         }
+      });
+
+      allPtkData.forEach(p => {
+         const isGuru = String(getVal(p, 'jenis_ptk')).toUpperCase().includes('GURU');
+         const isInduk = String(getVal(p, 'status_tugas') || getVal(p, 'ptk_induk')).trim().toUpperCase() === 'INDUK' || String(getVal(p, 'status_tugas')).trim() === '1';
+         if(isGuru && isInduk) {
+            const npsn = String(getVal(p, 'npsn')).trim();
+            if(mapSekolah.has(npsn)) {
+               mapSekolah.get(npsn).guru_aktual++;
+            }
+         }
+      });
+
+      setUploadProgress(60);
+
+      const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, guru_n: 0, pd_n: 0, guru_s: 0, pd_s: 0 }));
+      const mapWilayah = new Map();
+
+      Array.from(mapSekolah.values()).forEach(item => {
+        const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
+        const group = identifyJenjangGroup(bentuk);
+        if (!group) return;
+
+        const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
+        const pdTotal = item.pd_total;
+        const guruAktual = item.guru_aktual;
+
+        const rowTab1 = tab1Data.find(r => r.jenjang === group);
+        if (isNegeri) { rowTab1.guru_n += guruAktual; rowTab1.pd_n += pdTotal; } 
+        else { rowTab1.guru_s += guruAktual; rowTab1.pd_s += pdTotal; }
+
+        const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+        const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+        const uniqueId = `${kabDb}_${keyKec}`;
+
+        if (!mapWilayah.has(uniqueId)) {
+          const init = { wilayah: kabDb, kecamatan: keyKec };
+          JENJANG_KEYS.forEach(k => { 
+             init[`${k}_guru`] = 0; init[`${k}_pd`] = 0;
+             init[`${k}_guru_n`] = 0; init[`${k}_pd_n`] = 0;
+             init[`${k}_guru_s`] = 0; init[`${k}_pd_s`] = 0;
+          });
+          mapWilayah.set(uniqueId, init);
+        }
+
+        const rowTab2 = mapWilayah.get(uniqueId);
+        rowTab2[`${group}_guru`] += guruAktual;
+        rowTab2[`${group}_pd`] += pdTotal;
+        
+        if (isNegeri) {
+           rowTab2[`${group}_guru_n`] += guruAktual;
+           rowTab2[`${group}_pd_n`] += pdTotal;
+        } else {
+           rowTab2[`${group}_guru_s`] += guruAktual;
+           rowTab2[`${group}_pd_s`] += pdTotal;
+        }
+      });
+
+      setUploadProgress(80); 
+
+      const tab2DataRaw = Array.from(mapWilayah.values());
+
+      const docRef = doc(db, 'dapodik_agregasi', `rasio_guru_pd_${year}`);
+      await setDoc(docRef, {
+        tahun_data: year, tabel1: tab1Data, tabel2: tab2DataRaw, last_updated: new Date().toISOString()
+      });
+
+      setUploadProgress(100);
+      alert(`KALKULASI SUKSES!\n\nHasil rasio Guru VS Peserta Didik tahun ${year} berhasil dihitung dan disimpan.`);
+      checkCalcStatus();
+    } catch (error) {
+      console.error(error);
+      alert("Terjadi kesalahan saat melakukan kalkulasi rasio Guru VS PD.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
 
   // --- KOMPONEN UI ---
 
@@ -1111,9 +1287,12 @@ export default function AdminDashboard({ Header }) {
                     </div>
                     <div className="flex gap-2">
                        {['2024', '2025', '2026'].map(year => (
-                         <button key={year} onClick={() => handleCalculateRasioSekolahPD(year)} className="bg-white border-2 border-blue-200 text-blue-600 hover:bg-blue-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
-                           Hitung {year}
-                         </button>
+                         <div key={year} className="flex flex-col items-center gap-1">
+                           <button onClick={() => handleCalculateRasioSekolahPD(year)} className="bg-white border-2 border-blue-200 text-blue-600 hover:bg-blue-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
+                             Hitung {year}
+                           </button>
+                           <span className="text-[9px] font-bold text-gray-400">{calcStatus[`rasio_sekolah_pd_${year}`] || 'Belum'}</span>
+                         </div>
                        ))}
                     </div>
                  </div>
@@ -1126,9 +1305,12 @@ export default function AdminDashboard({ Header }) {
                     </div>
                     <div className="flex gap-2">
                        {['2024', '2025', '2026'].map(year => (
-                         <button key={year} onClick={() => handleCalculateRasioSekolahGuru(year)} className="bg-white border-2 border-emerald-200 text-emerald-600 hover:bg-emerald-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
-                           Hitung {year}
-                         </button>
+                         <div key={year} className="flex flex-col items-center gap-1">
+                           <button onClick={() => handleCalculateRasioSekolahGuru(year)} className="bg-white border-2 border-emerald-200 text-emerald-600 hover:bg-emerald-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
+                             Hitung {year}
+                           </button>
+                           <span className="text-[9px] font-bold text-gray-400">{calcStatus[`rasio_sekolah_guru_${year}`] || 'Belum'}</span>
+                         </div>
                        ))}
                     </div>
                  </div>
@@ -1141,9 +1323,12 @@ export default function AdminDashboard({ Header }) {
                     </div>
                     <div className="flex gap-2">
                        {['2024', '2025', '2026'].map(year => (
-                         <button key={year} onClick={() => handleCalculateRasioRombelGuru(year)} className="bg-white border-2 border-purple-200 text-purple-600 hover:bg-purple-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
-                           Hitung {year}
-                         </button>
+                         <div key={year} className="flex flex-col items-center gap-1">
+                           <button onClick={() => handleCalculateRasioRombelGuru(year)} className="bg-white border-2 border-purple-200 text-purple-600 hover:bg-purple-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
+                             Hitung {year}
+                           </button>
+                           <span className="text-[9px] font-bold text-gray-400">{calcStatus[`rasio_rombel_guru_${year}`] || 'Belum'}</span>
+                         </div>
                        ))}
                     </div>
                  </div>
@@ -1156,9 +1341,12 @@ export default function AdminDashboard({ Header }) {
                     </div>
                     <div className="flex gap-2">
                        {['2024', '2025', '2026'].map(year => (
-                         <button key={year} onClick={() => handleCalculateRasioSekolahRombel(year)} className="bg-white border-2 border-rose-200 text-rose-600 hover:bg-rose-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
-                           Hitung {year}
-                         </button>
+                         <div key={year} className="flex flex-col items-center gap-1">
+                           <button onClick={() => handleCalculateRasioSekolahRombel(year)} className="bg-white border-2 border-rose-200 text-rose-600 hover:bg-rose-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
+                             Hitung {year}
+                           </button>
+                           <span className="text-[9px] font-bold text-gray-400">{calcStatus[`rasio_sekolah_rombel_${year}`] || 'Belum'}</span>
+                         </div>
                        ))}
                     </div>
                  </div>
@@ -1171,9 +1359,12 @@ export default function AdminDashboard({ Header }) {
                     </div>
                     <div className="flex gap-2">
                        {['2024', '2025', '2026'].map(year => (
-                         <button key={year} onClick={() => handleCalculateRasioRombelPD(year)} className="bg-white border-2 border-orange-200 text-orange-600 hover:bg-orange-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
-                           Hitung {year}
-                         </button>
+                         <div key={year} className="flex flex-col items-center gap-1">
+                           <button onClick={() => handleCalculateRasioRombelPD(year)} className="bg-white border-2 border-orange-200 text-orange-600 hover:bg-orange-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
+                             Hitung {year}
+                           </button>
+                           <span className="text-[9px] font-bold text-gray-400">{calcStatus[`rasio_rombel_pd_${year}`] || 'Belum'}</span>
+                         </div>
                        ))}
                     </div>
                  </div>
@@ -1186,9 +1377,30 @@ export default function AdminDashboard({ Header }) {
                     </div>
                     <div className="flex gap-2">
                        {['2024', '2025', '2026'].map(year => (
-                         <button key={year} onClick={() => handleCalculateRasioRombelKelas(year)} className="bg-white border-2 border-amber-200 text-amber-600 hover:bg-amber-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
-                           Hitung {year}
-                         </button>
+                         <div key={year} className="flex flex-col items-center gap-1">
+                           <button onClick={() => handleCalculateRasioRombelKelas(year)} className="bg-white border-2 border-amber-200 text-amber-600 hover:bg-amber-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
+                             Hitung {year}
+                           </button>
+                           <span className="text-[9px] font-bold text-gray-400">{calcStatus[`rasio_rombel_kelas_${year}`] || 'Belum'}</span>
+                         </div>
+                       ))}
+                    </div>
+                 </div>
+
+                 {/* GURU VS PD */}
+                 <div className="bg-gray-50 p-6 rounded-3xl border border-gray-200 flex flex-col md:flex-row items-center justify-between gap-6">
+                    <div>
+                      <h4 className="text-xl font-black text-indigo-900 uppercase">Guru VS Peserta Didik</h4>
+                      <p className="text-sm font-medium text-gray-500 mt-1">Metodologi Baru: Pembagian Murni (Total PD / Total Guru)</p>
+                    </div>
+                    <div className="flex gap-2">
+                       {['2024', '2025', '2026'].map(year => (
+                         <div key={year} className="flex flex-col items-center gap-1">
+                           <button onClick={() => handleCalculateRasioGuruPD(year)} className="bg-white border-2 border-indigo-200 text-indigo-600 hover:bg-indigo-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
+                             Hitung {year}
+                           </button>
+                           <span className="text-[9px] font-bold text-gray-400">{calcStatus[`rasio_guru_pd_${year}`] || 'Belum'}</span>
+                         </div>
                        ))}
                     </div>
                  </div>

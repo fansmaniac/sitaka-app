@@ -5,6 +5,8 @@ import {
   Search, X, ChevronLeft, ChevronRight, Building2
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
+import { db } from '../firebase/config';
+import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 
 // =====================================================================
 // UTILITY FUNCTIONS
@@ -220,7 +222,6 @@ const DapodikGuruModal = ({ isOpen, onClose, data, initialWilayah, displayLastUp
   const processedData = useMemo(() => {
     if (!data) return [];
 
-    // Filter Awal
     const validData = data.filter(guru => {
       const kabDb = String(getVal(guru, 'kabupaten') || getVal(guru, 'Kabupaten/Kota') || '').trim().toUpperCase();
       if (!isModeSemua && kabDb !== filterWilayah) return false;
@@ -267,7 +268,6 @@ const DapodikGuruModal = ({ isOpen, onClose, data, initialWilayah, displayLastUp
     }
   }, [data, isModeSemua, filterWilayah, filterStatus, searchTerm]);
 
-  // HITUNG TOTAL KESELURUHAN (GRAND TOTAL UNTUK FOOTER TABEL)
   const columnTotals = useMemo(() => {
     const totals = { total: 0 };
     JENJANG_KEYS.forEach(k => totals[k] = 0);
@@ -293,7 +293,6 @@ const DapodikGuruModal = ({ isOpen, onClose, data, initialWilayah, displayLastUp
 
     processedData.forEach(item => worksheet.addRow(item));
 
-    // Tambahkan Baris Total di Excel
     const totalRowData = { namaWilayah: 'TOTAL KESELURUHAN', total: columnTotals.total };
     JENJANG_KEYS.forEach(k => totalRowData[k] = columnTotals[k]);
     const totalRow = worksheet.addRow(totalRowData);
@@ -336,7 +335,7 @@ const DapodikGuruModal = ({ isOpen, onClose, data, initialWilayah, displayLastUp
                 Rincian {isModeSemua ? 'Wilayah Provinsi' : 'Kecamatan'}
               </h2>
               <p className="text-blue-200 text-sm font-bold uppercase tracking-widest mt-1">
-                {isModeSemua ? 'Semua Kabupaten' : `Kab. ${filterWilayah}`}
+                {isModeSemua ? 'Semua Kabupaten' : filterWilayah}
               </p>
             </div>
           </div>
@@ -455,21 +454,61 @@ const DapodikGuruModal = ({ isOpen, onClose, data, initialWilayah, displayLastUp
 // =====================================================================
 export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpdatedDate }) {
   const [activeTab, setActiveTab] = useState('SEMUA'); 
-  
-  // Modal State
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedWilayah, setSelectedWilayah] = useState('SEMUA');
+  
+  // STATE UNTUK FETCH TANGGAL
+  const [fetchedDate, setFetchedDate] = useState('');
 
-  // Menangkap tanggal update (Jika tidak ada props, gunakan fallback)
-  const displayLastUpdated = lastUpdatedDate || 'Sesuai Database Terkini';
+  // FETCH TANGGAL UPDATE
+  useEffect(() => {
+    const getUpdateDate = async () => {
+      try {
+        // Cek dulu dari PTK
+        const qPtk = query(collection(db, 'dapodik_ptk_chunks'), where('tahun_data', '==', selectedYear), limit(1));
+        const snapPtk = await getDocs(qPtk);
+        
+        let dateString = null;
+        
+        if (!snapPtk.empty) {
+          const docData = snapPtk.docs[0].data();
+          if (docData.last_updated && typeof docData.last_updated === 'string') {
+            dateString = docData.last_updated;
+          }
+        }
+        
+        // Fallback ke Sekolah jika PTK tidak punya last_updated yang valid
+        if (!dateString) {
+           const qSek = query(collection(db, 'dapodik_sekolah_chunks'), where('tahun_data', '==', selectedYear), limit(1));
+           const snapSek = await getDocs(qSek);
+           if (!snapSek.empty) {
+              const docData = snapSek.docs[0].data();
+              if (docData.last_updated && typeof docData.last_updated === 'string') {
+                 dateString = docData.last_updated;
+              }
+           }
+        }
+        
+        if (dateString) {
+          const d = new Date(dateString);
+          const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+          setFetchedDate(`${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()} Pukul ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+        }
+      } catch (e) {
+        console.error("Gagal menarik tanggal update", e);
+      }
+    };
+    getUpdateDate();
+  }, [selectedYear]);
 
-  // 1. Ekstrak daftar unik Kabupaten dari seluruh data
+  // Logika prioritas: 1. Fetched Date, 2. Props Date, 3. Fallback text
+  const displayLastUpdated = fetchedDate || lastUpdatedDate || 'Sesuai Database Terkini';
+
   const listKabupaten = useMemo(() => {
     const unik = [...new Set(data.map(item => String(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota') || '').trim().toUpperCase()))];
     return unik.filter(k => k !== '').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
   }, [data]);
 
-  // 2. Mesin Agregasi Utama berdasarkan Active Tab
   const aggregatedData = useMemo(() => {
     const validJenjangList = JENJANG_GROUPS[activeTab];
 
@@ -480,7 +519,6 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
     });
 
     const mapAgg = new Map();
-    // Inisiasi semua wilayah dengan 0 agar tabel konsisten
     listKabupaten.forEach(kab => {
       mapAgg.set(kab, { wilayah: kab, negeri: 0, swasta: 0, total: 0 });
     });
@@ -505,7 +543,6 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
     return Array.from(mapAgg.values()).sort((a, b) => getKabupatenRank(a.wilayah) - getKabupatenRank(b.wilayah));
   }, [data, activeTab, listKabupaten]);
 
-  // 3. Hitung Grand Total & Data Chart
   const grandTotals = useMemo(() => {
     return aggregatedData.reduce((acc, curr) => {
       acc.negeri += curr.negeri;
@@ -515,19 +552,17 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
     }, { negeri: 0, swasta: 0, total: 0 });
   }, [aggregatedData]);
 
-  // Data Pie Chart
   const pieSegments = [
-    { name: 'Negeri', value: grandTotals.negeri, color: '#2563eb' }, // Blue 600
-    { name: 'Swasta', value: grandTotals.swasta, color: '#f97316' }  // Orange 500
+    { name: 'Negeri', value: grandTotals.negeri, color: '#2563eb' }, 
+    { name: 'Swasta', value: grandTotals.swasta, color: '#f97316' }  
   ];
 
   const percentNegeri = grandTotals.total > 0 ? ((grandTotals.negeri / grandTotals.total) * 100).toFixed(1) : 0;
   const percentSwasta = grandTotals.total > 0 ? ((grandTotals.swasta / grandTotals.total) * 100).toFixed(1) : 0;
 
-  // 4. Unduh Excel Tabel
   const downloadExcel = async () => {
     const workbook = new ExcelJS.Workbook();
-    const worksheetTitle = activeTab === 'SEMUA' ? 'Semua Jenjang' : activeTab.replace('/', '-'); // replace slashes for valid sheet name
+    const worksheetTitle = activeTab === 'SEMUA' ? 'Semua Jenjang' : activeTab.replace('/', '-'); 
     const worksheet = workbook.addWorksheet(`Rekap ${worksheetTitle}`);
 
     worksheet.columns = [
@@ -567,7 +602,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
   return (
     <div className="h-full flex flex-col animate-in fade-in duration-500">
       
-      {/* 1. TABS HEADER (Dioptimalkan untuk layar 1366x768) */}
+      {/* 1. TABS HEADER */}
       <div className="bg-white px-4 md:px-6 py-3 border-b border-gray-100 flex items-center justify-between shrink-0 shadow-sm z-20 overflow-x-auto">
         <div className="flex items-center gap-1.5 md:gap-2 bg-gray-100 p-1 md:p-1.5 rounded-xl md:rounded-2xl min-w-max">
           {Object.keys(JENJANG_GROUPS).map(tab => (
@@ -645,7 +680,6 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
                   </tr>
                 </tfoot>
               </table>
-              {/* TEKS SUMBER UPDATE DAPODIK */}
               <div className="mt-4 px-2 text-right text-xs font-bold italic text-gray-400 pb-2">
                  Sumber : Data Dapodik Update Pada Tanggal : {displayLastUpdated}
               </div>

@@ -109,12 +109,10 @@ export default function AdminDashboard({ Header }) {
     setCalcStatus(newStatus);
   };
 
-
   useEffect(() => { 
      if (adminView === 'input') checkDatabaseStatus(); 
      if (adminView === 'kalkulasi') checkCalcStatus(); 
   }, [adminView]);
-
 
   const handleDeleteData = async (target) => {
     const confirmDelete = window.confirm(`PERINGATAN KERAS!\n\nYakin Menghapus Database ${target.label} Tahun ${target.year}?\nData yang dihapus tidak bisa dikembalikan.`);
@@ -172,6 +170,7 @@ export default function AdminDashboard({ Header }) {
             const jenisPtkKey = keys.find(k => k.toLowerCase() === 'jenis_ptk'); 
             const nikKey = keys.find(k => k.toLowerCase() === 'nik');
             
+            // Logika asli milikmu yang terkonfirmasi berhasil
             const isGuru = jenisPtkKey ? /guru/i.test(String(item[jenisPtkKey])) : false;
             const isInduk = statusTugasKey ? (String(item[statusTugasKey]).trim().toUpperCase() === 'INDUK' || String(item[statusTugasKey]).trim() === '1') : false;
             
@@ -212,6 +211,7 @@ export default function AdminDashboard({ Header }) {
       const collectionName = `${activeTarget.collection}_chunks`; 
       const cleanTahun = String(activeTarget.year);
       
+      // Bersihkan data lama di Firebase
       const q = query(collection(db, collectionName), where("tahun_data", "==", cleanTahun));
       const snapshot = await getDocs(q);
       if (!snapshot.empty) {
@@ -222,41 +222,55 @@ export default function AdminDashboard({ Header }) {
       const CHUNK_SIZE = 150; 
       const totalChunks = Math.ceil(totalRowsInExcel / CHUNK_SIZE);
       
-      // CATAT WAKTU UPLOAD SAAT INI
+      // CATAT WAKTU UPLOAD SAAT INI (KUNCI AGAR LAST_UPDATED MUNCUL DI FIREBASE)
       const currentTime = new Date().toISOString();
 
-      for (let i = 0; i < totalChunks; i++) {
-        const chunkData = jsonData.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE).map(item => {
-          const sanitizedItem = {};
-          for (const key in item) {
-             let val = item[key];
-             if (val === undefined) sanitizedItem[key] = '';
-             else if (val instanceof Date) sanitizedItem[key] = val.toISOString().split('T')[0];
-             else sanitizedItem[key] = val;
-          }
-          const keys = Object.keys(sanitizedItem);
-          const nikKey = keys.find(k => k.toLowerCase() === 'nik');
-          const npsnKey = keys.find(k => k.toLowerCase() === 'npsn');
-          let returnData = { ...sanitizedItem };
-          
-          if (nikKey) returnData[nikKey] = String(sanitizedItem[nikKey]).replace(/\D/g, '');
-          if (npsnKey) returnData[npsnKey] = String(sanitizedItem[npsnKey]).trim();
-          return returnData;
-        });
-
+      if (totalRowsInExcel === 0) {
+        // Jika data kosong setelah difilter, buat 1 dokumen metadata agar tanggal tetap tersimpan
         const docRef = doc(collection(db, collectionName));
-        
-        // PERBAIKAN: TAMBAHKAN last_updated SAAT SETDOC
         await setDoc(docRef, { 
           tahun_data: cleanTahun, 
-          data: chunkData,
-          last_updated: currentTime 
+          data: [], 
+          last_updated: currentTime
         });
-        
-        setUploadProgress(Math.round(((i + 1) / totalChunks) * 100));
-      }
+        setUploadProgress(100);
+        alert(`UPLOAD SELESAI.\n\nSistem mencatat waktu upload, tapi tidak ada data yang valid untuk disimpan (Cek kembali file excel Anda).`);
+      } else {
+        // Proses Upload Normal
+        for (let i = 0; i < totalChunks; i++) {
+          const chunkData = jsonData.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE).map(item => {
+            const sanitizedItem = {};
+            for (const key in item) {
+               let val = item[key];
+               if (val === undefined) sanitizedItem[key] = '';
+               else if (val instanceof Date) sanitizedItem[key] = val.toISOString().split('T')[0];
+               else sanitizedItem[key] = val;
+            }
+            const keys = Object.keys(sanitizedItem);
+            const nikKey = keys.find(k => k.toLowerCase() === 'nik');
+            const npsnKey = keys.find(k => k.toLowerCase() === 'npsn');
+            let returnData = { ...sanitizedItem };
+            
+            if (nikKey) returnData[nikKey] = String(sanitizedItem[nikKey]).replace(/\D/g, '');
+            if (npsnKey) returnData[npsnKey] = String(sanitizedItem[npsnKey]).trim();
+            return returnData;
+          });
 
-      alert(`SINKRONISASI BERHASIL!\n\nTotal ${totalRowsInExcel.toLocaleString('id-ID')} baris data unik telah di-compress menjadi ${totalChunks} dokumen.`);
+          const docRef = doc(collection(db, collectionName));
+          
+          // INILAH BARIS YANG MEMASTIKAN LAST_UPDATED MASUK KE FIREBASE
+          await setDoc(docRef, { 
+            tahun_data: cleanTahun, 
+            data: chunkData,
+            last_updated: currentTime 
+          });
+          
+          setUploadProgress(Math.round(((i + 1) / totalChunks) * 100));
+        }
+
+        alert(`SINKRONISASI BERHASIL!\n\nTotal ${totalRowsInExcel.toLocaleString('id-ID')} baris data unik telah di-compress menjadi ${totalChunks} dokumen.`);
+      }
+      
       checkDatabaseStatus();
     } catch (error) {
       alert("Error saat memproses. Pastikan format file sesuai.");
@@ -272,13 +286,11 @@ export default function AdminDashboard({ Header }) {
   };
 
   // =====================================================================
-  // FUNGSI UNDUH FORMAT EXCEL (BERDASARKAN STRUKTUR ASLI)
+  // FUNGSI UNDUH FORMAT EXCEL
   // =====================================================================
-  
   const handleDownloadFormatSekolah = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Satuan Pendidikan');
-    
     const columns = [
       'npsn', 'nama_satuan_pendidikan', 'status_sekolah', 'bentuk_pendidikan', 'alamat', 
       'desa', 'kecamatan', 'kabupaten', 'lintang', 'bujur', 'npwp', 'nama_kepala_sekolah', 
@@ -291,12 +303,9 @@ export default function AdminDashboard({ Header }) {
       't9_l', 't9_p', 't10_l', 't10_p', 't11_l', 't11_p', 't12_l', 't12_p', 't13_l', 't13_p', 
       'paket_a_l', 'paket_a_p', 'paket_b_l', 'paket_b_p', 'paket_c_l', 'paket_c_p'
     ];
-
     worksheet.columns = columns.map(col => ({ header: col, key: col, width: 15 }));
-    
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } }; // Blue
-
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
@@ -308,18 +317,14 @@ export default function AdminDashboard({ Header }) {
   const handleDownloadFormatPtk = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Data PTK');
-    
     const columns = [
       'nik', 'nama', 'gender', 'tanggal_lahir', 'status_tugas', 'npsn', 'kecamatan', 
       'kabupaten', 'jenis_ptk', 'pendidikan', 'bidang_studi_sertifikasi', 
       'status_kepegawaian', 'bentuk_pendidikan', 'status_sekolah'
     ];
-
     worksheet.columns = columns.map(col => ({ header: col, key: col, width: 18 }));
-
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3B82F6' } }; // Light Blue
-    
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3B82F6' } };
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
@@ -331,7 +336,6 @@ export default function AdminDashboard({ Header }) {
   const handleDownloadFormatSarpras = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Data Sarpras');
-    
     const columns = [
       'npsn', 'nama_sekolah', 'jenjang', 'kecamatan', 'kabupaten',
       'ruang_kelas_baik', 'ruang_kelas_rusak_ringan', 'ruang_kelas_rusak_sedang', 'ruang_kelas_rusak_berat', 'ruang_kelas_tidak_bisa_dipakai',
@@ -353,12 +357,9 @@ export default function AdminDashboard({ Header }) {
       'papan_tulis_baik', 'papan_tulis_rusak_ringan', 'papan_tulis_rusak_sedang', 'papan_tulis_rusak_berat', 'papan_tulis_tidak_bisa_dipakai',
       'komputer_baik', 'komputer_rusak_ringan', 'komputer_rusak_sedang', 'komputer_rusak_berat', 'komputer_tidak_bisa_dipakai'
     ];
-
     worksheet.columns = columns.map(col => ({ header: col, key: col, width: 25 }));
-
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF9333EA' } }; // Purple
-    
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF9333EA' } }; 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
@@ -370,570 +371,324 @@ export default function AdminDashboard({ Header }) {
   // =====================================================================
   // MESIN PRE-CALCULATION RASIO
   // =====================================================================
-  
-  // 1. SEKOLAH VS PD (PD / SEKOLAH)
   const handleCalculateRasioSekolahPD = async (year) => {
     setUploading(true);
     setProgressLabel(`Menghitung Rasio Sekolah VS PD ${year}...`);
     setUploadProgress(10);
-
     try {
       const q = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", year));
       const snapshot = await getDocs(q);
-      
       if (snapshot.empty) {
         alert("Data Sekolah Kosong! Silakan unggah data sekolah terlebih dahulu.");
         setUploading(false); return;
       }
-
       let allSekolahData = [];
       snapshot.forEach(doc => {
         if(doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data);
       });
-
       setUploadProgress(50);
-
       const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, sek_n: 0, pd_n: 0, sek_s: 0, pd_s: 0 }));
       const mapWilayah = new Map();
-
       allSekolahData.forEach(item => {
         const group = identifyJenjangGroup(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'));
         if (!group) return;
-
         const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
-        
         let pd = parseInt(getVal(item, 'pd_total'));
         if (isNaN(pd)) {
-          const totalLaki = 
-            (parseInt(getVal(item, 'tka_l')) || 0) + (parseInt(getVal(item, 'tkb_l')) || 0) +
-            (parseInt(getVal(item, 't1_l')) || 0) + (parseInt(getVal(item, 't2_l')) || 0) +
-            (parseInt(getVal(item, 't3_l')) || 0) + (parseInt(getVal(item, 't4_l')) || 0) +
-            (parseInt(getVal(item, 't5_l')) || 0) + (parseInt(getVal(item, 't6_l')) || 0) +
-            (parseInt(getVal(item, 't7_l')) || 0) + (parseInt(getVal(item, 't8_l')) || 0) +
-            (parseInt(getVal(item, 't9_l')) || 0) + (parseInt(getVal(item, 't10_l')) || 0) +
-            (parseInt(getVal(item, 't11_l')) || 0) + (parseInt(getVal(item, 't12_l')) || 0) +
-            (parseInt(getVal(item, 't13_l')) || 0) + (parseInt(getVal(item, 'paket_a_l')) || 0) +
-            (parseInt(getVal(item, 'paket_b_l')) || 0) + (parseInt(getVal(item, 'paket_c_l')) || 0);
-          
-          const totalPerempuan = 
-            (parseInt(getVal(item, 'tka_p')) || 0) + (parseInt(getVal(item, 'tkb_p')) || 0) +
-            (parseInt(getVal(item, 't1_p')) || 0) + (parseInt(getVal(item, 't2_p')) || 0) +
-            (parseInt(getVal(item, 't3_p')) || 0) + (parseInt(getVal(item, 't4_p')) || 0) +
-            (parseInt(getVal(item, 't5_p')) || 0) + (parseInt(getVal(item, 't6_p')) || 0) +
-            (parseInt(getVal(item, 't7_p')) || 0) + (parseInt(getVal(item, 't8_p')) || 0) +
-            (parseInt(getVal(item, 't9_p')) || 0) + (parseInt(getVal(item, 't10_p')) || 0) +
-            (parseInt(getVal(item, 't11_p')) || 0) + (parseInt(getVal(item, 't12_p')) || 0) +
-            (parseInt(getVal(item, 't13_p')) || 0) + (parseInt(getVal(item, 'paket_a_p')) || 0) +
-            (parseInt(getVal(item, 'paket_b_p')) || 0) + (parseInt(getVal(item, 'paket_c_p')) || 0);
-
+          const totalLaki = (parseInt(getVal(item, 'tka_l')) || 0) + (parseInt(getVal(item, 'tkb_l')) || 0) + (parseInt(getVal(item, 't1_l')) || 0) + (parseInt(getVal(item, 't2_l')) || 0) + (parseInt(getVal(item, 't3_l')) || 0) + (parseInt(getVal(item, 't4_l')) || 0) + (parseInt(getVal(item, 't5_l')) || 0) + (parseInt(getVal(item, 't6_l')) || 0) + (parseInt(getVal(item, 't7_l')) || 0) + (parseInt(getVal(item, 't8_l')) || 0) + (parseInt(getVal(item, 't9_l')) || 0) + (parseInt(getVal(item, 't10_l')) || 0) + (parseInt(getVal(item, 't11_l')) || 0) + (parseInt(getVal(item, 't12_l')) || 0) + (parseInt(getVal(item, 't13_l')) || 0) + (parseInt(getVal(item, 'paket_a_l')) || 0) + (parseInt(getVal(item, 'paket_b_l')) || 0) + (parseInt(getVal(item, 'paket_c_l')) || 0);
+          const totalPerempuan = (parseInt(getVal(item, 'tka_p')) || 0) + (parseInt(getVal(item, 'tkb_p')) || 0) + (parseInt(getVal(item, 't1_p')) || 0) + (parseInt(getVal(item, 't2_p')) || 0) + (parseInt(getVal(item, 't3_p')) || 0) + (parseInt(getVal(item, 't4_p')) || 0) + (parseInt(getVal(item, 't5_p')) || 0) + (parseInt(getVal(item, 't6_p')) || 0) + (parseInt(getVal(item, 't7_p')) || 0) + (parseInt(getVal(item, 't8_p')) || 0) + (parseInt(getVal(item, 't9_p')) || 0) + (parseInt(getVal(item, 't10_p')) || 0) + (parseInt(getVal(item, 't11_p')) || 0) + (parseInt(getVal(item, 't12_p')) || 0) + (parseInt(getVal(item, 't13_p')) || 0) + (parseInt(getVal(item, 'paket_a_p')) || 0) + (parseInt(getVal(item, 'paket_b_p')) || 0) + (parseInt(getVal(item, 'paket_c_p')) || 0);
           pd = totalLaki + totalPerempuan;
         }
-
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
-        if (isNegeri) { rowTab1.sek_n++; rowTab1.pd_n += pd; } 
-        else { rowTab1.sek_s++; rowTab1.pd_s += pd; }
-
+        if (isNegeri) { rowTab1.sek_n++; rowTab1.pd_n += pd; } else { rowTab1.sek_s++; rowTab1.pd_s += pd; }
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
         const uniqueId = `${kabDb}_${keyKec}`;
-
         if (!mapWilayah.has(uniqueId)) {
           const init = { wilayah: kabDb, kecamatan: keyKec };
-          JENJANG_KEYS.forEach(k => { 
-             init[`${k}_sek`] = 0; init[`${k}_pd`] = 0;
-             init[`${k}_sek_n`] = 0; init[`${k}_pd_n`] = 0; 
-             init[`${k}_sek_s`] = 0; init[`${k}_pd_s`] = 0; 
-          });
+          JENJANG_KEYS.forEach(k => { init[`${k}_sek`] = 0; init[`${k}_pd`] = 0; init[`${k}_sek_n`] = 0; init[`${k}_pd_n`] = 0; init[`${k}_sek_s`] = 0; init[`${k}_pd_s`] = 0; });
           mapWilayah.set(uniqueId, init);
         }
-
         const rowTab2 = mapWilayah.get(uniqueId);
         rowTab2[`${group}_sek`]++;
         rowTab2[`${group}_pd`] += pd;
-        
-        if (isNegeri) {
-           rowTab2[`${group}_sek_n`]++;
-           rowTab2[`${group}_pd_n`] += pd;
-        } else {
-           rowTab2[`${group}_sek_s`]++;
-           rowTab2[`${group}_pd_s`] += pd;
-        }
+        if (isNegeri) { rowTab2[`${group}_sek_n`]++; rowTab2[`${group}_pd_n`] += pd; } else { rowTab2[`${group}_sek_s`]++; rowTab2[`${group}_pd_s`] += pd; }
       });
-
       setUploadProgress(80);
       const tab2DataRaw = Array.from(mapWilayah.values());
-
       const docRef = doc(db, 'dapodik_agregasi', `rasio_sekolah_pd_${year}`);
-      await setDoc(docRef, {
-        tahun_data: year, tabel1: tab1Data, tabel2: tab2DataRaw, last_updated: new Date().toISOString()
-      });
-
+      await setDoc(docRef, { tahun_data: year, tabel1: tab1Data, tabel2: tab2DataRaw, last_updated: new Date().toISOString() });
       setUploadProgress(100);
       alert(`KALKULASI SUKSES!\n\nHasil rasio Sekolah VS Peserta Didik tahun ${year} berhasil disimpan.`);
       checkCalcStatus();
     } catch (error) {
-      console.error(error);
-      alert("Terjadi kesalahan saat melakukan kalkulasi rasio.");
-    } finally {
-      setUploading(false);
-    }
+      console.error(error); alert("Terjadi kesalahan saat melakukan kalkulasi rasio.");
+    } finally { setUploading(false); }
   };
 
-  // 2. SEKOLAH VS GURU (GURU / SEKOLAH)
   const handleCalculateRasioSekolahGuru = async (year) => {
     setUploading(true);
     setProgressLabel(`Menghitung Rasio Sekolah VS Guru ${year}...`);
     setUploadProgress(10);
-
     try {
       const qSek = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", year));
       const snapSek = await getDocs(qSek);
       const qPtk = query(collection(db, 'dapodik_ptk_chunks'), where("tahun_data", "==", year));
       const snapPtk = await getDocs(qPtk);
-
       if (snapSek.empty || snapPtk.empty) {
         alert("Data Sekolah atau Guru Kosong! Pastikan kedua data sudah diunggah untuk tahun ini.");
         setUploading(false); return;
       }
-
       let allSekolahData = [];
       snapSek.forEach(doc => { if(doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data); });
       let allPtkData = [];
       snapPtk.forEach(doc => { if(doc.data().data) allPtkData = allPtkData.concat(doc.data().data); });
-
       setUploadProgress(40); 
-
       const mapSekolah = new Map();
       allSekolahData.forEach(s => {
          const npsn = String(getVal(s, 'npsn')).trim();
          if(npsn) mapSekolah.set(npsn, { ...s, guru_aktual: 0 });
       });
-
       allPtkData.forEach(p => {
          const isGuru = String(getVal(p, 'jenis_ptk')).toUpperCase().includes('GURU');
          const isInduk = String(getVal(p, 'status_tugas') || getVal(p, 'ptk_induk')).trim().toUpperCase() === 'INDUK' || String(getVal(p, 'status_tugas')).trim() === '1';
          if(isGuru && isInduk) {
             const npsn = String(getVal(p, 'npsn')).trim();
-            if(mapSekolah.has(npsn)) {
-               mapSekolah.get(npsn).guru_aktual++;
-            }
+            if(mapSekolah.has(npsn)) { mapSekolah.get(npsn).guru_aktual++; }
          }
       });
-
       setUploadProgress(60); 
-
       const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, sek_n: 0, guru_n: 0, sek_s: 0, guru_s: 0 }));
       const mapWilayah = new Map();
-
       Array.from(mapSekolah.values()).forEach(item => {
         const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
         const group = identifyJenjangGroup(bentuk);
         if (!group) return;
-
         const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
         const guruAktual = item.guru_aktual;
-
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
-        if (isNegeri) { rowTab1.sek_n++; rowTab1.guru_n += guruAktual; } 
-        else { rowTab1.sek_s++; rowTab1.guru_s += guruAktual; }
-
+        if (isNegeri) { rowTab1.sek_n++; rowTab1.guru_n += guruAktual; } else { rowTab1.sek_s++; rowTab1.guru_s += guruAktual; }
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
         const uniqueId = `${kabDb}_${keyKec}`;
-
         if (!mapWilayah.has(uniqueId)) {
           const init = { wilayah: kabDb, kecamatan: keyKec };
-          JENJANG_KEYS.forEach(k => { 
-             init[`${k}_sek`] = 0; 
-             init[`${k}_guru`] = 0;
-             init[`${k}_sek_n`] = 0; init[`${k}_guru_n`] = 0;
-             init[`${k}_sek_s`] = 0; init[`${k}_guru_s`] = 0;
-          });
+          JENJANG_KEYS.forEach(k => { init[`${k}_sek`] = 0; init[`${k}_guru`] = 0; init[`${k}_sek_n`] = 0; init[`${k}_guru_n`] = 0; init[`${k}_sek_s`] = 0; init[`${k}_guru_s`] = 0; });
           mapWilayah.set(uniqueId, init);
         }
-
         const rowTab2 = mapWilayah.get(uniqueId);
-        
         rowTab2[`${group}_sek`]++;
         rowTab2[`${group}_guru`] += guruAktual;
-        
-        if (isNegeri) {
-           rowTab2[`${group}_sek_n`]++;
-           rowTab2[`${group}_guru_n`] += guruAktual;
-        } else {
-           rowTab2[`${group}_sek_s`]++;
-           rowTab2[`${group}_guru_s`] += guruAktual;
-        }
+        if (isNegeri) { rowTab2[`${group}_sek_n`]++; rowTab2[`${group}_guru_n`] += guruAktual; } else { rowTab2[`${group}_sek_s`]++; rowTab2[`${group}_guru_s`] += guruAktual; }
       });
-
       setUploadProgress(80); 
-
       const tab2DataRaw = Array.from(mapWilayah.values());
-
       const docRef = doc(db, 'dapodik_agregasi', `rasio_sekolah_guru_${year}`);
-      await setDoc(docRef, {
-        tahun_data: year, tabel1: tab1Data, tabel2: tab2DataRaw, last_updated: new Date().toISOString()
-      });
-
+      await setDoc(docRef, { tahun_data: year, tabel1: tab1Data, tabel2: tab2DataRaw, last_updated: new Date().toISOString() });
       setUploadProgress(100);
       alert(`KALKULASI SUKSES!\n\nHasil rasio Sekolah VS Guru tahun ${year} berhasil dihitung dan disimpan.`);
       checkCalcStatus();
     } catch (error) {
-      console.error(error);
-      alert("Terjadi kesalahan saat melakukan kalkulasi rasio Guru.");
-    } finally {
-      setUploading(false);
-    }
+      console.error(error); alert("Terjadi kesalahan saat melakukan kalkulasi rasio Guru.");
+    } finally { setUploading(false); }
   };
 
-  // 3. ROMBEL VS GURU (GURU / ROMBEL)
   const handleCalculateRasioRombelGuru = async (year) => {
     setUploading(true);
     setProgressLabel(`Menghitung Rasio Rombel VS Guru ${year}...`);
     setUploadProgress(10);
-
     try {
       const qSek = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", year));
       const snapSek = await getDocs(qSek);
       const qPtk = query(collection(db, 'dapodik_ptk_chunks'), where("tahun_data", "==", year));
       const snapPtk = await getDocs(qPtk);
-
       if (snapSek.empty || snapPtk.empty) {
         alert("Data Sekolah atau Guru Kosong! Pastikan kedua data sudah diunggah untuk tahun ini.");
         setUploading(false); return;
       }
-
       let allSekolahData = [];
       snapSek.forEach(doc => { if(doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data); });
       let allPtkData = [];
       snapPtk.forEach(doc => { if(doc.data().data) allPtkData = allPtkData.concat(doc.data().data); });
-
       setUploadProgress(40);
-
       const mapSekolah = new Map();
       allSekolahData.forEach(s => {
          const npsn = String(getVal(s, 'npsn')).trim();
          if(npsn) {
              let rombelTotal = 0;
-             Object.keys(s).forEach(k => {
-                 if(k.toLowerCase().includes('rombel_')) rombelTotal += parseInt(s[k]) || 0;
-             });
+             Object.keys(s).forEach(k => { if(k.toLowerCase().includes('rombel_')) rombelTotal += parseInt(s[k]) || 0; });
              mapSekolah.set(npsn, { ...s, rombel_total: rombelTotal, guru_aktual: 0 });
          }
       });
-
       allPtkData.forEach(p => {
          const isGuru = String(getVal(p, 'jenis_ptk')).toUpperCase().includes('GURU');
          const isInduk = String(getVal(p, 'status_tugas') || getVal(p, 'ptk_induk')).trim().toUpperCase() === 'INDUK' || String(getVal(p, 'status_tugas')).trim() === '1';
          if(isGuru && isInduk) {
             const npsn = String(getVal(p, 'npsn')).trim();
-            if(mapSekolah.has(npsn)) {
-               mapSekolah.get(npsn).guru_aktual++;
-            }
+            if(mapSekolah.has(npsn)) { mapSekolah.get(npsn).guru_aktual++; }
          }
       });
-
       setUploadProgress(60);
-
       const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, rombel_n: 0, guru_n: 0, rombel_s: 0, guru_s: 0 }));
       const mapWilayah = new Map();
-
       Array.from(mapSekolah.values()).forEach(item => {
         const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
         const group = identifyJenjangGroup(bentuk);
         if (!group) return;
-
         const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
         const rombelTotal = item.rombel_total;
         const guruAktual = item.guru_aktual;
-
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
-        if (isNegeri) { rowTab1.rombel_n += rombelTotal; rowTab1.guru_n += guruAktual; } 
-        else { rowTab1.rombel_s += rombelTotal; rowTab1.guru_s += guruAktual; }
-
+        if (isNegeri) { rowTab1.rombel_n += rombelTotal; rowTab1.guru_n += guruAktual; } else { rowTab1.rombel_s += rombelTotal; rowTab1.guru_s += guruAktual; }
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
         const uniqueId = `${kabDb}_${keyKec}`;
-
         if (!mapWilayah.has(uniqueId)) {
           const init = { wilayah: kabDb, kecamatan: keyKec };
-          JENJANG_KEYS.forEach(k => { 
-             init[`${k}_rombel`] = 0; init[`${k}_guru`] = 0;
-             init[`${k}_rombel_n`] = 0; init[`${k}_guru_n`] = 0;
-             init[`${k}_rombel_s`] = 0; init[`${k}_guru_s`] = 0;
-          });
+          JENJANG_KEYS.forEach(k => { init[`${k}_rombel`] = 0; init[`${k}_guru`] = 0; init[`${k}_rombel_n`] = 0; init[`${k}_guru_n`] = 0; init[`${k}_rombel_s`] = 0; init[`${k}_guru_s`] = 0; });
           mapWilayah.set(uniqueId, init);
         }
-
         const rowTab2 = mapWilayah.get(uniqueId);
         rowTab2[`${group}_rombel`] += rombelTotal;
         rowTab2[`${group}_guru`] += guruAktual;
-        
-        if (isNegeri) {
-           rowTab2[`${group}_rombel_n`] += rombelTotal;
-           rowTab2[`${group}_guru_n`] += guruAktual;
-        } else {
-           rowTab2[`${group}_rombel_s`] += rombelTotal;
-           rowTab2[`${group}_guru_s`] += guruAktual;
-        }
+        if (isNegeri) { rowTab2[`${group}_rombel_n`] += rombelTotal; rowTab2[`${group}_guru_n`] += guruAktual; } else { rowTab2[`${group}_rombel_s`] += rombelTotal; rowTab2[`${group}_guru_s`] += guruAktual; }
       });
-
       setUploadProgress(80); 
-
       const tab2DataRaw = Array.from(mapWilayah.values());
-
       const docRef = doc(db, 'dapodik_agregasi', `rasio_rombel_guru_${year}`);
-      await setDoc(docRef, {
-        tahun_data: year, tabel1: tab1Data, tabel2: tab2DataRaw, last_updated: new Date().toISOString()
-      });
-
+      await setDoc(docRef, { tahun_data: year, tabel1: tab1Data, tabel2: tab2DataRaw, last_updated: new Date().toISOString() });
       setUploadProgress(100);
       alert(`KALKULASI SUKSES!\n\nHasil rasio Rombel VS Guru tahun ${year} berhasil dihitung dan disimpan.`);
       checkCalcStatus();
     } catch (error) {
-      console.error(error);
-      alert("Terjadi kesalahan saat melakukan kalkulasi rasio Rombel VS Guru.");
-    } finally {
-      setUploading(false);
-    }
+      console.error(error); alert("Terjadi kesalahan saat melakukan kalkulasi rasio Rombel VS Guru.");
+    } finally { setUploading(false); }
   };
 
-  // 4. SEKOLAH VS ROMBEL (ROMBEL / SEKOLAH)
   const handleCalculateRasioSekolahRombel = async (year) => {
     setUploading(true);
     setProgressLabel(`Menghitung Rasio Sekolah VS Rombel ${year}...`);
     setUploadProgress(10);
-
     try {
       const qSek = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", year));
       const snapSek = await getDocs(qSek);
-
       if (snapSek.empty) {
         alert("Data Sekolah Kosong! Silakan unggah data sekolah terlebih dahulu.");
         setUploading(false); return;
       }
-
       let allSekolahData = [];
       snapSek.forEach(doc => { if(doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data); });
-
       setUploadProgress(50);
-
       const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, sek_n: 0, rombel_n: 0, sek_s: 0, rombel_s: 0 }));
       const mapWilayah = new Map();
-
       allSekolahData.forEach(item => {
         const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
         const group = identifyJenjangGroup(bentuk);
         if (!group) return;
-
         const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
-        
         let rombelTotal = 0;
-        Object.keys(item).forEach(k => {
-            if(k.toLowerCase().includes('rombel_')) {
-                rombelTotal += parseInt(item[k]) || 0;
-            }
-        });
-
-        // Update Tab 1 Global
+        Object.keys(item).forEach(k => { if(k.toLowerCase().includes('rombel_')) { rombelTotal += parseInt(item[k]) || 0; } });
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
-        if (isNegeri) { rowTab1.sek_n++; rowTab1.rombel_n += rombelTotal; } 
-        else { rowTab1.sek_s++; rowTab1.rombel_s += rombelTotal; }
-
-        // Update Tab 2
+        if (isNegeri) { rowTab1.sek_n++; rowTab1.rombel_n += rombelTotal; } else { rowTab1.sek_s++; rowTab1.rombel_s += rombelTotal; }
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
         const uniqueId = `${kabDb}_${keyKec}`;
-
         if (!mapWilayah.has(uniqueId)) {
           const init = { wilayah: kabDb, kecamatan: keyKec };
-          JENJANG_KEYS.forEach(k => { 
-             init[`${k}_sek`] = 0; init[`${k}_rombel`] = 0;
-             init[`${k}_sek_n`] = 0; init[`${k}_rombel_n`] = 0;
-             init[`${k}_sek_s`] = 0; init[`${k}_rombel_s`] = 0;
-          });
+          JENJANG_KEYS.forEach(k => { init[`${k}_sek`] = 0; init[`${k}_rombel`] = 0; init[`${k}_sek_n`] = 0; init[`${k}_rombel_n`] = 0; init[`${k}_sek_s`] = 0; init[`${k}_rombel_s`] = 0; });
           mapWilayah.set(uniqueId, init);
         }
-
         const rowTab2 = mapWilayah.get(uniqueId);
         rowTab2[`${group}_sek`]++;
         rowTab2[`${group}_rombel`] += rombelTotal;
-        
-        if (isNegeri) {
-           rowTab2[`${group}_sek_n`]++;
-           rowTab2[`${group}_rombel_n`] += rombelTotal;
-        } else {
-           rowTab2[`${group}_sek_s`]++;
-           rowTab2[`${group}_rombel_s`] += rombelTotal;
-        }
+        if (isNegeri) { rowTab2[`${group}_sek_n`]++; rowTab2[`${group}_rombel_n`] += rombelTotal; } else { rowTab2[`${group}_sek_s`]++; rowTab2[`${group}_rombel_s`] += rombelTotal; }
       });
-
       setUploadProgress(80); 
-
       const tab2DataRaw = Array.from(mapWilayah.values());
-
       const docRef = doc(db, 'dapodik_agregasi', `rasio_sekolah_rombel_${year}`);
-      await setDoc(docRef, {
-        tahun_data: year, tabel1: tab1Data, tabel2: tab2DataRaw, last_updated: new Date().toISOString()
-      });
-
+      await setDoc(docRef, { tahun_data: year, tabel1: tab1Data, tabel2: tab2DataRaw, last_updated: new Date().toISOString() });
       setUploadProgress(100);
       alert(`KALKULASI SUKSES!\n\nHasil rasio Sekolah VS Rombel tahun ${year} berhasil dihitung dan disimpan.`);
       checkCalcStatus();
     } catch (error) {
-      console.error(error);
-      alert("Terjadi kesalahan saat melakukan kalkulasi rasio Sekolah VS Rombel.");
-    } finally {
-      setUploading(false);
-    }
+      console.error(error); alert("Terjadi kesalahan saat melakukan kalkulasi rasio Sekolah VS Rombel.");
+    } finally { setUploading(false); }
   };
 
-  // 5. ROMBEL VS PD (PD / ROMBEL)
   const handleCalculateRasioRombelPD = async (year) => {
     setUploading(true);
     setProgressLabel(`Menghitung Rasio Rombel VS Peserta Didik ${year}...`);
     setUploadProgress(10);
-
     try {
       const qSek = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", year));
       const snapSek = await getDocs(qSek);
-
       if (snapSek.empty) {
         alert("Data Sekolah Kosong! Silakan unggah data sekolah terlebih dahulu.");
         setUploading(false); return;
       }
-
       let allSekolahData = [];
       snapSek.forEach(doc => { if(doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data); });
-
       setUploadProgress(40);
-
       const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, rombel_n: 0, pd_n: 0, rombel_s: 0, pd_s: 0 }));
       const mapWilayah = new Map();
-
       allSekolahData.forEach(item => {
         const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
         const group = identifyJenjangGroup(bentuk);
         if (!group) return;
-
         const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
-        
         let pd = parseInt(getVal(item, 'pd_total'));
         if (isNaN(pd)) {
-          const totalLaki = 
-            (parseInt(getVal(item, 'tka_l')) || 0) + (parseInt(getVal(item, 'tkb_l')) || 0) +
-            (parseInt(getVal(item, 't1_l')) || 0) + (parseInt(getVal(item, 't2_l')) || 0) +
-            (parseInt(getVal(item, 't3_l')) || 0) + (parseInt(getVal(item, 't4_l')) || 0) +
-            (parseInt(getVal(item, 't5_l')) || 0) + (parseInt(getVal(item, 't6_l')) || 0) +
-            (parseInt(getVal(item, 't7_l')) || 0) + (parseInt(getVal(item, 't8_l')) || 0) +
-            (parseInt(getVal(item, 't9_l')) || 0) + (parseInt(getVal(item, 't10_l')) || 0) +
-            (parseInt(getVal(item, 't11_l')) || 0) + (parseInt(getVal(item, 't12_l')) || 0) +
-            (parseInt(getVal(item, 't13_l')) || 0) + (parseInt(getVal(item, 'paket_a_l')) || 0) +
-            (parseInt(getVal(item, 'paket_b_l')) || 0) + (parseInt(getVal(item, 'paket_c_l')) || 0);
-          
-          const totalPerempuan = 
-            (parseInt(getVal(item, 'tka_p')) || 0) + (parseInt(getVal(item, 'tkb_p')) || 0) +
-            (parseInt(getVal(item, 't1_p')) || 0) + (parseInt(getVal(item, 't2_p')) || 0) +
-            (parseInt(getVal(item, 't3_p')) || 0) + (parseInt(getVal(item, 't4_p')) || 0) +
-            (parseInt(getVal(item, 't5_p')) || 0) + (parseInt(getVal(item, 't6_p')) || 0) +
-            (parseInt(getVal(item, 't7_p')) || 0) + (parseInt(getVal(item, 't8_p')) || 0) +
-            (parseInt(getVal(item, 't9_p')) || 0) + (parseInt(getVal(item, 't10_p')) || 0) +
-            (parseInt(getVal(item, 't11_p')) || 0) + (parseInt(getVal(item, 't12_p')) || 0) +
-            (parseInt(getVal(item, 't13_p')) || 0) + (parseInt(getVal(item, 'paket_a_p')) || 0) +
-            (parseInt(getVal(item, 'paket_b_p')) || 0) + (parseInt(getVal(item, 'paket_c_p')) || 0);
-
+          const totalLaki = (parseInt(getVal(item, 'tka_l')) || 0) + (parseInt(getVal(item, 'tkb_l')) || 0) + (parseInt(getVal(item, 't1_l')) || 0) + (parseInt(getVal(item, 't2_l')) || 0) + (parseInt(getVal(item, 't3_l')) || 0) + (parseInt(getVal(item, 't4_l')) || 0) + (parseInt(getVal(item, 't5_l')) || 0) + (parseInt(getVal(item, 't6_l')) || 0) + (parseInt(getVal(item, 't7_l')) || 0) + (parseInt(getVal(item, 't8_l')) || 0) + (parseInt(getVal(item, 't9_l')) || 0) + (parseInt(getVal(item, 't10_l')) || 0) + (parseInt(getVal(item, 't11_l')) || 0) + (parseInt(getVal(item, 't12_l')) || 0) + (parseInt(getVal(item, 't13_l')) || 0) + (parseInt(getVal(item, 'paket_a_l')) || 0) + (parseInt(getVal(item, 'paket_b_l')) || 0) + (parseInt(getVal(item, 'paket_c_l')) || 0);
+          const totalPerempuan = (parseInt(getVal(item, 'tka_p')) || 0) + (parseInt(getVal(item, 'tkb_p')) || 0) + (parseInt(getVal(item, 't1_p')) || 0) + (parseInt(getVal(item, 't2_p')) || 0) + (parseInt(getVal(item, 't3_p')) || 0) + (parseInt(getVal(item, 't4_p')) || 0) + (parseInt(getVal(item, 't5_p')) || 0) + (parseInt(getVal(item, 't6_p')) || 0) + (parseInt(getVal(item, 't7_p')) || 0) + (parseInt(getVal(item, 't8_p')) || 0) + (parseInt(getVal(item, 't9_p')) || 0) + (parseInt(getVal(item, 't10_p')) || 0) + (parseInt(getVal(item, 't11_p')) || 0) + (parseInt(getVal(item, 't12_p')) || 0) + (parseInt(getVal(item, 't13_p')) || 0) + (parseInt(getVal(item, 'paket_a_p')) || 0) + (parseInt(getVal(item, 'paket_b_p')) || 0) + (parseInt(getVal(item, 'paket_c_p')) || 0);
           pd = totalLaki + totalPerempuan;
         }
-
         let rombelTotal = 0;
-        Object.keys(item).forEach(k => {
-            if(k.toLowerCase().includes('rombel_')) {
-                rombelTotal += parseInt(item[k]) || 0;
-            }
-        });
-
+        Object.keys(item).forEach(k => { if(k.toLowerCase().includes('rombel_')) { rombelTotal += parseInt(item[k]) || 0; } });
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
-        if (isNegeri) { rowTab1.rombel_n += rombelTotal; rowTab1.pd_n += pd; } 
-        else { rowTab1.rombel_s += rombelTotal; rowTab1.pd_s += pd; }
-
+        if (isNegeri) { rowTab1.rombel_n += rombelTotal; rowTab1.pd_n += pd; } else { rowTab1.rombel_s += rombelTotal; rowTab1.pd_s += pd; }
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
         const uniqueId = `${kabDb}_${keyKec}`;
-
         if (!mapWilayah.has(uniqueId)) {
           const init = { wilayah: kabDb, kecamatan: keyKec };
-          JENJANG_KEYS.forEach(k => { 
-             init[`${k}_rombel`] = 0; 
-             init[`${k}_pd`] = 0;
-             init[`${k}_rombel_n`] = 0; init[`${k}_pd_n`] = 0;
-             init[`${k}_rombel_s`] = 0; init[`${k}_pd_s`] = 0;
-          });
+          JENJANG_KEYS.forEach(k => { init[`${k}_rombel`] = 0; init[`${k}_pd`] = 0; init[`${k}_rombel_n`] = 0; init[`${k}_pd_n`] = 0; init[`${k}_rombel_s`] = 0; init[`${k}_pd_s`] = 0; });
           mapWilayah.set(uniqueId, init);
         }
-
         const rowTab2 = mapWilayah.get(uniqueId);
         rowTab2[`${group}_rombel`] += rombelTotal;
         rowTab2[`${group}_pd`] += pd;
-        
-        if (isNegeri) {
-           rowTab2[`${group}_rombel_n`] += rombelTotal;
-           rowTab2[`${group}_pd_n`] += pd;
-        } else {
-           rowTab2[`${group}_rombel_s`] += rombelTotal;
-           rowTab2[`${group}_pd_s`] += pd;
-        }
+        if (isNegeri) { rowTab2[`${group}_rombel_n`] += rombelTotal; rowTab2[`${group}_pd_n`] += pd; } else { rowTab2[`${group}_rombel_s`] += rombelTotal; rowTab2[`${group}_pd_s`] += pd; }
       });
-
       setUploadProgress(80); 
-
       const tab2DataRaw = Array.from(mapWilayah.values());
-
       const docRef = doc(db, 'dapodik_agregasi', `rasio_rombel_pd_${year}`);
-      await setDoc(docRef, {
-        tahun_data: year,
-        tabel1: tab1Data, 
-        tabel2: tab2DataRaw, 
-        last_updated: new Date().toISOString()
-      });
-
+      await setDoc(docRef, { tahun_data: year, tabel1: tab1Data, tabel2: tab2DataRaw, last_updated: new Date().toISOString() });
       setUploadProgress(100);
       alert(`KALKULASI SUKSES!\n\nHasil rasio Rombel VS Peserta Didik tahun ${year} berhasil dihitung dan disimpan.`);
       checkCalcStatus();
     } catch (error) {
-      console.error(error);
-      alert("Terjadi kesalahan saat melakukan kalkulasi rasio Rombel VS PD.");
-    } finally {
-      setUploading(false);
-    }
+      console.error(error); alert("Terjadi kesalahan saat melakukan kalkulasi rasio Rombel VS PD.");
+    } finally { setUploading(false); }
   };
 
-  // 6. ROMBEL VS RUANG KELAS (KELAS / ROMBEL)
   const handleCalculateRasioRombelKelas = async (year) => {
     setUploading(true);
     setProgressLabel(`Menghitung Rasio Rombel VS Ruang Kelas ${year}...`);
     setUploadProgress(10);
-
     try {
       const qSek = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", year));
       const snapSek = await getDocs(qSek);
-      
       const qSarpras = query(collection(db, 'data_sarpras_chunks'), where("tahun_data", "==", year));
       const snapSarpras = await getDocs(qSarpras);
-
       if (snapSek.empty || snapSarpras.empty) {
         alert("Data Sekolah atau Data Sarpras Kosong! Pastikan kedua data sudah diunggah untuk tahun ini.");
         setUploading(false); return;
       }
-
       let allSekolahData = [];
       snapSek.forEach(doc => { if(doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data); });
-      
       let allSarprasData = [];
       snapSarpras.forEach(doc => { if(doc.data().data) allSarprasData = allSarprasData.concat(doc.data().data); });
-
       setUploadProgress(40);
-
-      // Map Sarpras untuk mencari Ruang Kelas per NPSN.
       const mapSarpras = new Map();
       allSarprasData.forEach(s => {
          const npsn = String(getVal(s, 'npsn')).trim();
@@ -942,229 +697,128 @@ export default function AdminDashboard({ Header }) {
              const kelasRusakRingan = parseInt(getVal(s, 'ruang_kelas_rusak_ringan')) || 0;
              const kelasRusakSedang = parseInt(getVal(s, 'ruang_kelas_rusak_sedang')) || 0;
              const kelasRusakBerat = parseInt(getVal(s, 'ruang_kelas_rusak_berat')) || 0;
-             
              const ruangKelasTotal = kelasBaik + kelasRusakRingan + kelasRusakSedang + kelasRusakBerat;
              mapSarpras.set(npsn, ruangKelasTotal);
          }
       });
-
       const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, rombel_n: 0, kelas_n: 0, rombel_s: 0, kelas_s: 0 }));
       const mapWilayah = new Map();
-
       allSekolahData.forEach(item => {
         const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
         const group = identifyJenjangGroup(bentuk);
         if (!group) return;
-
         const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
         const npsn = String(getVal(item, 'npsn')).trim();
-        
         let rombelTotal = 0;
-        Object.keys(item).forEach(k => {
-            if(k.toLowerCase().includes('rombel_')) {
-                rombelTotal += parseInt(item[k]) || 0;
-            }
-        });
-
+        Object.keys(item).forEach(k => { if(k.toLowerCase().includes('rombel_')) { rombelTotal += parseInt(item[k]) || 0; } });
         const kelasTotal = mapSarpras.get(npsn) || 0;
-
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
-        if (isNegeri) { rowTab1.rombel_n += rombelTotal; rowTab1.kelas_n += kelasTotal; } 
-        else { rowTab1.rombel_s += rombelTotal; rowTab1.kelas_s += kelasTotal; }
-
+        if (isNegeri) { rowTab1.rombel_n += rombelTotal; rowTab1.kelas_n += kelasTotal; } else { rowTab1.rombel_s += rombelTotal; rowTab1.kelas_s += kelasTotal; }
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
         const uniqueId = `${kabDb}_${keyKec}`;
-
         if (!mapWilayah.has(uniqueId)) {
           const init = { wilayah: kabDb, kecamatan: keyKec };
-          JENJANG_KEYS.forEach(k => { 
-             init[`${k}_rombel`] = 0; 
-             init[`${k}_kelas`] = 0;
-             init[`${k}_rombel_n`] = 0; init[`${k}_kelas_n`] = 0;
-             init[`${k}_rombel_s`] = 0; init[`${k}_kelas_s`] = 0;
-          });
+          JENJANG_KEYS.forEach(k => { init[`${k}_rombel`] = 0; init[`${k}_kelas`] = 0; init[`${k}_rombel_n`] = 0; init[`${k}_kelas_n`] = 0; init[`${k}_rombel_s`] = 0; init[`${k}_kelas_s`] = 0; });
           mapWilayah.set(uniqueId, init);
         }
-
         const rowTab2 = mapWilayah.get(uniqueId);
         rowTab2[`${group}_rombel`] += rombelTotal;
         rowTab2[`${group}_kelas`] += kelasTotal;
-        
-        if (isNegeri) {
-           rowTab2[`${group}_rombel_n`] += rombelTotal;
-           rowTab2[`${group}_kelas_n`] += kelasTotal;
-        } else {
-           rowTab2[`${group}_rombel_s`] += rombelTotal;
-           rowTab2[`${group}_kelas_s`] += kelasTotal;
-        }
+        if (isNegeri) { rowTab2[`${group}_rombel_n`] += rombelTotal; rowTab2[`${group}_kelas_n`] += kelasTotal; } else { rowTab2[`${group}_rombel_s`] += rombelTotal; rowTab2[`${group}_kelas_s`] += kelasTotal; }
       });
-
       setUploadProgress(80); 
-
       const tab2DataRaw = Array.from(mapWilayah.values());
-
       const docRef = doc(db, 'dapodik_agregasi', `rasio_rombel_kelas_${year}`);
-      await setDoc(docRef, {
-        tahun_data: year,
-        tabel1: tab1Data, 
-        tabel2: tab2DataRaw, 
-        last_updated: new Date().toISOString()
-      });
-
+      await setDoc(docRef, { tahun_data: year, tabel1: tab1Data, tabel2: tab2DataRaw, last_updated: new Date().toISOString() });
       setUploadProgress(100);
       alert(`KALKULASI SUKSES!\n\nHasil rasio Rombel VS Ruang Kelas tahun ${year} berhasil dihitung dan disimpan.`);
       checkCalcStatus();
     } catch (error) {
-      console.error(error);
-      alert("Terjadi kesalahan saat melakukan kalkulasi rasio Rombel VS Kelas.");
-    } finally {
-      setUploading(false);
-    }
+      console.error(error); alert("Terjadi kesalahan saat melakukan kalkulasi rasio Rombel VS Kelas.");
+    } finally { setUploading(false); }
   };
 
-  // 7. GURU VS PD (PD / GURU)
   const handleCalculateRasioGuruPD = async (year) => {
     setUploading(true);
     setProgressLabel(`Menghitung Rasio Guru VS Peserta Didik ${year}...`);
     setUploadProgress(10);
-
     try {
       const qSek = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", year));
       const snapSek = await getDocs(qSek);
       const qPtk = query(collection(db, 'dapodik_ptk_chunks'), where("tahun_data", "==", year));
       const snapPtk = await getDocs(qPtk);
-
       if (snapSek.empty || snapPtk.empty) {
         alert("Data Sekolah atau Guru Kosong! Pastikan kedua data sudah diunggah untuk tahun ini.");
         setUploading(false); return;
       }
-
       let allSekolahData = [];
       snapSek.forEach(doc => { if(doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data); });
       let allPtkData = [];
       snapPtk.forEach(doc => { if(doc.data().data) allPtkData = allPtkData.concat(doc.data().data); });
-
       setUploadProgress(40);
-
       const mapSekolah = new Map();
       allSekolahData.forEach(s => {
          const npsn = String(getVal(s, 'npsn')).trim();
          if(npsn) {
              let pd = parseInt(getVal(s, 'pd_total'));
              if (isNaN(pd)) {
-               const totalLaki = (parseInt(getVal(s, 'tka_l')) || 0) + (parseInt(getVal(s, 'tkb_l')) || 0) +
-                 (parseInt(getVal(s, 't1_l')) || 0) + (parseInt(getVal(s, 't2_l')) || 0) +
-                 (parseInt(getVal(s, 't3_l')) || 0) + (parseInt(getVal(s, 't4_l')) || 0) +
-                 (parseInt(getVal(s, 't5_l')) || 0) + (parseInt(getVal(s, 't6_l')) || 0) +
-                 (parseInt(getVal(s, 't7_l')) || 0) + (parseInt(getVal(s, 't8_l')) || 0) +
-                 (parseInt(getVal(s, 't9_l')) || 0) + (parseInt(getVal(s, 't10_l')) || 0) +
-                 (parseInt(getVal(s, 't11_l')) || 0) + (parseInt(getVal(s, 't12_l')) || 0) +
-                 (parseInt(getVal(s, 't13_l')) || 0) + (parseInt(getVal(s, 'paket_a_l')) || 0) +
-                 (parseInt(getVal(s, 'paket_b_l')) || 0) + (parseInt(getVal(s, 'paket_c_l')) || 0);
-
-               const totalPerempuan = (parseInt(getVal(s, 'tka_p')) || 0) + (parseInt(getVal(s, 'tkb_p')) || 0) +
-                 (parseInt(getVal(s, 't1_p')) || 0) + (parseInt(getVal(s, 't2_p')) || 0) +
-                 (parseInt(getVal(s, 't3_p')) || 0) + (parseInt(getVal(s, 't4_p')) || 0) +
-                 (parseInt(getVal(s, 't5_p')) || 0) + (parseInt(getVal(s, 't6_p')) || 0) +
-                 (parseInt(getVal(s, 't7_p')) || 0) + (parseInt(getVal(s, 't8_p')) || 0) +
-                 (parseInt(getVal(s, 't9_p')) || 0) + (parseInt(getVal(s, 't10_p')) || 0) +
-                 (parseInt(getVal(s, 't11_p')) || 0) + (parseInt(getVal(s, 't12_p')) || 0) +
-                 (parseInt(getVal(s, 't13_p')) || 0) + (parseInt(getVal(s, 'paket_a_p')) || 0) +
-                 (parseInt(getVal(s, 'paket_b_p')) || 0) + (parseInt(getVal(s, 'paket_c_p')) || 0);
-
+               const totalLaki = (parseInt(getVal(s, 'tka_l')) || 0) + (parseInt(getVal(s, 'tkb_l')) || 0) + (parseInt(getVal(s, 't1_l')) || 0) + (parseInt(getVal(s, 't2_l')) || 0) + (parseInt(getVal(s, 't3_l')) || 0) + (parseInt(getVal(s, 't4_l')) || 0) + (parseInt(getVal(s, 't5_l')) || 0) + (parseInt(getVal(s, 't6_l')) || 0) + (parseInt(getVal(s, 't7_l')) || 0) + (parseInt(getVal(s, 't8_l')) || 0) + (parseInt(getVal(s, 't9_l')) || 0) + (parseInt(getVal(s, 't10_l')) || 0) + (parseInt(getVal(s, 't11_l')) || 0) + (parseInt(getVal(s, 't12_l')) || 0) + (parseInt(getVal(s, 't13_l')) || 0) + (parseInt(getVal(s, 'paket_a_l')) || 0) + (parseInt(getVal(s, 'paket_b_l')) || 0) + (parseInt(getVal(s, 'paket_c_l')) || 0);
+               const totalPerempuan = (parseInt(getVal(s, 'tka_p')) || 0) + (parseInt(getVal(s, 'tkb_p')) || 0) + (parseInt(getVal(s, 't1_p')) || 0) + (parseInt(getVal(s, 't2_p')) || 0) + (parseInt(getVal(s, 't3_p')) || 0) + (parseInt(getVal(s, 't4_p')) || 0) + (parseInt(getVal(s, 't5_p')) || 0) + (parseInt(getVal(s, 't6_p')) || 0) + (parseInt(getVal(s, 't7_p')) || 0) + (parseInt(getVal(s, 't8_p')) || 0) + (parseInt(getVal(s, 't9_p')) || 0) + (parseInt(getVal(s, 't10_p')) || 0) + (parseInt(getVal(s, 't11_p')) || 0) + (parseInt(getVal(s, 't12_p')) || 0) + (parseInt(getVal(s, 't13_p')) || 0) + (parseInt(getVal(s, 'paket_a_p')) || 0) + (parseInt(getVal(s, 'paket_b_p')) || 0) + (parseInt(getVal(s, 'paket_c_p')) || 0);
                pd = totalLaki + totalPerempuan;
              }
              mapSekolah.set(npsn, { ...s, pd_total: pd, guru_aktual: 0 });
          }
       });
-
       allPtkData.forEach(p => {
          const isGuru = String(getVal(p, 'jenis_ptk')).toUpperCase().includes('GURU');
          const isInduk = String(getVal(p, 'status_tugas') || getVal(p, 'ptk_induk')).trim().toUpperCase() === 'INDUK' || String(getVal(p, 'status_tugas')).trim() === '1';
          if(isGuru && isInduk) {
             const npsn = String(getVal(p, 'npsn')).trim();
-            if(mapSekolah.has(npsn)) {
-               mapSekolah.get(npsn).guru_aktual++;
-            }
+            if(mapSekolah.has(npsn)) { mapSekolah.get(npsn).guru_aktual++; }
          }
       });
-
       setUploadProgress(60);
-
       const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, guru_n: 0, pd_n: 0, guru_s: 0, pd_s: 0 }));
       const mapWilayah = new Map();
-
       Array.from(mapSekolah.values()).forEach(item => {
         const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
         const group = identifyJenjangGroup(bentuk);
         if (!group) return;
-
         const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
         const pdTotal = item.pd_total;
         const guruAktual = item.guru_aktual;
-
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
-        if (isNegeri) { rowTab1.guru_n += guruAktual; rowTab1.pd_n += pdTotal; } 
-        else { rowTab1.guru_s += guruAktual; rowTab1.pd_s += pdTotal; }
-
+        if (isNegeri) { rowTab1.guru_n += guruAktual; rowTab1.pd_n += pdTotal; } else { rowTab1.guru_s += guruAktual; rowTab1.pd_s += pdTotal; }
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
         const uniqueId = `${kabDb}_${keyKec}`;
-
         if (!mapWilayah.has(uniqueId)) {
           const init = { wilayah: kabDb, kecamatan: keyKec };
-          JENJANG_KEYS.forEach(k => { 
-             init[`${k}_guru`] = 0; init[`${k}_pd`] = 0;
-             init[`${k}_guru_n`] = 0; init[`${k}_pd_n`] = 0;
-             init[`${k}_guru_s`] = 0; init[`${k}_pd_s`] = 0;
-          });
+          JENJANG_KEYS.forEach(k => { init[`${k}_guru`] = 0; init[`${k}_pd`] = 0; init[`${k}_guru_n`] = 0; init[`${k}_pd_n`] = 0; init[`${k}_guru_s`] = 0; init[`${k}_pd_s`] = 0; });
           mapWilayah.set(uniqueId, init);
         }
-
         const rowTab2 = mapWilayah.get(uniqueId);
         rowTab2[`${group}_guru`] += guruAktual;
         rowTab2[`${group}_pd`] += pdTotal;
-        
-        if (isNegeri) {
-           rowTab2[`${group}_guru_n`] += guruAktual;
-           rowTab2[`${group}_pd_n`] += pdTotal;
-        } else {
-           rowTab2[`${group}_guru_s`] += guruAktual;
-           rowTab2[`${group}_pd_s`] += pdTotal;
-        }
+        if (isNegeri) { rowTab2[`${group}_guru_n`] += guruAktual; rowTab2[`${group}_pd_n`] += pdTotal; } else { rowTab2[`${group}_guru_s`] += guruAktual; rowTab2[`${group}_pd_s`] += pdTotal; }
       });
-
       setUploadProgress(80); 
-
       const tab2DataRaw = Array.from(mapWilayah.values());
-
       const docRef = doc(db, 'dapodik_agregasi', `rasio_guru_pd_${year}`);
-      await setDoc(docRef, {
-        tahun_data: year, tabel1: tab1Data, tabel2: tab2DataRaw, last_updated: new Date().toISOString()
-      });
-
+      await setDoc(docRef, { tahun_data: year, tabel1: tab1Data, tabel2: tab2DataRaw, last_updated: new Date().toISOString() });
       setUploadProgress(100);
       alert(`KALKULASI SUKSES!\n\nHasil rasio Guru VS Peserta Didik tahun ${year} berhasil dihitung dan disimpan.`);
       checkCalcStatus();
     } catch (error) {
-      console.error(error);
-      alert("Terjadi kesalahan saat melakukan kalkulasi rasio Guru VS PD.");
-    } finally {
-      setUploading(false);
-    }
+      console.error(error); alert("Terjadi kesalahan saat melakukan kalkulasi rasio Guru VS PD.");
+    } finally { setUploading(false); }
   };
-
-
-  // --- KOMPONEN UI ---
 
   const YearUploadGroup = ({ label, collection, icon: Icon, colorClass, formatHandler }) => (
     <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-gray-100 flex flex-col gap-6 relative">
       {formatHandler && (
-        <button 
-          onClick={formatHandler} 
-          className={`absolute top-8 right-8 text-[10px] flex items-center gap-1 bg-gray-100 text-gray-700 px-3 py-1.5 rounded-full font-bold hover:bg-gray-200 transition-colors shadow-sm`}
-        >
+        <button onClick={formatHandler} className={`absolute top-8 right-8 text-[10px] flex items-center gap-1 bg-gray-100 text-gray-700 px-3 py-1.5 rounded-full font-bold hover:bg-gray-200 transition-colors shadow-sm`}>
           <Download size={12} /> Unduh Format
         </button>
       )}
@@ -1181,17 +835,13 @@ export default function AdminDashboard({ Header }) {
             <div key={year} className="flex flex-col gap-2">
               <button 
                 onClick={() => triggerUpload({ label, collection, year })}
-                className={`w-full py-4 rounded-2xl font-black text-xl transition-all active:scale-95 border-2 flex flex-col items-center gap-1
-                  ${hasData ? `${colorClass} text-white border-transparent shadow-lg` : 'bg-gray-50 text-gray-300 border-gray-100 hover:border-blue-300'}`}
+                className={`w-full py-4 rounded-2xl font-black text-xl transition-all active:scale-95 border-2 flex flex-col items-center gap-1 ${hasData ? `${colorClass} text-white border-transparent shadow-lg` : 'bg-gray-50 text-gray-300 border-gray-100 hover:border-blue-300'}`}
               >
                 <div className="flex items-center gap-2">{hasData ? <CheckCircle size={18} /> : <UploadCloud size={18} />}{year}</div>
                 <span className="text-[9px] uppercase opacity-70">{hasData ? 'Data Terisi' : 'Kosong'}</span>
               </button>
               {hasData && (
-                <button 
-                  onClick={() => handleDeleteData({ label, collection, year })}
-                  className="flex items-center justify-center gap-1 text-red-500 font-black uppercase text-[9px] hover:text-red-700 transition-colors py-1"
-                >
+                <button onClick={() => handleDeleteData({ label, collection, year })} className="flex items-center justify-center gap-1 text-red-500 font-black uppercase text-[9px] hover:text-red-700 transition-colors py-1">
                   <Trash2 size={12} /> Hapus Data
                 </button>
               )}
@@ -1205,7 +855,6 @@ export default function AdminDashboard({ Header }) {
   return (
     <div className="h-screen flex flex-col bg-gray-100 overflow-hidden text-center">
       <Header />
-      
       {uploading && (
         <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center backdrop-blur-md">
           <div className="bg-white p-12 rounded-[3rem] shadow-2xl flex flex-col items-center gap-6 animate-in zoom-in duration-300 w-full max-w-md text-center">
@@ -1220,9 +869,7 @@ export default function AdminDashboard({ Header }) {
           </div>
         </div>
       )}
-
       <div className={`flex-1 flex flex-col items-center p-12 overflow-y-auto ${adminView === 'main' ? 'justify-center' : 'justify-start pt-10'}`}>
-        
         {adminView === 'main' && (
           <div className="w-full flex flex-col items-center animate-in fade-in zoom-in duration-300">
             <div className="bg-blue-600 text-white w-20 h-20 rounded-3xl flex items-center justify-center mb-8 shadow-lg"><Database size={40} /></div>
@@ -1239,7 +886,6 @@ export default function AdminDashboard({ Header }) {
             </div>
           </div>
         )}
-
         {adminView === 'input' && (
           <div className="flex flex-col items-center w-full max-w-6xl animate-in slide-in-from-top-4 duration-500">
             <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".xlsx, .xls, .csv" />
@@ -1248,7 +894,6 @@ export default function AdminDashboard({ Header }) {
                 <ArrowLeft size={24} /> Kembali
               </button>
             </div>
-            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full pb-20">
               <YearUploadGroup label="Satuan Pendidikan" collection="dapodik_sekolah" icon={School} colorClass="bg-blue-600" formatHandler={handleDownloadFormatSekolah} />
               <YearUploadGroup label="Database PTK" collection="dapodik_ptk" icon={Users} colorClass="bg-blue-500" formatHandler={handleDownloadFormatPtk} />
@@ -1259,7 +904,6 @@ export default function AdminDashboard({ Header }) {
             </div>
           </div>
         )}
-
         {adminView === 'kalkulasi' && (
           <div className="flex flex-col items-center w-full max-w-5xl animate-in slide-in-from-top-4 duration-500">
             <div className="w-full flex justify-start mb-8">
@@ -1267,7 +911,6 @@ export default function AdminDashboard({ Header }) {
                 <ArrowLeft size={24} /> Kembali
               </button>
             </div>
-
             <div className="bg-white p-10 rounded-[3rem] shadow-xl border border-gray-100 w-full text-left">
                <div className="flex items-center gap-4 mb-8">
                  <div className="bg-orange-100 text-orange-600 p-4 rounded-2xl"><Activity size={32}/></div>
@@ -1276,9 +919,7 @@ export default function AdminDashboard({ Header }) {
                    <p className="text-gray-500 font-bold uppercase tracking-widest text-xs mt-1">Jalankan wajib setelah upload / update database terbaru</p>
                  </div>
                </div>
-
                <div className="grid grid-cols-1 gap-6">
-                 
                  {/* SEKOLAH VS PD */}
                  <div className="bg-gray-50 p-6 rounded-3xl border border-gray-200 flex flex-col md:flex-row items-center justify-between gap-6">
                     <div>
@@ -1296,7 +937,6 @@ export default function AdminDashboard({ Header }) {
                        ))}
                     </div>
                  </div>
-
                  {/* SEKOLAH VS GURU */}
                  <div className="bg-gray-50 p-6 rounded-3xl border border-gray-200 flex flex-col md:flex-row items-center justify-between gap-6">
                     <div>
@@ -1314,7 +954,6 @@ export default function AdminDashboard({ Header }) {
                        ))}
                     </div>
                  </div>
-
                  {/* ROMBEL VS GURU */}
                  <div className="bg-gray-50 p-6 rounded-3xl border border-gray-200 flex flex-col md:flex-row items-center justify-between gap-6">
                     <div>
@@ -1332,7 +971,6 @@ export default function AdminDashboard({ Header }) {
                        ))}
                     </div>
                  </div>
-
                  {/* SEKOLAH VS ROMBEL */}
                  <div className="bg-gray-50 p-6 rounded-3xl border border-gray-200 flex flex-col md:flex-row items-center justify-between gap-6">
                     <div>
@@ -1350,7 +988,6 @@ export default function AdminDashboard({ Header }) {
                        ))}
                     </div>
                  </div>
-
                  {/* ROMBEL VS PD */}
                  <div className="bg-gray-50 p-6 rounded-3xl border border-gray-200 flex flex-col md:flex-row items-center justify-between gap-6">
                     <div>
@@ -1368,7 +1005,6 @@ export default function AdminDashboard({ Header }) {
                        ))}
                     </div>
                  </div>
-
                  {/* ROMBEL VS RUANG KELAS */}
                  <div className="bg-gray-50 p-6 rounded-3xl border border-gray-200 flex flex-col md:flex-row items-center justify-between gap-6">
                     <div>
@@ -1386,7 +1022,6 @@ export default function AdminDashboard({ Header }) {
                        ))}
                     </div>
                  </div>
-
                  {/* GURU VS PD */}
                  <div className="bg-gray-50 p-6 rounded-3xl border border-gray-200 flex flex-col md:flex-row items-center justify-between gap-6">
                     <div>
@@ -1409,7 +1044,6 @@ export default function AdminDashboard({ Header }) {
             </div>
           </div>
         )}
-
       </div>
     </div>
   );

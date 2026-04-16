@@ -5,6 +5,8 @@ import {
   Search, X, ChevronLeft, ChevronRight, Building2
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
+import { db } from '../firebase/config';
+import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 
 // =====================================================================
 // UTILITY FUNCTIONS
@@ -220,7 +222,6 @@ const DapodikPesertaDidikModal = ({ isOpen, onClose, data, initialWilayah, displ
   const processedData = useMemo(() => {
     if (!data) return [];
 
-    // Filter Awal
     const validData = data.filter(item => {
       const kabDb = String(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota') || '').trim().toUpperCase();
       if (!isModeSemua && kabDb !== filterWilayah) return false;
@@ -251,7 +252,6 @@ const DapodikPesertaDidikModal = ({ isOpen, onClose, data, initialWilayah, displ
 
       const row = mapAgg.get(keyId);
       
-      // Ambil nilai PD
       let pd = parseInt(getVal(item, 'pd_total'));
       if (isNaN(pd)) {
           let sum = 0;
@@ -277,7 +277,6 @@ const DapodikPesertaDidikModal = ({ isOpen, onClose, data, initialWilayah, displ
     }
   }, [data, isModeSemua, filterWilayah, filterStatus, searchTerm]);
 
-  // HITUNG TOTAL KESELURUHAN (GRAND TOTAL UNTUK FOOTER TABEL)
   const columnTotals = useMemo(() => {
     const totals = { total: 0 };
     JENJANG_KEYS.forEach(k => totals[k] = 0);
@@ -308,7 +307,7 @@ const DapodikPesertaDidikModal = ({ isOpen, onClose, data, initialWilayah, displ
     const totalRow = worksheet.addRow(totalRowData);
 
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0891B2' } }; // Teal 600
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0891B2' } }; 
     
     totalRow.font = { bold: true, color: { argb: 'FF164E63' } };
     totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCFBF1' } };
@@ -344,7 +343,6 @@ const DapodikPesertaDidikModal = ({ isOpen, onClose, data, initialWilayah, displ
               <h2 className="text-xl font-black uppercase tracking-tighter leading-none">
                 Rincian {isModeSemua ? 'Wilayah Provinsi' : 'Kecamatan'}
               </h2>
-              {/* Teks Kab. sudah dihilangkan agar tidak double */}
               <p className="text-cyan-100 text-sm font-bold uppercase tracking-widest mt-1">
                 {isModeSemua ? 'Semua Kabupaten' : filterWilayah}
               </p>
@@ -465,21 +463,41 @@ const DapodikPesertaDidikModal = ({ isOpen, onClose, data, initialWilayah, displ
 // =====================================================================
 export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', lastUpdatedDate }) {
   const [activeTab, setActiveTab] = useState('SEMUA'); 
-  
-  // Modal State
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedWilayah, setSelectedWilayah] = useState('SEMUA');
 
-  // Menangkap tanggal update (Jika tidak ada props, gunakan fallback)
-  const displayLastUpdated = lastUpdatedDate || 'Sesuai Database Terkini';
+  // STATE UNTUK FETCH TANGGAL DARI FIREBASE
+  const [fetchedDate, setFetchedDate] = useState('');
 
-  // 1. Ekstrak daftar unik Kabupaten
+  // FETCH TANGGAL UPDATE LANGSUNG DARI FIREBASE (MANDIRI)
+  useEffect(() => {
+    const getUpdateDate = async () => {
+      try {
+        const q = query(collection(db, 'dapodik_sekolah_chunks'), where('tahun_data', '==', selectedYear), limit(1));
+        const snap = await getDocs(q);
+        
+        if (!snap.empty) {
+          const docData = snap.docs[0].data();
+          if (docData.last_updated && typeof docData.last_updated === 'string') {
+            const d = new Date(docData.last_updated);
+            const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+            setFetchedDate(`${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()} Pukul ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+          }
+        }
+      } catch (e) {
+        console.error("Gagal menarik tanggal update", e);
+      }
+    };
+    getUpdateDate();
+  }, [selectedYear]);
+
+  const displayLastUpdated = fetchedDate || lastUpdatedDate || 'Sesuai Database Terkini';
+
   const listKabupaten = useMemo(() => {
     const unik = [...new Set(data.map(item => String(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota') || '').trim().toUpperCase()))];
     return unik.filter(k => k !== '').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
   }, [data]);
 
-  // 2. Mesin Agregasi Utama
   const aggregatedData = useMemo(() => {
     const validJenjangList = JENJANG_GROUPS[activeTab];
 
@@ -504,7 +522,6 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
        const row = mapAgg.get(kab);
        const status = String(getVal(item, 'status_sekolah') || '').trim().toUpperCase();
        
-       // Logika perhitungan total PD
        let pd = parseInt(getVal(item, 'pd_total'));
        if (isNaN(pd)) {
            let sum = 0;
@@ -523,7 +540,6 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
     return Array.from(mapAgg.values()).sort((a, b) => getKabupatenRank(a.wilayah) - getKabupatenRank(b.wilayah));
   }, [data, activeTab, listKabupaten]);
 
-  // 3. Hitung Grand Total & Data Chart
   const grandTotals = useMemo(() => {
     return aggregatedData.reduce((acc, curr) => {
       acc.negeri += curr.negeri;
@@ -533,16 +549,14 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
     }, { negeri: 0, swasta: 0, total: 0 });
   }, [aggregatedData]);
 
-  // Data Pie Chart
   const pieSegments = [
-    { name: 'Negeri', value: grandTotals.negeri, color: '#0284c7' }, // Cyan 600
-    { name: 'Swasta', value: grandTotals.swasta, color: '#f97316' }  // Orange 500
+    { name: 'Negeri', value: grandTotals.negeri, color: '#0284c7' }, 
+    { name: 'Swasta', value: grandTotals.swasta, color: '#f97316' }  
   ];
 
   const percentNegeri = grandTotals.total > 0 ? ((grandTotals.negeri / grandTotals.total) * 100).toFixed(1) : 0;
   const percentSwasta = grandTotals.total > 0 ? ((grandTotals.swasta / grandTotals.total) * 100).toFixed(1) : 0;
 
-  // 4. Unduh Excel Tabel
   const downloadExcel = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheetTitle = activeTab === 'SEMUA' ? 'Semua Jenjang' : activeTab.replace('/', '-'); 
@@ -585,7 +599,6 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
   return (
     <div className="h-full flex flex-col animate-in fade-in duration-500">
       
-      {/* 1. TABS HEADER */}
       <div className="bg-white px-4 md:px-6 py-3 border-b border-gray-100 flex items-center justify-between shrink-0 shadow-sm z-20 overflow-x-auto">
         <div className="flex items-center gap-1.5 md:gap-2 bg-gray-100 p-1 md:p-1.5 rounded-xl md:rounded-2xl min-w-max">
           {Object.keys(JENJANG_GROUPS).map(tab => (
@@ -607,10 +620,8 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
         </button>
       </div>
 
-      {/* 2. DUA KOLOM LAYOUT */}
       <div className="flex-1 flex flex-col lg:flex-row min-h-0 bg-gray-50/50">
         
-        {/* KOLOM KIRI: TABEL REKAPITULASI */}
         <div className="flex-1 lg:w-2/3 p-4 md:p-6 flex flex-col min-h-0 overflow-hidden border-r border-gray-200">
           <div className="bg-white rounded-3xl shadow-sm border border-gray-100 flex-1 flex flex-col overflow-hidden relative">
             <div className="flex-1 overflow-auto p-4">
@@ -663,7 +674,6 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
                   </tr>
                 </tfoot>
               </table>
-              {/* TEKS SUMBER UPDATE DAPODIK */}
               <div className="mt-4 px-2 text-right text-xs font-bold italic text-gray-400 pb-2">
                  Sumber : Data Dapodik Update Pada Tanggal : {displayLastUpdated}
               </div>
@@ -671,7 +681,6 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
           </div>
         </div>
 
-        {/* KOLOM KANAN: PREMIUM PIE CHART */}
         <div className="lg:w-1/3 flex flex-col bg-white border-l border-gray-100 relative">
           
           <div className="text-center w-full px-4 pt-8 pb-4 shrink-0">
@@ -717,7 +726,6 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
 
       </div>
 
-      {/* 3. MODAL COMPONENT */}
       <DapodikPesertaDidikModal 
         isOpen={modalOpen} 
         onClose={() => setModalOpen(false)}

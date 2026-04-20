@@ -1,12 +1,21 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import { 
   Download, Users, MapPin, Eye, FileSpreadsheet, 
-  Search, X, ChevronLeft, ChevronRight, Building2
+  Search, X, ChevronLeft, ChevronRight, Building2, 
+  Award, Briefcase, GraduationCap, Clock, CalendarDays
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import { db } from '../firebase/config';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+
+// IMPORT SELURUH KOMPONEN MODAL RINCIAN
+import RincianStatusSekolahGuru from './RincianStatusSekolahGuru';
+import RincianGenderGuru from './RincianGenderGuru';
+import RincianKualifikasiGuru from './RincianKualifikasiGuru';
+import RincianKepegawaianGuru from './RincianKepegawaianGuru';
+import RincianProfesiGuru from './RincianProfesiGuru';
+import RincianUsiaGuru from './RincianUsiaGuru';
+import RincianProyeksiPensiunGuru from './RincianProyeksiPensiunGuru';
 
 // =====================================================================
 // UTILITY FUNCTIONS
@@ -15,6 +24,20 @@ const getVal = (obj, keyName) => {
   if (!obj) return '';
   const key = Object.keys(obj).find(k => k.trim().toLowerCase() === keyName.toLowerCase());
   return key ? obj[key] : '';
+};
+
+const KABUPATEN_LIST = [
+  "BENGKAYANG", "KAPUAS HULU", "KAYONG UTARA", "KETAPANG", 
+  "KUBU RAYA", "LANDAK", "MELAWI", "MEMPAWAH", "PONTIANAK", 
+  "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
+];
+
+const cleanKabupatenName = (rawName) => {
+  if (!rawName) return "TIDAK DIKETAHUI";
+  let name = String(rawName).toUpperCase().replace(/^(KAB\.|KABUPATEN|KOTA)\s+/i, '').trim();
+  const found = KABUPATEN_LIST.find(kab => name.includes(kab));
+  if (found) return found;
+  return name; 
 };
 
 const getKabupatenRank = (kabName) => {
@@ -36,17 +59,31 @@ const getKabupatenRank = (kabName) => {
   return 99;
 };
 
+// Hitung Umur Real-time
+const calculateAge = (birthDateString) => {
+  if (!birthDateString) return null;
+  const today = new Date();
+  const birthDate = new Date(birthDateString);
+  if (isNaN(birthDate)) return null;
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const m = today.getMonth() - birthDate.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+  }
+  return age;
+};
+
 // =====================================================================
 // PENGELOMPOKAN JENJANG
 // =====================================================================
 const JENJANG_GROUPS = {
   'SEMUA': [],
-  'PAUD': ['TK', 'KB', 'SPS', 'TPA', 'PAUD'],
+  'PAUD': ['TK', 'KB', 'PAUD'],
   'SD': ['SD', 'SPK SD'],
   'SMP': ['SMP', 'SPK SMP'],
   'SMA/SMK': ['SMA', 'SPK SMA', 'SMK'],
   'SLB (Inklusif)': ['SLB'],
-  'NON FORMAL': ['PKBM', 'SKB']
+  'NON FORMAL': ['PKBM', 'SKB', 'SPS', 'TPA']
 };
 
 const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'NON FORMAL'];
@@ -65,10 +102,10 @@ const identifyJenjangGroup = (jenjangDb) => {
 const PremiumPieChart = ({ segments, total }) => {
   const [hoveredIndex, setHoveredIndex] = useState(null);
 
-  if (total === 0) {
+  if (total === 0 || !total) {
     return (
-      <div className="w-full h-full flex items-center justify-center">
-        <div className="w-32 h-32 md:w-40 md:h-40 rounded-full bg-gray-50 flex items-center justify-center border-4 border-dashed border-gray-200">
+      <div className="w-full h-full flex items-center justify-center min-h-[250px]">
+        <div className="w-32 h-32 rounded-full bg-gray-50 flex items-center justify-center border-4 border-dashed border-gray-200">
           <span className="text-gray-400 font-bold text-xs uppercase tracking-widest">Kosong</span>
         </div>
       </div>
@@ -76,7 +113,6 @@ const PremiumPieChart = ({ segments, total }) => {
   }
 
   let cumulativePercent = 0;
-  
   const getCoordinatesForPercent = (percent, radius = 1) => {
     const x = Math.cos(2 * Math.PI * percent) * radius;
     const y = Math.sin(2 * Math.PI * percent) * radius;
@@ -85,12 +121,10 @@ const PremiumPieChart = ({ segments, total }) => {
 
   const chartData = segments.map((s, i) => {
     if (s.value === 0) return null;
-    
     const percentage = s.value / total;
     const startPercent = cumulativePercent;
     const endPercent = cumulativePercent + percentage;
     const midPercent = startPercent + (percentage / 2); 
-    
     cumulativePercent = endPercent;
 
     const [startX, startY] = getCoordinatesForPercent(startPercent);
@@ -109,7 +143,6 @@ const PremiumPieChart = ({ segments, total }) => {
     const isRightSide = lineMidX > 0;
     const lineEndX = isRightSide ? lineMidX + 0.2 : lineMidX - 0.2;
     const lineEndY = lineMidY;
-
     const textX = isRightSide ? lineEndX + 0.05 : lineEndX - 0.05;
     const textAnchor = isRightSide ? "start" : "end";
     
@@ -119,67 +152,33 @@ const PremiumPieChart = ({ segments, total }) => {
     const transform = isHovered && percentage < 1 ? `translate(${popX}, ${popY}) scale(1.05)` : 'scale(1)';
 
     return {
-      ...s,
-      index: i,
-      pathData,
-      percentage: (percentage * 100).toFixed(1),
-      lineStartX, lineStartY,
-      lineMidX, lineMidY,
-      lineEndX, lineEndY,
-      textX, textAnchor,
-      transform,
-      isRightSide
+      ...s, index: i, pathData, percentage: (percentage * 100).toFixed(1),
+      lineStartX, lineStartY, lineMidX, lineMidY, lineEndX, lineEndY,
+      textX, textAnchor, transform, isRightSide
     };
   }).filter(Boolean);
 
   return (
-    <div className="w-full max-w-[280px] md:max-w-[320px] aspect-square relative flex items-center justify-center mx-auto drop-shadow-xl hover:scale-105 transition-transform duration-300">
+    <div className="w-full max-w-[280px] aspect-square relative flex items-center justify-center mx-auto drop-shadow-xl hover:scale-105 transition-transform duration-300">
       <svg viewBox="-1.8 -1.5 3.6 3" className="w-full h-full max-h-[300px] overflow-visible drop-shadow-xl">
         <g transform="rotate(-90)">
           {chartData.map((data) => (
             <path 
-              key={`slice-${data.index}`} 
-              d={data.pathData} 
-              fill={data.color}
-              transform={data.transform}
-              onMouseEnter={() => setHoveredIndex(data.index)}
-              onMouseLeave={() => setHoveredIndex(null)}
+              key={`slice-${data.index}`} d={data.pathData} fill={data.color} transform={data.transform}
+              onMouseEnter={() => setHoveredIndex(data.index)} onMouseLeave={() => setHoveredIndex(null)}
               className="cursor-pointer transition-all duration-300 stroke-white stroke-[0.015]"
               style={{ transformOrigin: '0px 0px' }}
             />
           ))}
           {chartData.map((data) => (
-            <g 
-              key={`label-${data.index}`}
-              className={`transition-opacity duration-300 ${hoveredIndex !== null && hoveredIndex !== data.index ? 'opacity-30' : 'opacity-100'}`}
-            >
-              <polyline 
-                points={`${data.lineStartX},${data.lineStartY} ${data.lineMidX},${data.lineMidY} ${data.lineEndX},${data.lineEndY}`}
-                fill="none"
-                stroke={data.color}
-                strokeWidth="0.015"
-                strokeLinejoin="round"
-              />
+            <g key={`label-${data.index}`} className={`transition-opacity duration-300 ${hoveredIndex !== null && hoveredIndex !== data.index ? 'opacity-30' : 'opacity-100'}`}>
+              <polyline points={`${data.lineStartX},${data.lineStartY} ${data.lineMidX},${data.lineMidY} ${data.lineEndX},${data.lineEndY}`} fill="none" stroke={data.color} strokeWidth="0.015" strokeLinejoin="round" />
               <circle cx={data.lineStartX} cy={data.lineStartY} r="0.04" fill={data.color} />
               <circle cx={data.lineEndX} cy={data.lineEndY} r="0.03" fill={data.color} />
               <g transform={`rotate(90 ${data.textX} ${data.lineEndY})`}>
-                <text 
-                  x={data.textX} 
-                  y={data.lineEndY - 0.04}
-                  textAnchor={data.textAnchor}
-                  fill={data.color}
-                  className="font-black text-[0.14px] uppercase"
-                >
-                  {data.percentage}%
-                </text>
-                <text 
-                  x={data.textX} 
-                  y={data.lineEndY + 0.12} 
-                  textAnchor={data.textAnchor}
-                  fill="#4B5563" 
-                  className="font-bold text-[0.1px] tracking-widest"
-                >
-                  {data.name} ({data.value.toLocaleString()})
+                <text x={data.textX} y={data.lineEndY - 0.04} textAnchor={data.textAnchor} fill={data.color} className="font-black text-[0.14px] uppercase">{data.percentage}%</text>
+                <text x={data.textX} y={data.lineEndY + 0.12} textAnchor={data.textAnchor} fill="#4B5563" className="font-bold text-[0.09px] tracking-widest">
+                  {data.name}
                 </text>
               </g>
             </g>
@@ -190,302 +189,38 @@ const PremiumPieChart = ({ segments, total }) => {
   );
 };
 
-// =====================================================================
-// MODAL RINCIAN GURU (REKAP PER WILAYAH/KECAMATAN)
-// =====================================================================
-const DapodikGuruModal = ({ isOpen, onClose, data, initialWilayah, displayLastUpdated }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterWilayah, setFilterWilayah] = useState(initialWilayah);
-  const [filterStatus, setFilterStatus] = useState('SEMUA');
-  const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 15;
-
-  useEffect(() => {
-    if (isOpen) setFilterWilayah(initialWilayah);
-  }, [isOpen, initialWilayah]);
-
-  useEffect(() => { setCurrentPage(1); }, [searchTerm, filterWilayah, filterStatus]);
-
-  useEffect(() => {
-    const handleEsc = (e) => { if (e.key === 'Escape') onClose(); };
-    if (isOpen) window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
-  }, [isOpen, onClose]);
-
-  const listKabupaten = useMemo(() => {
-    const unik = [...new Set(data.map(item => String(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota') || '').trim().toUpperCase()))];
-    return unik.filter(k => k !== '').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
-  }, [data]);
-
-  const isModeSemua = filterWilayah === 'SEMUA';
-
-  const processedData = useMemo(() => {
-    if (!data) return [];
-
-    const validData = data.filter(guru => {
-      const kabDb = String(getVal(guru, 'kabupaten') || getVal(guru, 'Kabupaten/Kota') || '').trim().toUpperCase();
-      if (!isModeSemua && kabDb !== filterWilayah) return false;
-
-      const statusDb = String(getVal(guru, 'status_sekolah') || '').trim().toUpperCase();
-      if (filterStatus !== 'SEMUA' && statusDb !== filterStatus) return false;
-      return true;
-    });
-
-    const mapAgg = new Map();
-
-    validData.forEach(guru => {
-      const group = identifyJenjangGroup(getVal(guru, 'bentuk_pendidikan') || getVal(guru, 'jenjang'));
-      if (!group) return;
-
-      let keyId;
-      if (isModeSemua) {
-        keyId = String(getVal(guru, 'kabupaten') || getVal(guru, 'Kabupaten/Kota') || 'TIDAK DIKETAHUI').trim().toUpperCase();
-      } else {
-        keyId = String(getVal(guru, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
-      }
-
-      if (!mapAgg.has(keyId)) {
-        const initRow = { namaWilayah: keyId, total: 0 };
-        JENJANG_KEYS.forEach(k => initRow[k] = 0);
-        mapAgg.set(keyId, initRow);
-      }
-
-      const row = mapAgg.get(keyId);
-      row[group]++;
-      row.total++;
-    });
-
-    let resultArray = Array.from(mapAgg.values());
-
-    if (searchTerm) {
-      resultArray = resultArray.filter(r => r.namaWilayah.toLowerCase().includes(searchTerm.toLowerCase()));
-    }
-
-    if (isModeSemua) {
-      return resultArray.sort((a, b) => getKabupatenRank(a.namaWilayah) - getKabupatenRank(b.namaWilayah));
-    } else {
-      return resultArray.sort((a, b) => a.namaWilayah.localeCompare(b.namaWilayah));
-    }
-  }, [data, isModeSemua, filterWilayah, filterStatus, searchTerm]);
-
-  const columnTotals = useMemo(() => {
-    const totals = { total: 0 };
-    JENJANG_KEYS.forEach(k => totals[k] = 0);
-
-    processedData.forEach(row => {
-      totals.total += row.total;
-      JENJANG_KEYS.forEach(k => totals[k] += row[k]);
-    });
-
-    return totals;
-  }, [processedData]);
-
-  const downloadExcelRincian = async () => {
-    const workbook = new ExcelJS.Workbook();
-    const sheetName = isModeSemua ? 'Rekap Provinsi' : `Rekap ${filterWilayah}`;
-    const worksheet = workbook.addWorksheet(sheetName);
-
-    worksheet.columns = [
-      { header: isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan', key: 'namaWilayah', width: 30 },
-      ...JENJANG_KEYS.map(k => ({ header: k, key: k, width: 15 })),
-      { header: 'Total Guru', key: 'total', width: 15 },
-    ];
-
-    processedData.forEach(item => worksheet.addRow(item));
-
-    const totalRowData = { namaWilayah: 'TOTAL KESELURUHAN', total: columnTotals.total };
-    JENJANG_KEYS.forEach(k => totalRowData[k] = columnTotals[k]);
-    const totalRow = worksheet.addRow(totalRowData);
-
-    worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
-    
-    totalRow.font = { bold: true, color: { argb: 'FF1E3A8A' } };
-    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `Rekap_Guru_${isModeSemua ? 'Provinsi' : filterWilayah}_${filterStatus}.xlsx`;
-    link.click();
-  };
-
-  const totalPages = Math.ceil(processedData.length / rowsPerPage) || 1;
-  const startIndex = (currentPage - 1) * rowsPerPage;
-  const currentRows = processedData.slice(startIndex, startIndex + rowsPerPage);
-  
-  const goToPage = (page) => {
-    if (page >= 1 && page <= totalPages) {
-      setCurrentPage(page);
-    }
-  };
-
-  if (!isOpen) return null;
-
-  return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onClose}>
-      <div className="bg-white w-full max-w-6xl h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-300" onClick={e => e.stopPropagation()}>
-        
-        <div className="bg-blue-700 px-6 py-5 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3 text-white">
-            <div className="bg-white/20 p-2 rounded-xl"><Users size={24} /></div>
-            <div>
-              <h2 className="text-xl font-black uppercase tracking-tighter leading-none">
-                Rincian {isModeSemua ? 'Wilayah Provinsi' : 'Kecamatan'}
-              </h2>
-              <p className="text-blue-200 text-sm font-bold uppercase tracking-widest mt-1">
-                {isModeSemua ? 'Semua Kabupaten' : filterWilayah}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <button onClick={downloadExcelRincian} className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl font-black text-xs uppercase shadow-md transition-all active:scale-95">
-              <Download size={14} /> Unduh
-            </button>
-            <button onClick={onClose} className="p-2 bg-white/10 hover:bg-red-500 text-white rounded-xl transition-colors">
-              <X size={24} />
-            </button>
-          </div>
-        </div>
-
-        <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex flex-wrap gap-4 items-center shrink-0">
-          <div className="relative flex-1 min-w-[250px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-            <input 
-              type="text" placeholder={`Cari Nama ${isModeSemua ? 'Kabupaten' : 'Kecamatan'}...`} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-gray-200 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 font-bold text-gray-700"
-            />
-          </div>
-          <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
-            <MapPin size={16} className="text-gray-400 mr-2" />
-            <select value={filterWilayah} onChange={(e) => setFilterWilayah(e.target.value)} className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[150px]">
-              <option value="SEMUA">Semua Wilayah</option>
-              {listKabupaten.map(k => <option key={k} value={k}>{k}</option>)}
-            </select>
-          </div>
-          <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
-            <Building2 size={16} className="text-gray-400 mr-2" />
-            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer">
-              <option value="SEMUA">Semua Status</option>
-              <option value="NEGERI">Negeri</option>
-              <option value="SWASTA">Swasta</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-auto bg-white p-4">
-          <table className="w-full text-center border-separate border-spacing-y-2">
-            <thead className="sticky top-0 bg-white z-10 shadow-sm rounded-xl">
-              <tr className="text-[10px] font-black uppercase text-gray-500">
-                <th className="px-4 py-3 text-center rounded-l-xl w-16">No</th>
-                <th className="px-4 py-3 text-left">{isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan'}</th>
-                {JENJANG_KEYS.map(k => (
-                  <th key={k} className="px-2 py-3 text-blue-700 whitespace-nowrap">{k}</th>
-                ))}
-                <th className="px-4 py-3 rounded-r-xl text-gray-800">Total Guru</th>
-              </tr>
-            </thead>
-            <tbody>
-              {currentRows.map((row, idx) => (
-                <tr key={idx} className="bg-white shadow-sm hover:shadow-md hover:scale-[1.01] transition-all group">
-                  <td className="px-4 py-3 text-center font-bold text-gray-400 text-xs rounded-l-2xl border-y border-l border-gray-100">{startIndex + idx + 1}</td>
-                  <td className="px-4 py-3 font-black text-gray-800 text-sm uppercase text-left border-y border-gray-100 whitespace-nowrap">
-                    {row.namaWilayah}
-                  </td>
-                  {JENJANG_KEYS.map(k => (
-                    <td key={k} className="px-2 py-3 font-bold text-gray-600 text-sm border-y border-gray-100 bg-blue-50/10">
-                      {row[k].toLocaleString()}
-                    </td>
-                  ))}
-                  <td className="px-4 py-3 font-black text-blue-800 text-base border-y border-r border-gray-100 bg-blue-50/50 rounded-r-2xl">
-                    {row.total.toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            {/* TFOOT: BARIS TOTAL KESELURUHAN */}
-            {processedData.length > 0 && (
-              <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
-                <tr className="bg-blue-100 text-center font-black uppercase text-xs border-t-2 border-blue-200">
-                  <td colSpan="2" className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-blue-200 text-blue-900">
-                    TOTAL {isModeSemua ? 'KESELURUHAN' : 'KECAMATAN'}
-                  </td>
-                  {JENJANG_KEYS.map(k => (
-                    <td key={k} className="px-2 py-4 text-blue-800 border-y border-blue-200">
-                      {columnTotals[k].toLocaleString()}
-                    </td>
-                  ))}
-                  <td className="px-4 py-4 text-blue-900 text-base border-y border-r border-blue-200 rounded-r-2xl">
-                    {columnTotals.total.toLocaleString()}
-                  </td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-          
-          {processedData.length === 0 && (
-             <div className="py-20 flex flex-col items-center opacity-30 text-gray-500">
-               <Search size={64} className="mb-4" />
-               <p className="font-black uppercase tracking-widest text-xl">Tidak Ada Data</p>
-             </div>
-          )}
-        </div>
-
-        <div className="bg-gray-50 p-4 border-t border-gray-200 flex items-center justify-between shrink-0 rounded-b-3xl">
-          <p className="text-xs font-bold text-gray-500">
-            Menampilkan <span className="text-gray-800">{processedData.length === 0 ? 0 : startIndex + 1}</span> - <span className="text-gray-800">{Math.min(startIndex + rowsPerPage, processedData.length)}</span> dari <span className="text-blue-700 font-black">{processedData.length}</span> baris
-          </p>
-          <div className="flex items-center gap-2">
-            <button disabled={currentPage === 1} onClick={() => goToPage(currentPage - 1)} className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-blue-50 disabled:opacity-50"><ChevronLeft size={16} /></button>
-            <span className="text-xs font-black text-gray-600 px-2">Hal {currentPage} / {totalPages}</span>
-            <button disabled={currentPage === totalPages || totalPages === 0} onClick={() => goToPage(currentPage + 1)} className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-blue-50 disabled:opacity-50"><ChevronRight size={16} /></button>
-          </div>
-        </div>
-
-      </div>
-    </div>,
-    document.body
-  );
-};
 
 // =====================================================================
 // MAIN COMPONENT: DAPODIK GURU
 // =====================================================================
 export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpdatedDate }) {
-  const [activeTab, setActiveTab] = useState('SEMUA'); 
+  // 7 TAB MENU UTAMA
+  const [activeView, setActiveView] = useState('STATUS'); 
+  // STATUS, GENDER, KUALIFIKASI, KEPEGAWAIAN, SERTIFIKASI, USIA, PENSIUN
+
+  const [activeJenjang, setActiveJenjang] = useState('SEMUA'); 
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedWilayah, setSelectedWilayah] = useState('SEMUA');
-  
-  // STATE UNTUK FETCH TANGGAL
   const [fetchedDate, setFetchedDate] = useState('');
 
-  // FETCH TANGGAL UPDATE
   useEffect(() => {
     const getUpdateDate = async () => {
       try {
-        // Cek dulu dari PTK
         const qPtk = query(collection(db, 'dapodik_ptk_chunks'), where('tahun_data', '==', selectedYear), limit(1));
         const snapPtk = await getDocs(qPtk);
-        
         let dateString = null;
         
         if (!snapPtk.empty) {
           const docData = snapPtk.docs[0].data();
-          if (docData.last_updated && typeof docData.last_updated === 'string') {
-            dateString = docData.last_updated;
-          }
+          if (docData.last_updated && typeof docData.last_updated === 'string') dateString = docData.last_updated;
         }
         
-        // Fallback ke Sekolah jika PTK tidak punya last_updated yang valid
         if (!dateString) {
            const qSek = query(collection(db, 'dapodik_sekolah_chunks'), where('tahun_data', '==', selectedYear), limit(1));
            const snapSek = await getDocs(qSek);
            if (!snapSek.empty) {
               const docData = snapSek.docs[0].data();
-              if (docData.last_updated && typeof docData.last_updated === 'string') {
-                 dateString = docData.last_updated;
-              }
+              if (docData.last_updated && typeof docData.last_updated === 'string') dateString = docData.last_updated;
            }
         }
         
@@ -501,85 +236,204 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
     getUpdateDate();
   }, [selectedYear]);
 
-  // Logika prioritas: 1. Fetched Date, 2. Props Date, 3. Fallback text
   const displayLastUpdated = fetchedDate || lastUpdatedDate || 'Sesuai Database Terkini';
 
   const listKabupaten = useMemo(() => {
-    const unik = [...new Set(data.map(item => String(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota') || '').trim().toUpperCase()))];
-    return unik.filter(k => k !== '').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
+    const unik = [...new Set(data.map(item => cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'))))];
+    return unik.filter(k => k !== 'TIDAK DIKETAHUI').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
   }, [data]);
 
+  // ENGINE AGREGASI RAKSASA UNTUK 7 TABS
   const aggregatedData = useMemo(() => {
-    const validJenjangList = JENJANG_GROUPS[activeTab];
+    const validJenjangList = JENJANG_GROUPS[activeJenjang];
 
     const filteredData = data.filter(item => {
-      if (activeTab === 'SEMUA') return true;
+      if (activeJenjang === 'SEMUA') return true;
       const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
       return validJenjangList.includes(jenjangDb);
     });
 
     const mapAgg = new Map();
     listKabupaten.forEach(kab => {
-      mapAgg.set(kab, { wilayah: kab, negeri: 0, swasta: 0, total: 0 });
+      mapAgg.set(kab, { 
+        wilayah: kab, 
+        // Status Sekolah
+        status_n: 0, status_s: 0, 
+        // Gender
+        gen_l: 0, gen_p: 0,
+        // Kualifikasi Pendidikan
+        kual_s1: 0, kual_s2: 0, kual_kurang: 0, kual_lain: 0,
+        // Kepegawaian
+        peg_pns: 0, peg_pppk: 0, peg_gty: 0, peg_honor: 0, peg_lain: 0,
+        // Sertifikasi
+        sert_sudah: 0, sert_belum: 0,
+        // Usia
+        usia_30: 0, usia_40: 0, usia_50: 0, usia_51: 0,
+        // Pensiun
+        pens_5: 0, pens_4: 0, pens_3: 0, pens_2: 0, pens_1: 0,
+        total: 0 
+      });
     });
 
-    filteredData.forEach(guru => {
-       const kab = String(getVal(guru, 'kabupaten') || getVal(guru, 'Kabupaten/Kota') || 'TIDAK DIKETAHUI').trim().toUpperCase();
-       
-       if (!mapAgg.has(kab)) {
-           mapAgg.set(kab, { wilayah: kab, negeri: 0, swasta: 0, total: 0 });
+    filteredData.forEach(item => {
+       const kab = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+       if (!mapAgg.has(kab)) return; 
+       const row = mapAgg.get(kab);
+
+       // 1. Status Sekolah
+       const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
+       if (isNegeri) row.status_n++; else row.status_s++;
+
+       // 2. Gender
+       const gender = String(getVal(item, 'gender') || getVal(item, 'jenis_kelamin')).trim().toUpperCase();
+       if (gender === 'L' || gender === 'LAKI-LAKI') row.gen_l++;
+       else if (gender === 'P' || gender === 'PEREMPUAN') row.gen_p++;
+
+       // 3. Kualifikasi
+       const pend = String(getVal(item, 'pendidikan') || '').toUpperCase();
+       if (pend.includes('S1') || pend.includes('D4')) row.kual_s1++;
+       else if (pend.includes('S2') || pend.includes('S3')) row.kual_s2++;
+       else if (pend.includes('D1') || pend.includes('D2') || pend.includes('D3') || pend.includes('SMA') || pend.includes('SMK')) row.kual_kurang++;
+       else row.kual_lain++;
+
+       // 4. Kepegawaian
+       const peg = String(getVal(item, 'status_kepegawaian') || '').toUpperCase();
+       if (peg === 'PNS') row.peg_pns++;
+       else if (peg === 'PPPK') row.peg_pppk++;
+       else if (peg.includes('GTY') || peg.includes('PTY')) row.peg_gty++;
+       else if (peg.includes('HONOR')) row.peg_honor++;
+       else row.peg_lain++;
+
+       // 5. Sertifikasi
+       const sert = String(getVal(item, 'bidang_studi_sertifikasi') || '').trim();
+       if (sert && sert !== '-' && sert !== '0') row.sert_sudah++;
+       else row.sert_belum++;
+
+       // 6 & 7. Usia & Pensiun
+       const tglLahir = getVal(item, 'tanggal_lahir');
+       const age = calculateAge(tglLahir);
+       if (age !== null) {
+          if (age <= 30) row.usia_30++;
+          else if (age <= 40) row.usia_40++;
+          else if (age <= 50) row.usia_50++;
+          else row.usia_51++;
+
+          if (age === 56) row.pens_5++;
+          else if (age === 57) row.pens_4++;
+          else if (age === 58) row.pens_3++;
+          else if (age === 59) row.pens_2++;
+          else if (age === 60) row.pens_1++;
        }
 
-       const row = mapAgg.get(kab);
-       const status = String(getVal(guru, 'status_sekolah') || '').trim().toUpperCase();
-       
-       if (status === 'NEGERI') row.negeri++;
-       else if (status === 'SWASTA') row.swasta++;
-       else row.swasta++; 
-       
        row.total++;
     });
 
     return Array.from(mapAgg.values()).sort((a, b) => getKabupatenRank(a.wilayah) - getKabupatenRank(b.wilayah));
-  }, [data, activeTab, listKabupaten]);
+  }, [data, activeJenjang, listKabupaten]);
 
   const grandTotals = useMemo(() => {
     return aggregatedData.reduce((acc, curr) => {
-      acc.negeri += curr.negeri;
-      acc.swasta += curr.swasta;
+      acc.status_n += curr.status_n; acc.status_s += curr.status_s;
+      acc.gen_l += curr.gen_l; acc.gen_p += curr.gen_p;
+      acc.kual_s1 += curr.kual_s1; acc.kual_s2 += curr.kual_s2; acc.kual_kurang += curr.kual_kurang; acc.kual_lain += curr.kual_lain;
+      acc.peg_pns += curr.peg_pns; acc.peg_pppk += curr.peg_pppk; acc.peg_gty += curr.peg_gty; acc.peg_honor += curr.peg_honor; acc.peg_lain += curr.peg_lain;
+      acc.sert_sudah += curr.sert_sudah; acc.sert_belum += curr.sert_belum;
+      acc.usia_30 += curr.usia_30; acc.usia_40 += curr.usia_40; acc.usia_50 += curr.usia_50; acc.usia_51 += curr.usia_51;
+      acc.pens_5 += curr.pens_5; acc.pens_4 += curr.pens_4; acc.pens_3 += curr.pens_3; acc.pens_2 += curr.pens_2; acc.pens_1 += curr.pens_1;
       acc.total += curr.total;
       return acc;
-    }, { negeri: 0, swasta: 0, total: 0 });
+    }, { 
+      status_n: 0, status_s: 0, gen_l: 0, gen_p: 0,
+      kual_s1: 0, kual_s2: 0, kual_kurang: 0, kual_lain: 0,
+      peg_pns: 0, peg_pppk: 0, peg_gty: 0, peg_honor: 0, peg_lain: 0,
+      sert_sudah: 0, sert_belum: 0,
+      usia_30: 0, usia_40: 0, usia_50: 0, usia_51: 0,
+      pens_5: 0, pens_4: 0, pens_3: 0, pens_2: 0, pens_1: 0, total: 0 
+    });
   }, [aggregatedData]);
 
-  const pieSegments = [
-    { name: 'Negeri', value: grandTotals.negeri, color: '#2563eb' }, 
-    { name: 'Swasta', value: grandTotals.swasta, color: '#f97316' }  
-  ];
+  // DINAMIKA PIE CHART
+  let pieSegments = [];
+  let pieTotal = grandTotals.total;
+  
+  if (activeView === 'STATUS') {
+     pieSegments = [
+       { name: 'Negeri', value: grandTotals.status_n, color: '#2563eb' }, 
+       { name: 'Swasta', value: grandTotals.status_s, color: '#f97316' }  
+     ];
+  } else if (activeView === 'GENDER') {
+     pieSegments = [
+       { name: 'Laki-laki', value: grandTotals.gen_l, color: '#3b82f6' }, 
+       { name: 'Perempuan', value: grandTotals.gen_p, color: '#ec4899' }  
+     ];
+  } else if (activeView === 'KUALIFIKASI') {
+     pieSegments = [
+       { name: 'S1 / D4', value: grandTotals.kual_s1, color: '#10b981' }, 
+       { name: 'S2 / S3', value: grandTotals.kual_s2, color: '#3b82f6' }, 
+       { name: '< S1', value: grandTotals.kual_kurang, color: '#f59e0b' },
+       { name: 'Lainnya', value: grandTotals.kual_lain, color: '#6b7280' }
+     ];
+  } else if (activeView === 'KEPEGAWAIAN') {
+     pieSegments = [
+       { name: 'PNS', value: grandTotals.peg_pns, color: '#3b82f6' }, 
+       { name: 'PPPK', value: grandTotals.peg_pppk, color: '#10b981' }, 
+       { name: 'GTY/PTY', value: grandTotals.peg_gty, color: '#f97316' },
+       { name: 'Honor', value: grandTotals.peg_honor, color: '#ef4444' },
+       { name: 'Lainnya', value: grandTotals.peg_lain, color: '#6b7280' }
+     ];
+  } else if (activeView === 'SERTIFIKASI') {
+     pieSegments = [
+       { name: 'Sertifikasi', value: grandTotals.sert_sudah, color: '#10b981' }, 
+       { name: 'Belum', value: grandTotals.sert_belum, color: '#ef4444' }  
+     ];
+  } else if (activeView === 'USIA') {
+     pieSegments = [
+       { name: '<= 30 Thn', value: grandTotals.usia_30, color: '#10b981' }, 
+       { name: '31-40 Thn', value: grandTotals.usia_40, color: '#3b82f6' }, 
+       { name: '41-50 Thn', value: grandTotals.usia_50, color: '#f59e0b' },
+       { name: '>= 51 Thn', value: grandTotals.usia_51, color: '#ef4444' }
+     ];
+  } else if (activeView === 'PENSIUN') {
+     pieTotal = grandTotals.pens_5 + grandTotals.pens_4 + grandTotals.pens_3 + grandTotals.pens_2 + grandTotals.pens_1;
+     pieSegments = [
+       { name: '5 Thn (56)', value: grandTotals.pens_5, color: '#10b981' }, 
+       { name: '4 Thn (57)', value: grandTotals.pens_4, color: '#3b82f6' }, 
+       { name: '3 Thn (58)', value: grandTotals.pens_3, color: '#f59e0b' },
+       { name: '2 Thn (59)', value: grandTotals.pens_2, color: '#f97316' },
+       { name: '1 Thn (60)', value: grandTotals.pens_1, color: '#ef4444' }
+     ];
+  }
 
-  const percentNegeri = grandTotals.total > 0 ? ((grandTotals.negeri / grandTotals.total) * 100).toFixed(1) : 0;
-  const percentSwasta = grandTotals.total > 0 ? ((grandTotals.swasta / grandTotals.total) * 100).toFixed(1) : 0;
-
+  // EXPORT EXCEL
   const downloadExcel = async () => {
     const workbook = new ExcelJS.Workbook();
-    const worksheetTitle = activeTab === 'SEMUA' ? 'Semua Jenjang' : activeTab.replace('/', '-'); 
-    const worksheet = workbook.addWorksheet(`Rekap ${worksheetTitle}`);
+    const worksheet = workbook.addWorksheet(`Rekap ${activeView} - ${activeJenjang}`);
 
-    worksheet.columns = [
-      { header: 'Wilayah (Kabupaten/Kota)', key: 'wilayah', width: 30 },
-      { header: 'Negeri', key: 'negeri', width: 15 },
-      { header: 'Swasta', key: 'swasta', width: 15 },
-      { header: 'Jumlah Guru', key: 'total', width: 15 },
-    ];
+    let columns = [{ header: 'Wilayah (Kabupaten/Kota)', key: 'wilayah', width: 30 }];
+    
+    if (activeView === 'STATUS') columns.push({header:'Negeri',key:'status_n',width:15}, {header:'Swasta',key:'status_s',width:15});
+    else if (activeView === 'GENDER') columns.push({header:'Laki-laki',key:'gen_l',width:15}, {header:'Perempuan',key:'gen_p',width:15});
+    else if (activeView === 'KUALIFIKASI') columns.push({header:'S1/D4',key:'kual_s1',width:15}, {header:'S2/S3',key:'kual_s2',width:15}, {header:'Kurang S1',key:'kual_kurang',width:15}, {header:'Lainnya',key:'kual_lain',width:15});
+    else if (activeView === 'KEPEGAWAIAN') columns.push({header:'PNS',key:'peg_pns',width:15}, {header:'PPPK',key:'peg_pppk',width:15}, {header:'GTY/PTY',key:'peg_gty',width:15}, {header:'Honor',key:'peg_honor',width:15}, {header:'Lainnya',key:'peg_lain',width:15});
+    else if (activeView === 'SERTIFIKASI') columns.push({header:'Sertifikasi',key:'sert_sudah',width:15}, {header:'Belum',key:'sert_belum',width:15});
+    else if (activeView === 'USIA') columns.push({header:'<=30 Thn',key:'usia_30',width:15}, {header:'31-40 Thn',key:'usia_40',width:15}, {header:'41-50 Thn',key:'usia_50',width:15}, {header:'>=51 Thn',key:'usia_51',width:15});
+    else if (activeView === 'PENSIUN') columns.push({header:'Usia 56 (5 Thn)',key:'pens_5',width:15}, {header:'Usia 57 (4 Thn)',key:'pens_4',width:15}, {header:'Usia 58 (3 Thn)',key:'pens_3',width:15}, {header:'Usia 59 (2 Thn)',key:'pens_2',width:15}, {header:'Usia 60 (1 Thn)',key:'pens_1',width:15});
 
-    aggregatedData.forEach(item => worksheet.addRow(item));
+    if (activeView === 'PENSIUN') columns.push({ header: 'Total Proyeksi Pensiun', key: 'total_pensiun', width: 25 });
+    else columns.push({ header: 'Total Guru', key: 'total', width: 15 });
 
-    const totalRow = worksheet.addRow({
-      wilayah: 'TOTAL KESELURUHAN',
-      negeri: grandTotals.negeri,
-      swasta: grandTotals.swasta,
-      total: grandTotals.total
+    worksheet.columns = columns;
+
+    aggregatedData.forEach(item => {
+       const row = {...item};
+       if (activeView === 'PENSIUN') row.total_pensiun = row.pens_1 + row.pens_2 + row.pens_3 + row.pens_4 + row.pens_5;
+       worksheet.addRow(row);
     });
+
+    const totalRowData = { wilayah: 'TOTAL KESELURUHAN', ...grandTotals };
+    if (activeView === 'PENSIUN') totalRowData.total_pensiun = grandTotals.pens_1 + grandTotals.pens_2 + grandTotals.pens_3 + grandTotals.pens_4 + grandTotals.pens_5;
+    
+    const totalRow = worksheet.addRow(totalRowData);
 
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
     worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1D4ED8' } };
@@ -590,7 +444,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Rekap_Guru_${activeTab === 'SEMUA' ? 'Keseluruhan' : activeTab.replace('/', '-')}_${selectedYear}.xlsx`;
+    link.download = `Rekap_Guru_${activeView}_${activeJenjang === 'SEMUA' ? 'Keseluruhan' : activeJenjang.replace('/', '-')}_${selectedYear}.xlsx`;
     link.click();
   };
 
@@ -599,62 +453,144 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
     setModalOpen(true);
   };
 
+  // Helper Card
+  const StatCard = ({ label, value, percentage, colorClasses }) => (
+    <div className={`flex flex-col justify-between ${colorClasses.bg} p-3 md:p-4 rounded-2xl border ${colorClasses.border} transition-colors ${colorClasses.hover}`}>
+       <div className="flex items-center gap-2 mb-2">
+          <div className={`w-3 h-3 rounded-full ${colorClasses.dot} shadow-inner`}></div>
+          <span className={`font-black text-[10px] md:text-[11px] ${colorClasses.textMain} uppercase leading-tight tracking-wide`}>{label}</span>
+       </div>
+       <div className="flex items-end justify-between">
+          <span className={`font-black text-lg md:text-xl ${colorClasses.textVal} leading-none`}>{value.toLocaleString()}</span>
+          <span className={`font-bold text-[10px] md:text-[11px] ${colorClasses.textPct}`}>({percentage}%)</span>
+       </div>
+    </div>
+  );
+
+  const colors = {
+    blue: { bg: 'bg-blue-50', border: 'border-blue-100', hover: 'hover:bg-blue-100', dot: 'bg-blue-600', textMain: 'text-blue-900', textVal: 'text-blue-700', textPct: 'text-blue-500' },
+    orange: { bg: 'bg-orange-50', border: 'border-orange-100', hover: 'hover:bg-orange-100', dot: 'bg-orange-500', textMain: 'text-orange-900', textVal: 'text-orange-600', textPct: 'text-orange-400' },
+    emerald: { bg: 'bg-emerald-50', border: 'border-emerald-100', hover: 'hover:bg-emerald-100', dot: 'bg-emerald-500', textMain: 'text-emerald-900', textVal: 'text-emerald-600', textPct: 'text-emerald-500' },
+    amber: { bg: 'bg-amber-50', border: 'border-amber-100', hover: 'hover:bg-amber-100', dot: 'bg-amber-500', textMain: 'text-amber-900', textVal: 'text-amber-600', textPct: 'text-amber-500' },
+    red: { bg: 'bg-red-50', border: 'border-red-100', hover: 'hover:bg-red-100', dot: 'bg-red-500', textMain: 'text-red-900', textVal: 'text-red-600', textPct: 'text-red-500' },
+    pink: { bg: 'bg-pink-50', border: 'border-pink-100', hover: 'hover:bg-pink-100', dot: 'bg-pink-500', textMain: 'text-pink-900', textVal: 'text-pink-600', textPct: 'text-pink-500' },
+    gray: { bg: 'bg-gray-100', border: 'border-gray-200', hover: 'hover:bg-gray-200', dot: 'bg-gray-500', textMain: 'text-gray-700', textVal: 'text-gray-600', textPct: 'text-gray-500' }
+  };
+
+  const TABS = [
+    { id: 'STATUS', label: 'Status Sekolah', icon: Building2, color: 'text-blue-700' },
+    { id: 'GENDER', label: 'Gender', icon: Users, color: 'text-pink-700' },
+    { id: 'KUALIFIKASI', label: 'Kualifikasi', icon: GraduationCap, color: 'text-purple-700' },
+    { id: 'KEPEGAWAIAN', label: 'Kepegawaian', icon: Briefcase, color: 'text-teal-700' },
+    { id: 'SERTIFIKASI', label: 'Profesi Guru', icon: Award, color: 'text-amber-700' },
+    { id: 'USIA', label: 'Usia', icon: Clock, color: 'text-rose-700' },
+    { id: 'PENSIUN', label: 'Proyeksi Pensiun', icon: CalendarDays, color: 'text-slate-700' },
+  ];
+
   return (
     <div className="h-full flex flex-col animate-in fade-in duration-500">
       
-      {/* 1. TABS HEADER */}
-      <div className="bg-white px-4 md:px-6 py-3 border-b border-gray-100 flex items-center justify-between shrink-0 shadow-sm z-20 overflow-x-auto">
-        <div className="flex items-center gap-1.5 md:gap-2 bg-gray-100 p-1 md:p-1.5 rounded-xl md:rounded-2xl min-w-max">
+      {/* HEADER: TAB UTAMA */}
+      <div className="bg-white px-4 md:px-6 py-4 border-b border-gray-100 flex flex-col gap-4 shrink-0 shadow-sm z-20">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+           
+           <div className="flex items-center gap-2 bg-gray-100 p-1.5 rounded-2xl w-full md:w-auto overflow-x-auto custom-scrollbar pb-1">
+             {TABS.map(t => (
+                <button 
+                  key={t.id} 
+                  onClick={() => setActiveView(t.id)} 
+                  className={`flex items-center gap-1.5 px-3 py-2 md:py-2.5 rounded-xl font-black text-[10px] md:text-xs transition-all whitespace-nowrap ${activeView === t.id ? `bg-white ${t.color} shadow-sm scale-[1.02]` : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'}`}
+                >
+                  <t.icon size={14} /> {t.label}
+                </button>
+             ))}
+           </div>
+
+           <button onClick={downloadExcel} className="flex items-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white px-5 py-2.5 rounded-xl font-black uppercase text-[10px] md:text-xs shadow-sm border border-blue-200 transition-all active:scale-95 shrink-0 w-full md:w-auto justify-center">
+             <FileSpreadsheet size={16} /> Unduh
+           </button>
+        </div>
+
+        {/* JENJANG FILTER */}
+        <div className="flex items-center gap-1.5 md:gap-2 overflow-x-auto pb-1 custom-scrollbar">
           {Object.keys(JENJANG_GROUPS).map(tab => (
-            <button 
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-3 md:px-5 lg:px-6 py-2 rounded-lg md:rounded-xl font-black text-[10px] md:text-xs transition-all duration-300 whitespace-nowrap ${activeTab === tab ? 'bg-blue-600 text-white shadow-md scale-[1.02]' : 'text-gray-500 hover:bg-gray-200'}`}
-            >
+            <button key={tab} onClick={() => setActiveJenjang(tab)} className={`px-4 py-1.5 rounded-lg font-black text-[10px] md:text-xs transition-all duration-300 whitespace-nowrap border ${activeJenjang === tab ? 'bg-gray-800 text-white border-gray-800 shadow-md' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
               {tab}
             </button>
           ))}
         </div>
-        
-        <button 
-          onClick={downloadExcel}
-          className="flex items-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white px-4 py-2 rounded-lg font-black uppercase text-[10px] md:text-xs shadow-sm border border-blue-200 transition-all active:scale-95 shrink-0 ml-3 md:ml-4"
-        >
-          <FileSpreadsheet size={16} /> <span className="hidden sm:inline">Unduh Rekap</span><span className="sm:hidden">Unduh</span>
-        </button>
       </div>
 
-      {/* 2. DUA KOLOM LAYOUT */}
       <div className="flex-1 flex flex-col lg:flex-row min-h-0 bg-gray-50/50">
         
-        {/* KOLOM KIRI: TABEL REKAPITULASI */}
+        {/* KOLOM KIRI: TABEL */}
         <div className="flex-1 lg:w-2/3 p-4 md:p-6 flex flex-col min-h-0 overflow-hidden border-r border-gray-200">
           <div className="bg-white rounded-3xl shadow-sm border border-gray-100 flex-1 flex flex-col overflow-hidden relative">
-            <div className="flex-1 overflow-auto p-4">
+            <div className="flex-1 overflow-auto p-4 custom-scrollbar">
               <table className="w-full text-center border-separate border-spacing-y-2">
                 <thead className="sticky top-0 bg-gray-50 z-10 shadow-sm rounded-xl">
-                  <tr className="text-[10px] font-black uppercase text-gray-500">
+                  <tr className="text-[10px] font-black uppercase text-gray-500 whitespace-nowrap">
                     <th className="px-4 py-3 text-left rounded-l-xl">Wilayah</th>
-                    <th className="px-4 py-3 text-blue-600">Negeri</th>
-                    <th className="px-4 py-3 text-orange-600">Swasta</th>
-                    <th className="px-4 py-3 text-gray-800">Jumlah Guru</th>
+                    
+                    {activeView === 'STATUS' && (
+                      <><th className="px-4 py-3 text-blue-600">Negeri</th><th className="px-4 py-3 text-orange-600">Swasta</th></>
+                    )}
+                    {activeView === 'GENDER' && (
+                      <><th className="px-4 py-3 text-blue-600">Laki-laki</th><th className="px-4 py-3 text-pink-600">Perempuan</th></>
+                    )}
+                    {activeView === 'KUALIFIKASI' && (
+                      <><th className="px-3 py-3 text-emerald-600">S1/D4</th><th className="px-3 py-3 text-blue-600">S2/S3</th><th className="px-3 py-3 text-amber-600">&lt; S1</th><th className="px-3 py-3 text-gray-500">Lainnya</th></>
+                    )}
+                    {activeView === 'KEPEGAWAIAN' && (
+                      <><th className="px-3 py-3 text-blue-600">PNS</th><th className="px-3 py-3 text-emerald-600">PPPK</th><th className="px-3 py-3 text-orange-600">GTY/PTY</th><th className="px-3 py-3 text-red-600">Honor</th><th className="px-3 py-3 text-gray-500">Lainnya</th></>
+                    )}
+                    {activeView === 'SERTIFIKASI' && (
+                      <><th className="px-4 py-3 text-emerald-600">Sertifikasi</th><th className="px-4 py-3 text-red-600">Belum</th></>
+                    )}
+                    {activeView === 'USIA' && (
+                      <><th className="px-3 py-3 text-emerald-600">&lt;= 30</th><th className="px-3 py-3 text-blue-600">31-40</th><th className="px-3 py-3 text-amber-600">41-50</th><th className="px-3 py-3 text-red-600">&gt;= 51</th></>
+                    )}
+                    {activeView === 'PENSIUN' && (
+                      <><th className="px-2 py-3 text-emerald-600">Usia 56</th><th className="px-2 py-3 text-blue-600">Usia 57</th><th className="px-2 py-3 text-amber-600">Usia 58</th><th className="px-2 py-3 text-orange-600">Usia 59</th><th className="px-2 py-3 text-red-600">Usia 60</th></>
+                    )}
+
+                    <th className="px-4 py-3 text-gray-800">{activeView === 'PENSIUN' ? 'Total Proyeksi' : 'Total Guru'}</th>
                     <th className="px-4 py-3 rounded-r-xl">Aksi</th>
                   </tr>
                 </thead>
                 <tbody>
                   {aggregatedData.map((row, idx) => (
                     <tr key={idx} className="bg-white shadow-sm hover:shadow-md hover:scale-[1.01] transition-all group">
-                      <td className="px-4 py-3 rounded-l-2xl font-black text-gray-800 uppercase text-left border-y border-l border-gray-100 whitespace-nowrap">
-                        {row.wilayah}
+                      <td className="px-4 py-3 rounded-l-2xl font-black text-gray-800 uppercase text-left border-y border-l border-gray-100 whitespace-nowrap">{row.wilayah}</td>
+                      
+                      {activeView === 'STATUS' && (
+                        <><td className="px-4 py-3 font-bold text-blue-600 text-sm border-y border-gray-100 bg-blue-50/30">{row.status_n.toLocaleString()}</td><td className="px-4 py-3 font-bold text-orange-600 text-sm border-y border-gray-100 bg-orange-50/30">{row.status_s.toLocaleString()}</td></>
+                      )}
+                      {activeView === 'GENDER' && (
+                        <><td className="px-4 py-3 font-bold text-blue-600 text-sm border-y border-gray-100 bg-blue-50/30">{row.gen_l.toLocaleString()}</td><td className="px-4 py-3 font-bold text-pink-600 text-sm border-y border-gray-100 bg-pink-50/30">{row.gen_p.toLocaleString()}</td></>
+                      )}
+                      {activeView === 'KUALIFIKASI' && (
+                        <><td className="px-3 py-3 font-bold text-emerald-600 text-sm border-y border-gray-100 bg-emerald-50/30">{row.kual_s1.toLocaleString()}</td><td className="px-3 py-3 font-bold text-blue-600 text-sm border-y border-gray-100 bg-blue-50/30">{row.kual_s2.toLocaleString()}</td><td className="px-3 py-3 font-bold text-amber-600 text-sm border-y border-gray-100 bg-amber-50/30">{row.kual_kurang.toLocaleString()}</td><td className="px-3 py-3 font-bold text-gray-500 text-sm border-y border-gray-100 bg-gray-50/50">{row.kual_lain.toLocaleString()}</td></>
+                      )}
+                      {activeView === 'KEPEGAWAIAN' && (
+                        <><td className="px-3 py-3 font-bold text-blue-600 text-sm border-y border-gray-100 bg-blue-50/30">{row.peg_pns.toLocaleString()}</td><td className="px-3 py-3 font-bold text-emerald-600 text-sm border-y border-gray-100 bg-emerald-50/30">{row.peg_pppk.toLocaleString()}</td><td className="px-3 py-3 font-bold text-orange-600 text-sm border-y border-gray-100 bg-orange-50/30">{row.peg_gty.toLocaleString()}</td><td className="px-3 py-3 font-bold text-red-600 text-sm border-y border-gray-100 bg-red-50/30">{row.peg_honor.toLocaleString()}</td><td className="px-3 py-3 font-bold text-gray-500 text-sm border-y border-gray-100 bg-gray-50/50">{row.peg_lain.toLocaleString()}</td></>
+                      )}
+                      {activeView === 'SERTIFIKASI' && (
+                        <><td className="px-4 py-3 font-bold text-emerald-600 text-sm border-y border-gray-100 bg-emerald-50/30">{row.sert_sudah.toLocaleString()}</td><td className="px-4 py-3 font-bold text-red-600 text-sm border-y border-gray-100 bg-red-50/30">{row.sert_belum.toLocaleString()}</td></>
+                      )}
+                      {activeView === 'USIA' && (
+                        <><td className="px-3 py-3 font-bold text-emerald-600 text-sm border-y border-gray-100 bg-emerald-50/30">{row.usia_30.toLocaleString()}</td><td className="px-3 py-3 font-bold text-blue-600 text-sm border-y border-gray-100 bg-blue-50/30">{row.usia_40.toLocaleString()}</td><td className="px-3 py-3 font-bold text-amber-600 text-sm border-y border-gray-100 bg-amber-50/30">{row.usia_50.toLocaleString()}</td><td className="px-3 py-3 font-bold text-red-600 text-sm border-y border-gray-100 bg-red-50/30">{row.usia_51.toLocaleString()}</td></>
+                      )}
+                      {activeView === 'PENSIUN' && (
+                        <><td className="px-2 py-3 font-bold text-emerald-600 text-sm border-y border-gray-100 bg-emerald-50/30">{row.pens_5.toLocaleString()}</td><td className="px-2 py-3 font-bold text-blue-600 text-sm border-y border-gray-100 bg-blue-50/30">{row.pens_4.toLocaleString()}</td><td className="px-2 py-3 font-bold text-amber-600 text-sm border-y border-gray-100 bg-amber-50/30">{row.pens_3.toLocaleString()}</td><td className="px-2 py-3 font-bold text-orange-600 text-sm border-y border-gray-100 bg-orange-50/30">{row.pens_2.toLocaleString()}</td><td className="px-2 py-3 font-bold text-red-600 text-sm border-y border-gray-100 bg-red-50/30">{row.pens_1.toLocaleString()}</td></>
+                      )}
+
+                      <td className="px-4 py-3 font-black text-gray-800 text-base border-y border-gray-100 bg-gray-50/80">
+                        {activeView === 'PENSIUN' ? (row.pens_1 + row.pens_2 + row.pens_3 + row.pens_4 + row.pens_5).toLocaleString() : row.total.toLocaleString()}
                       </td>
-                      <td className="px-4 py-3 font-black text-blue-600 text-base border-y border-gray-100 bg-blue-50/30">{row.negeri.toLocaleString()}</td>
-                      <td className="px-4 py-3 font-black text-orange-600 text-base border-y border-gray-100 bg-orange-50/30">{row.swasta.toLocaleString()}</td>
-                      <td className="px-4 py-3 font-black text-gray-800 text-lg border-y border-gray-100 bg-gray-50/50">{row.total.toLocaleString()}</td>
+
                       <td className="px-4 py-3 rounded-r-2xl border-y border-r border-gray-100">
-                         <button 
-                            onClick={() => handleBukaRincian(row.wilayah)}
-                            className="flex items-center justify-center gap-2 bg-blue-50 text-blue-600 px-4 py-1.5 rounded-xl text-[10px] font-black uppercase hover:bg-blue-600 hover:text-white transition-colors mx-auto"
-                         >
+                         <button onClick={() => handleBukaRincian(row.wilayah)} className="flex items-center justify-center gap-2 bg-blue-50 text-blue-600 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase hover:bg-blue-600 hover:text-white transition-colors mx-auto">
                            <Eye size={14} /> Rincian
                          </button>
                       </td>
@@ -662,85 +598,214 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
                   ))}
                 </tbody>
                 <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
-                  <tr className="bg-blue-50 text-center font-black uppercase text-sm border-t-2 border-blue-200">
-                    <td className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-blue-200 text-blue-900">
-                      TOTAL KALIMANTAN BARAT
+                  <tr className="bg-gray-100 text-center font-black uppercase text-xs border-t-2 border-gray-300 whitespace-nowrap">
+                    <td className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-gray-300 text-gray-900">TOTAL KALIMANTAN BARAT</td>
+                    
+                    {activeView === 'STATUS' && (
+                      <><td className="px-4 py-4 text-blue-700 border-y border-gray-300">{grandTotals.status_n.toLocaleString()}</td><td className="px-4 py-4 text-orange-700 border-y border-gray-300">{grandTotals.status_s.toLocaleString()}</td></>
+                    )}
+                    {activeView === 'GENDER' && (
+                      <><td className="px-4 py-4 text-blue-700 border-y border-gray-300">{grandTotals.gen_l.toLocaleString()}</td><td className="px-4 py-4 text-pink-700 border-y border-gray-300">{grandTotals.gen_p.toLocaleString()}</td></>
+                    )}
+                    {activeView === 'KUALIFIKASI' && (
+                      <><td className="px-3 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.kual_s1.toLocaleString()}</td><td className="px-3 py-4 text-blue-700 border-y border-gray-300">{grandTotals.kual_s2.toLocaleString()}</td><td className="px-3 py-4 text-amber-700 border-y border-gray-300">{grandTotals.kual_kurang.toLocaleString()}</td><td className="px-3 py-4 text-gray-600 border-y border-gray-300">{grandTotals.kual_lain.toLocaleString()}</td></>
+                    )}
+                    {activeView === 'KEPEGAWAIAN' && (
+                      <><td className="px-3 py-4 text-blue-700 border-y border-gray-300">{grandTotals.peg_pns.toLocaleString()}</td><td className="px-3 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.peg_pppk.toLocaleString()}</td><td className="px-3 py-4 text-orange-700 border-y border-gray-300">{grandTotals.peg_gty.toLocaleString()}</td><td className="px-3 py-4 text-red-700 border-y border-gray-300">{grandTotals.peg_honor.toLocaleString()}</td><td className="px-3 py-4 text-gray-600 border-y border-gray-300">{grandTotals.peg_lain.toLocaleString()}</td></>
+                    )}
+                    {activeView === 'SERTIFIKASI' && (
+                      <><td className="px-4 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.sert_sudah.toLocaleString()}</td><td className="px-4 py-4 text-red-700 border-y border-gray-300">{grandTotals.sert_belum.toLocaleString()}</td></>
+                    )}
+                    {activeView === 'USIA' && (
+                      <><td className="px-3 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.usia_30.toLocaleString()}</td><td className="px-3 py-4 text-blue-700 border-y border-gray-300">{grandTotals.usia_40.toLocaleString()}</td><td className="px-3 py-4 text-amber-700 border-y border-gray-300">{grandTotals.usia_50.toLocaleString()}</td><td className="px-3 py-4 text-red-700 border-y border-gray-300">{grandTotals.usia_51.toLocaleString()}</td></>
+                    )}
+                    {activeView === 'PENSIUN' && (
+                      <><td className="px-2 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.pens_5.toLocaleString()}</td><td className="px-2 py-4 text-blue-700 border-y border-gray-300">{grandTotals.pens_4.toLocaleString()}</td><td className="px-2 py-4 text-amber-700 border-y border-gray-300">{grandTotals.pens_3.toLocaleString()}</td><td className="px-2 py-4 text-orange-700 border-y border-gray-300">{grandTotals.pens_2.toLocaleString()}</td><td className="px-2 py-4 text-red-700 border-y border-gray-300">{grandTotals.pens_1.toLocaleString()}</td></>
+                    )}
+
+                    <td className="px-4 py-4 text-gray-900 border-y border-gray-300 text-base">
+                      {activeView === 'PENSIUN' ? (grandTotals.pens_1 + grandTotals.pens_2 + grandTotals.pens_3 + grandTotals.pens_4 + grandTotals.pens_5).toLocaleString() : grandTotals.total.toLocaleString()}
                     </td>
-                    <td className="px-4 py-4 text-blue-700 border-y border-blue-200">{grandTotals.negeri.toLocaleString()}</td>
-                    <td className="px-4 py-4 text-orange-700 border-y border-blue-200">{grandTotals.swasta.toLocaleString()}</td>
-                    <td className="px-4 py-4 text-gray-900 border-y border-blue-200 text-lg bg-blue-100/50">{grandTotals.total.toLocaleString()}</td>
-                    <td className="px-4 py-4 rounded-r-2xl border-y border-r border-blue-200">
-                       <button 
-                            onClick={() => handleBukaRincian('SEMUA')}
-                            className="flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-blue-800 transition-colors mx-auto shadow-md"
-                         >
-                           <Search size={14} /> Rincian Semua
-                         </button>
+                    <td className="px-4 py-4 rounded-r-2xl border-y border-r border-gray-300">
+                       <button onClick={() => handleBukaRincian('SEMUA')} className="flex items-center justify-center gap-2 bg-gray-800 text-white px-3 py-1.5 rounded-xl text-[10px] font-black uppercase hover:bg-gray-900 transition-colors mx-auto shadow-md">
+                         <Search size={14} /> Semua
+                       </button>
                     </td>
                   </tr>
                 </tfoot>
               </table>
               <div className="mt-4 px-2 text-right text-xs font-bold italic text-gray-400 pb-2">
-                 Sumber : Data Dapodik Update Pada Tanggal : {displayLastUpdated}
+                 Sumber : Data Dapodik PTK Update Pada Tanggal : {displayLastUpdated}
               </div>
             </div>
           </div>
         </div>
 
-        {/* KOLOM KANAN: PREMIUM PIE CHART */}
-        <div className="lg:w-1/3 flex flex-col bg-white border-l border-gray-100 relative">
+        {/* KOLOM KANAN: PIE CHART & KARTU REKAP */}
+        <div className="lg:w-1/3 flex flex-col bg-white border-l border-gray-100 relative overflow-y-auto custom-scrollbar">
           
-          <div className="text-center w-full px-4 pt-8 pb-4 shrink-0">
-            <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">Proporsi Status Sekolah</h2>
-            <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mt-1">
-              {activeTab === 'SEMUA' ? 'Semua Jenjang' : `Jenjang ${activeTab}`}
+          <div className="text-center w-full px-4 pt-6 pb-2 shrink-0">
+            <h2 className="text-xl font-black text-gray-800 uppercase tracking-tighter">Proporsi {activeView}</h2>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">
+              Jenjang {activeJenjang}
             </p>
           </div>
 
-          <div className="flex-1 flex items-center justify-center min-h-0 relative">
-             <PremiumPieChart segments={pieSegments} total={grandTotals.total} />
+          <div className="flex items-center justify-center min-h-[220px] relative px-4 shrink-0">
+             <PremiumPieChart segments={pieSegments} total={pieTotal} />
           </div>
 
-          <div className="px-6 pb-8 pt-4 w-full flex flex-col gap-3 shrink-0">
-             <div className="flex items-center justify-between bg-blue-50 p-4 rounded-2xl border border-blue-100 transition-colors hover:bg-blue-100">
-                <div className="flex items-center gap-3">
-                   <div className="w-4 h-4 rounded-full bg-blue-600 shadow-inner"></div>
-                   <div className="flex flex-col">
-                     <span className="font-black text-sm text-blue-900 uppercase">Guru Negeri</span>
-                   </div>
-                </div>
-                <div className="text-right">
-                   <span className="font-black text-xl text-blue-700">{grandTotals.negeri.toLocaleString()}</span>
-                   <span className="ml-2 font-bold text-sm text-blue-500">({percentNegeri}%)</span>
-                </div>
-             </div>
+          <div className="px-4 pb-6 pt-2 w-full shrink-0">
              
-             <div className="flex items-center justify-between bg-orange-50 p-4 rounded-2xl border border-orange-100 transition-colors hover:bg-orange-100">
-                <div className="flex items-center gap-3">
-                   <div className="w-4 h-4 rounded-full bg-orange-500 shadow-inner"></div>
-                   <div className="flex flex-col">
-                     <span className="font-black text-sm text-orange-900 uppercase">Guru Swasta</span>
+             {activeView === 'STATUS' && (
+                <div className="flex flex-col gap-2">
+                   <StatCard label="Guru Negeri" value={grandTotals.status_n} percentage={pieTotal > 0 ? ((grandTotals.status_n/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
+                   <StatCard label="Guru Swasta" value={grandTotals.status_s} percentage={pieTotal > 0 ? ((grandTotals.status_s/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.orange} />
+                </div>
+             )}
+
+             {activeView === 'GENDER' && (
+                <div className="flex flex-col gap-2">
+                   <StatCard label="Laki-Laki" value={grandTotals.gen_l} percentage={pieTotal > 0 ? ((grandTotals.gen_l/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
+                   <StatCard label="Perempuan" value={grandTotals.gen_p} percentage={pieTotal > 0 ? ((grandTotals.gen_p/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.pink} />
+                </div>
+             )}
+
+             {activeView === 'KUALIFIKASI' && (
+                <div className="grid grid-cols-2 gap-2">
+                   <StatCard label="S1 / D4" value={grandTotals.kual_s1} percentage={pieTotal > 0 ? ((grandTotals.kual_s1/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.emerald} />
+                   <StatCard label="S2 / S3" value={grandTotals.kual_s2} percentage={pieTotal > 0 ? ((grandTotals.kual_s2/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
+                   <StatCard label="< S1" value={grandTotals.kual_kurang} percentage={pieTotal > 0 ? ((grandTotals.kual_kurang/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.amber} />
+                   <StatCard label="Lainnya" value={grandTotals.kual_lain} percentage={pieTotal > 0 ? ((grandTotals.kual_lain/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.gray} />
+                </div>
+             )}
+
+             {activeView === 'KEPEGAWAIAN' && (
+                <div className="flex flex-col gap-2">
+                   <div className="grid grid-cols-2 gap-2">
+                     <StatCard label="PNS" value={grandTotals.peg_pns} percentage={pieTotal > 0 ? ((grandTotals.peg_pns/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
+                     <StatCard label="PPPK" value={grandTotals.peg_pppk} percentage={pieTotal > 0 ? ((grandTotals.peg_pppk/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.emerald} />
+                   </div>
+                   <StatCard label="GTY / PTY" value={grandTotals.peg_gty} percentage={pieTotal > 0 ? ((grandTotals.peg_gty/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.orange} />
+                   <div className="grid grid-cols-2 gap-2">
+                     <StatCard label="Honor" value={grandTotals.peg_honor} percentage={pieTotal > 0 ? ((grandTotals.peg_honor/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.red} />
+                     <StatCard label="Lainnya" value={grandTotals.peg_lain} percentage={pieTotal > 0 ? ((grandTotals.peg_lain/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.gray} />
                    </div>
                 </div>
-                <div className="text-right">
-                   <span className="font-black text-xl text-orange-600">{grandTotals.swasta.toLocaleString()}</span>
-                   <span className="ml-2 font-bold text-sm text-orange-400">({percentSwasta}%)</span>
-                </div>
-             </div>
-          </div>
+             )}
 
+             {activeView === 'SERTIFIKASI' && (
+                <div className="flex flex-col gap-2">
+                   <StatCard label="Sudah Sertifikasi" value={grandTotals.sert_sudah} percentage={pieTotal > 0 ? ((grandTotals.sert_sudah/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.emerald} />
+                   <StatCard label="Belum Sertifikasi" value={grandTotals.sert_belum} percentage={pieTotal > 0 ? ((grandTotals.sert_belum/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.red} />
+                </div>
+             )}
+
+             {activeView === 'USIA' && (
+                <div className="grid grid-cols-2 gap-2">
+                   <StatCard label="<= 30 Tahun" value={grandTotals.usia_30} percentage={pieTotal > 0 ? ((grandTotals.usia_30/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.emerald} />
+                   <StatCard label="31 - 40 Tahun" value={grandTotals.usia_40} percentage={pieTotal > 0 ? ((grandTotals.usia_40/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
+                   <StatCard label="41 - 50 Tahun" value={grandTotals.usia_50} percentage={pieTotal > 0 ? ((grandTotals.usia_50/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.amber} />
+                   <StatCard label=">= 51 Tahun" value={grandTotals.usia_51} percentage={pieTotal > 0 ? ((grandTotals.usia_51/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.red} />
+                </div>
+             )}
+
+             {activeView === 'PENSIUN' && (
+                <div className="flex flex-col gap-2">
+                   <div className="grid grid-cols-2 gap-2">
+                     <StatCard label="1 Thn Lagi (Usia 60)" value={grandTotals.pens_1} percentage={pieTotal > 0 ? ((grandTotals.pens_1/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.red} />
+                     <StatCard label="2 Thn Lagi (Usia 59)" value={grandTotals.pens_2} percentage={pieTotal > 0 ? ((grandTotals.pens_2/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.orange} />
+                   </div>
+                   <StatCard label="3 Thn Lagi (Usia 58)" value={grandTotals.pens_3} percentage={pieTotal > 0 ? ((grandTotals.pens_3/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.amber} />
+                   <div className="grid grid-cols-2 gap-2">
+                     <StatCard label="4 Thn Lagi (Usia 57)" value={grandTotals.pens_4} percentage={pieTotal > 0 ? ((grandTotals.pens_4/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
+                     <StatCard label="5 Thn Lagi (Usia 56)" value={grandTotals.pens_5} percentage={pieTotal > 0 ? ((grandTotals.pens_5/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.emerald} />
+                   </div>
+                </div>
+             )}
+
+          </div>
         </div>
 
       </div>
 
-      {/* 3. MODAL COMPONENT */}
-      <DapodikGuruModal 
-        isOpen={modalOpen} 
-        onClose={() => setModalOpen(false)}
-        data={data}
-        initialWilayah={selectedWilayah}
-        displayLastUpdated={displayLastUpdated}
-      />
+      {/* KONDISIONAL RENDER MODAL BERDASARKAN ACTIVE VIEW */}
+      {activeView === 'STATUS' && (
+        <RincianStatusSekolahGuru 
+          isOpen={modalOpen} 
+          onClose={() => setModalOpen(false)}
+          data={data}
+          initialWilayah={selectedWilayah}
+          activeJenjang={activeJenjang}
+          displayLastUpdated={displayLastUpdated}
+        />
+      )}
+
+      {activeView === 'GENDER' && (
+        <RincianGenderGuru 
+          isOpen={modalOpen} 
+          onClose={() => setModalOpen(false)}
+          data={data}
+          initialWilayah={selectedWilayah}
+          activeJenjang={activeJenjang}
+          displayLastUpdated={displayLastUpdated}
+        />
+      )}
+
+      {activeView === 'KUALIFIKASI' && (
+        <RincianKualifikasiGuru 
+          isOpen={modalOpen} 
+          onClose={() => setModalOpen(false)}
+          data={data}
+          initialWilayah={selectedWilayah}
+          activeJenjang={activeJenjang}
+          displayLastUpdated={displayLastUpdated}
+        />
+      )}
+
+      {activeView === 'KEPEGAWAIAN' && (
+        <RincianKepegawaianGuru 
+          isOpen={modalOpen} 
+          onClose={() => setModalOpen(false)}
+          data={data}
+          initialWilayah={selectedWilayah}
+          activeJenjang={activeJenjang}
+          displayLastUpdated={displayLastUpdated}
+        />
+      )}
+
+      {activeView === 'SERTIFIKASI' && (
+        <RincianProfesiGuru 
+          isOpen={modalOpen} 
+          onClose={() => setModalOpen(false)}
+          data={data}
+          initialWilayah={selectedWilayah}
+          activeJenjang={activeJenjang}
+          displayLastUpdated={displayLastUpdated}
+        />
+      )}
+
+      {activeView === 'USIA' && (
+        <RincianUsiaGuru 
+          isOpen={modalOpen} 
+          onClose={() => setModalOpen(false)}
+          data={data}
+          initialWilayah={selectedWilayah}
+          activeJenjang={activeJenjang}
+          displayLastUpdated={displayLastUpdated}
+        />
+      )}
+
+      {activeView === 'PENSIUN' && (
+        <RincianProyeksiPensiunGuru 
+          isOpen={modalOpen} 
+          onClose={() => setModalOpen(false)}
+          data={data}
+          initialWilayah={selectedWilayah}
+          activeJenjang={activeJenjang}
+          displayLastUpdated={displayLastUpdated}
+        />
+      )}
 
     </div>
   );

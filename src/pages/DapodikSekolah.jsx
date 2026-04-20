@@ -41,12 +41,12 @@ const getKabupatenRank = (kabName) => {
 // =====================================================================
 const JENJANG_GROUPS = {
   'SEMUA': [],
-  'PAUD': ['TK', 'KB', 'SPS', 'TPA', 'PAUD'],
+  'PAUD': ['TK', 'KB', 'PAUD'],
   'SD': ['SD', 'SPK SD'],
   'SMP': ['SMP', 'SPK SMP'],
   'SMA/SMK': ['SMA', 'SPK SMA', 'SMK'],
   'SLB (Inklusif)': ['SLB'],
-  'NON FORMAL': ['PKBM', 'SKB']
+  'NON FORMAL': ['PKBM', 'SKB', 'SPS', 'TPA']
 };
 
 const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'NON FORMAL'];

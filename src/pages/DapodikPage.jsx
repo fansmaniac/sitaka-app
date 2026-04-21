@@ -73,8 +73,9 @@ const MENU_ITEMS = [
   { id: 'guru', label: 'Guru', icon: Users },
   { id: 'peserta_didik', label: 'Peserta Didik', icon: GraduationCap },
   { id: 'rasio', label: 'Rasio / Bandingkan Data', icon: LineChart },
-  { id: 'rombel', label: 'Rombel', icon: Layers },
-  { id: 'sarpras', label: 'Sarpras', icon: Building2 },
+  // Menu di bawah ini dinonaktifkan sementara (Sesuai instruksi)
+  // { id: 'rombel', label: 'Rombel', icon: Layers },
+  // { id: 'sarpras', label: 'Sarpras', icon: Building2 },
 ];
 
 export default function DapodikPage({ Header }) {

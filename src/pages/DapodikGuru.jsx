@@ -407,7 +407,10 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
   // EXPORT EXCEL
   const downloadExcel = async () => {
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet(`Rekap ${activeView} - ${activeJenjang}`);
+    
+    // PERBAIKAN: Ganti karakter "/" dengan "-" agar Excel tidak error
+    const safeJenjangName = activeJenjang.replace(/\//g, '-');
+    const worksheet = workbook.addWorksheet(`Rekap ${activeView} - ${safeJenjangName}`);
 
     let columns = [{ header: 'Wilayah (Kabupaten/Kota)', key: 'wilayah', width: 30 }];
     
@@ -444,7 +447,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Rekap_Guru_${activeView}_${activeJenjang === 'SEMUA' ? 'Keseluruhan' : activeJenjang.replace('/', '-')}_${selectedYear}.xlsx`;
+    link.download = `Rekap_Guru_${activeView}_${activeJenjang === 'SEMUA' ? 'Keseluruhan' : safeJenjangName}_${selectedYear}.xlsx`;
     link.click();
   };
 

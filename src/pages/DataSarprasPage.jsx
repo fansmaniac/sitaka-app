@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { 
   ArrowLeft, Building2, Download, MapPin, Loader2, 
   ChevronRight, Eye, X, Search, Info,
-  Bot, Send, Sparkles, RefreshCw
+  Bot, Send, Sparkles, RefreshCw, FileSpreadsheet
 } from 'lucide-react';
 import { KABUPATEN_LIST } from '../constants/listData';
 import { db } from '../firebase/config';
@@ -281,6 +281,54 @@ export default function DataSarprasPage({ onBack, Header }) {
     }, { lengkap: 0, cukup: 0, kurang: 0, sangatKurang: 0, total: 0 });
   }, [summaryTable]);
 
+  // --- FUNGSI EXPORT EXCEL REKAPITULASI ---
+  const downloadRekapExcel = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheetName = activeTab === 'SEMUA' ? 'Rekap Semua Jenjang' : `Rekap ${activeTab}`;
+    const worksheet = workbook.addWorksheet(sheetName);
+
+    worksheet.columns = [
+      { header: activeTab === 'SEMUA' ? 'Jenjang Pendidikan' : 'Kabupaten/Kota', key: 'rowLabel', width: 30 },
+      { header: 'Sarpras Lengkap', key: 'lengkap', width: 20 },
+      { header: 'Sarpras Cukup', key: 'cukup', width: 20 },
+      { header: 'Sarpras Kurang', key: 'kurang', width: 20 },
+      { header: 'Sangat Kurang', key: 'sangatKurang', width: 20 },
+      { header: 'Total Sekolah', key: 'totalRow', width: 20 },
+    ];
+
+    summaryTable.forEach(row => {
+      worksheet.addRow({
+        rowLabel: row.rowLabel,
+        lengkap: row.lengkap,
+        cukup: row.cukup,
+        kurang: row.kurang,
+        sangatKurang: row.sangatKurang,
+        totalRow: row.totalRow
+      });
+    });
+
+    const totalRow = worksheet.addRow({
+      rowLabel: 'TOTAL KESELURUHAN',
+      lengkap: tableTotals.lengkap,
+      cukup: tableTotals.cukup,
+      kurang: tableTotals.kurang,
+      sangatKurang: tableTotals.sangatKurang,
+      totalRow: tableTotals.total
+    });
+
+    worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6B21A8' } }; 
+    totalRow.font = { bold: true, color: { argb: 'FF4C1D95' } }; 
+    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3E8FF' } }; 
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Rekap_Sarpras_${activeTab}_${selectedYear}.xlsx`;
+    link.click();
+  };
+
   // --- FUNGSI AI ASSISTANT ---
   const handleSendAiMessage = async () => {
     if (!aiInput.trim()) return;
@@ -531,6 +579,7 @@ export default function DataSarprasPage({ onBack, Header }) {
         {/* ========================================================= */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           
+          {/* HEADER KONTEN */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 md:mb-4 bg-white p-4 md:p-6 rounded-[1.5rem] md:rounded-[2.5rem] shadow-sm border border-gray-100 shrink-0 gap-3">
             <div className="flex items-center gap-3 md:gap-4">
               <div className="bg-purple-100 p-3 md:p-4 rounded-xl md:rounded-2xl text-purple-600">
@@ -546,7 +595,8 @@ export default function DataSarprasPage({ onBack, Header }) {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 mb-3 md:mb-4 shrink-0 overflow-x-auto pb-2 scrollbar-hide">
+          {/* TABS JENJANG */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 mb-3 md:mb-4 scrollbar-hide w-full shrink-0">
             {TABS.map(tab => (
               <button 
                 key={tab.id}
@@ -559,78 +609,87 @@ export default function DataSarprasPage({ onBack, Header }) {
             ))}
           </div>
 
+          {/* AREA TABEL */}
           <div className="flex-1 bg-white rounded-[2rem] md:rounded-[3rem] shadow-xl border border-gray-100 overflow-hidden flex flex-col min-h-0">
-            <div className="bg-purple-700 text-white p-3 md:p-4 text-center shrink-0">
-              <h3 className="font-black uppercase tracking-widest text-xs md:text-sm">Rekapitulasi {TABS.find(g=>g.id === activeTab).label}</h3>
-              <p className="text-[9px] md:text-[10px] opacity-80 mt-1">
-                {activeTab === 'SEMUA' 
-                  ? 'Pilih tab jenjang di atas untuk melihat rincian kondisi sekolah masing-masing wilayah.' 
-                  : 'Klik pada baris wilayah untuk melihat daftar sekolah secara detail.'}
-              </p>
+            
+            {/* HEADER TABEL DENGAN TOMBOL UNDUH */}
+            <div className="bg-purple-700 text-white p-4 md:px-6 md:py-4 shrink-0 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="text-center sm:text-left">
+                <h3 className="font-black uppercase tracking-widest text-xs md:text-sm">Rekapitulasi {TABS.find(g=>g.id === activeTab).label}</h3>
+                <p className="text-[9px] md:text-[10px] opacity-80 mt-1">
+                  {activeTab === 'SEMUA' 
+                    ? 'Pilih tab jenjang di atas untuk melihat rincian kondisi sekolah masing-masing wilayah.' 
+                    : 'Klik pada baris wilayah untuk melihat daftar sekolah secara detail.'}
+                </p>
+              </div>
+              <button 
+                onClick={downloadRekapExcel} 
+                className="flex items-center justify-center gap-2 bg-white text-purple-700 hover:bg-gray-100 px-4 py-2.5 rounded-xl font-black uppercase text-[10px] md:text-xs shadow-sm transition-all active:scale-95 shrink-0 w-full sm:w-auto"
+              >
+                <FileSpreadsheet size={16} /> Unduh Rekap
+              </button>
             </div>
             
             {/* WADAH TABEL RESPONSIVE */}
-            <div className="flex-1 overflow-auto p-2 md:p-4">
-              <div className="w-full overflow-x-auto pb-4">
-                <table className="w-full text-center border-separate border-spacing-y-2 min-w-[800px]">
-                  <thead className="sticky top-0 bg-white z-10 shadow-sm">
-                    <tr className="text-[9px] md:text-[11px] font-black uppercase text-gray-400 tracking-widest">
-                      <th className="px-2 md:px-4 py-3 md:py-4 w-12">No</th>
-                      <th className="px-2 md:px-4 py-3 md:py-4 text-left">{activeTab === 'SEMUA' ? 'Jenjang Pendidikan' : 'Kabupaten/Kota'}</th>
-                      <th className="px-2 md:px-4 py-3 md:py-4 text-emerald-600">Sarpras Lengkap</th>
-                      <th className="px-2 md:px-4 py-3 md:py-4 text-blue-600">Sarpras Cukup</th>
-                      <th className="px-2 md:px-4 py-3 md:py-4 text-orange-600">Sarpras Kurang</th>
-                      <th className="px-2 md:px-4 py-3 md:py-4 text-red-600">Sgt. Kurang</th>
-                      <th className="px-2 md:px-4 py-3 md:py-4 text-purple-700">Total Sekolah</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {summaryTable.map((row, idx) => (
-                      <tr 
-                        key={idx} 
-                        onClick={() => activeTab !== 'SEMUA' && setActiveRowModal(row)}
-                        className={`bg-gray-50 transition-colors group ${activeTab !== 'SEMUA' ? 'hover:bg-purple-50 cursor-pointer active:scale-[0.99]' : ''}`}
-                      >
-                        <td className={`px-2 md:px-4 py-3 md:py-4 rounded-l-xl md:rounded-l-2xl font-black text-gray-400 text-[10px] md:text-xs ${activeTab !== 'SEMUA' && 'group-hover:text-purple-600'}`}>{idx + 1}</td>
-                        <td className={`px-2 md:px-4 py-3 md:py-4 text-left font-black text-gray-700 text-xs md:text-sm uppercase ${activeTab !== 'SEMUA' && 'group-hover:text-purple-800'}`}>
-                          <div className="flex items-center gap-2">
-                            {row.rowLabel}
-                            {activeTab !== 'SEMUA' && <Eye size={14} className="opacity-0 group-hover:opacity-100 text-purple-500 transition-opacity" />}
-                          </div>
-                        </td>
-                        <td className="px-2 md:px-4 py-3 md:py-4">{renderCellWithPct(row.lengkap, row.totalRow, 'text-emerald-600')}</td>
-                        <td className="px-2 md:px-4 py-3 md:py-4">{renderCellWithPct(row.cukup, row.totalRow, 'text-blue-600')}</td>
-                        <td className="px-2 md:px-4 py-3 md:py-4">{renderCellWithPct(row.kurang, row.totalRow, 'text-orange-600')}</td>
-                        <td className="px-2 md:px-4 py-3 md:py-4">{renderCellWithPct(row.sangatKurang, row.totalRow, 'text-red-600')}</td>
-                        <td className="px-2 md:px-4 py-3 md:py-4 rounded-r-xl md:rounded-r-2xl">
-                          <div className="flex items-center justify-center">
-                            <span className="bg-purple-100 text-purple-700 font-black text-xs md:text-sm px-2 md:px-3 py-1 md:py-1.5 rounded-lg md:rounded-xl border border-purple-200">
-                              {row.totalRow.toLocaleString()}
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-
-                    {/* BARIS TOTAL KESELURUHAN */}
-                    <tr className="bg-purple-100/50 shadow-inner">
-                      <td className="px-2 md:px-4 py-4 md:py-5 rounded-l-xl md:rounded-l-2xl"></td>
-                      <td className="px-2 md:px-4 py-4 md:py-5 text-left font-black text-purple-900 text-xs md:text-base uppercase tracking-wider">TOTAL KESELURUHAN</td>
-                      <td className="px-2 md:px-4 py-4 md:py-5">{renderCellWithPct(tableTotals.lengkap, tableTotals.total, 'text-emerald-700')}</td>
-                      <td className="px-2 md:px-4 py-4 md:py-5">{renderCellWithPct(tableTotals.cukup, tableTotals.total, 'text-blue-700')}</td>
-                      <td className="px-2 md:px-4 py-4 md:py-5">{renderCellWithPct(tableTotals.kurang, tableTotals.total, 'text-orange-700')}</td>
-                      <td className="px-2 md:px-4 py-4 md:py-5">{renderCellWithPct(tableTotals.sangatKurang, tableTotals.total, 'text-red-700')}</td>
-                      <td className="px-2 md:px-4 py-4 md:py-5 rounded-r-xl md:rounded-r-2xl">
+            <div className="flex-1 overflow-auto p-2 md:px-6 md:py-4 custom-scrollbar">
+              <table className="w-full text-center border-separate border-spacing-y-2">
+                <thead className="sticky top-0 bg-white z-10 shadow-sm">
+                  <tr className="text-[9px] md:text-[11px] font-black uppercase text-gray-400 tracking-widest whitespace-nowrap">
+                    <th className="px-2 md:px-4 py-3 md:py-4 w-12">No</th>
+                    <th className="px-2 md:px-4 py-3 md:py-4 text-left">{activeTab === 'SEMUA' ? 'Jenjang Pendidikan' : 'Kabupaten/Kota'}</th>
+                    <th className="px-2 md:px-4 py-3 md:py-4 text-emerald-600">Sarpras Lengkap</th>
+                    <th className="px-2 md:px-4 py-3 md:py-4 text-blue-600">Sarpras Cukup</th>
+                    <th className="px-2 md:px-4 py-3 md:py-4 text-orange-600">Sarpras Kurang</th>
+                    <th className="px-2 md:px-4 py-3 md:py-4 text-red-600">Sgt. Kurang</th>
+                    <th className="px-2 md:px-4 py-3 md:py-4 text-purple-700">Total Sekolah</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summaryTable.map((row, idx) => (
+                    <tr 
+                      key={idx} 
+                      onClick={() => activeTab !== 'SEMUA' && setActiveRowModal(row)}
+                      className={`bg-gray-50 transition-colors group ${activeTab !== 'SEMUA' ? 'hover:bg-purple-50 cursor-pointer active:scale-[0.99]' : ''}`}
+                    >
+                      <td className={`px-2 md:px-4 py-3 md:py-4 rounded-l-xl md:rounded-l-2xl font-black text-gray-400 text-[10px] md:text-xs ${activeTab !== 'SEMUA' && 'group-hover:text-purple-600'}`}>{idx + 1}</td>
+                      <td className={`px-2 md:px-4 py-3 md:py-4 text-left font-black text-gray-700 text-xs md:text-sm uppercase ${activeTab !== 'SEMUA' && 'group-hover:text-purple-800'}`}>
+                        <div className="flex items-center gap-2 whitespace-nowrap md:whitespace-normal">
+                          {row.rowLabel}
+                          {activeTab !== 'SEMUA' && <Eye size={14} className="opacity-0 group-hover:opacity-100 text-purple-500 transition-opacity" />}
+                        </div>
+                      </td>
+                      <td className="px-2 md:px-4 py-3 md:py-4">{renderCellWithPct(row.lengkap, row.totalRow, 'text-emerald-600')}</td>
+                      <td className="px-2 md:px-4 py-3 md:py-4">{renderCellWithPct(row.cukup, row.totalRow, 'text-blue-600')}</td>
+                      <td className="px-2 md:px-4 py-3 md:py-4">{renderCellWithPct(row.kurang, row.totalRow, 'text-orange-600')}</td>
+                      <td className="px-2 md:px-4 py-3 md:py-4">{renderCellWithPct(row.sangatKurang, row.totalRow, 'text-red-600')}</td>
+                      <td className="px-2 md:px-4 py-3 md:py-4 rounded-r-xl md:rounded-r-2xl">
                         <div className="flex items-center justify-center">
-                          <span className="bg-purple-200 text-purple-800 font-black text-sm md:text-base px-3 md:px-4 py-1.5 md:py-2 rounded-lg md:rounded-xl border border-purple-300 shadow-sm">
-                            {tableTotals.total.toLocaleString()}
+                          <span className="bg-purple-100 text-purple-700 font-black text-xs md:text-sm px-2 md:px-3 py-1 md:py-1.5 rounded-lg md:rounded-xl border border-purple-200">
+                            {row.totalRow.toLocaleString()}
                           </span>
                         </div>
                       </td>
                     </tr>
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+
+                  {/* BARIS TOTAL KESELURUHAN */}
+                  <tr className="bg-purple-100/50 shadow-inner">
+                    <td className="px-2 md:px-4 py-4 md:py-5 rounded-l-xl md:rounded-l-2xl"></td>
+                    <td className="px-2 md:px-4 py-4 md:py-5 text-left font-black text-purple-900 text-xs md:text-base uppercase tracking-wider whitespace-nowrap">TOTAL KESELURUHAN</td>
+                    <td className="px-2 md:px-4 py-4 md:py-5">{renderCellWithPct(tableTotals.lengkap, tableTotals.total, 'text-emerald-700')}</td>
+                    <td className="px-2 md:px-4 py-4 md:py-5">{renderCellWithPct(tableTotals.cukup, tableTotals.total, 'text-blue-700')}</td>
+                    <td className="px-2 md:px-4 py-4 md:py-5">{renderCellWithPct(tableTotals.kurang, tableTotals.total, 'text-orange-700')}</td>
+                    <td className="px-2 md:px-4 py-4 md:py-5">{renderCellWithPct(tableTotals.sangatKurang, tableTotals.total, 'text-red-700')}</td>
+                    <td className="px-2 md:px-4 py-4 md:py-5 rounded-r-xl md:rounded-r-2xl">
+                      <div className="flex items-center justify-center">
+                        <span className="bg-purple-200 text-purple-800 font-black text-sm md:text-base px-3 md:px-4 py-1.5 md:py-2 rounded-lg md:rounded-xl border border-purple-300 shadow-sm">
+                          {tableTotals.total.toLocaleString()}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -730,7 +789,7 @@ export default function DataSarprasPage({ onBack, Header }) {
                 onChange={(e) => setAiInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSendAiMessage()}
                 placeholder="Ketik pertanyaanmu..." 
-                className="flex-1 bg-gray-100 border-none rounded-xl py-2.5 md:py-3 px-3 md:px-4 text-xs md:text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 font-medium"
+                className="flex-1 bg-gray-100 border-none rounded-xl py-2.5 md:py-3 px-3 md:px-4 text-xs md:text-sm focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50 font-medium"
               />
               <button 
                 onClick={handleSendAiMessage}

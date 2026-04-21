@@ -10,13 +10,13 @@ import { collection, getDocs, query, where, limit } from 'firebase/firestore';
 import DapodikSekolah from './DapodikSekolah';
 import DapodikGuru from './DapodikGuru'; 
 import DapodikPesertaDidik from './DapodikPesertaDidik'; 
-import DapodikRasio from './DapodikRasio'; // <-- IMPORT DAPODIK RASIO
+import DapodikRasio from './DapodikRasio';
+import DapodikSarpras from './DapodikSarpras'; // <-- IMPORT DAPODIK SARPRAS AKTIF
 
 // =====================================================================
 // PLACEHOLDER KOMPONEN (Nanti kita pisah ke file masing-masing)
 // =====================================================================
 const DapodikRombel = () => <div className="p-8 text-center text-gray-500 font-bold animate-in fade-in zoom-in-95">Tampilan Dapodik Rombel (Segera Hadir)</div>;
-const DapodikSarpras = () => <div className="p-8 text-center text-gray-500 font-bold animate-in fade-in zoom-in-95">Tampilan Dapodik Sarpras (Segera Hadir)</div>;
 
 // =====================================================================
 // UTILITY: INDEXED-DB CACHING (BRANKAS LOKAL)
@@ -73,9 +73,9 @@ const MENU_ITEMS = [
   { id: 'guru', label: 'Guru', icon: Users },
   { id: 'peserta_didik', label: 'Peserta Didik', icon: GraduationCap },
   { id: 'rasio', label: 'Rasio / Bandingkan Data', icon: LineChart },
-  // Menu di bawah ini dinonaktifkan sementara (Sesuai instruksi)
+  // Menu Rombel masih dinonaktifkan sementara
   // { id: 'rombel', label: 'Rombel', icon: Layers },
-  // { id: 'sarpras', label: 'Sarpras', icon: Building2 },
+  { id: 'sarpras', label: 'Sarpras', icon: Building2 }, // <-- MENU SARPRAS DIAKTIFKAN
 ];
 
 export default function DapodikPage({ Header }) {
@@ -195,9 +195,9 @@ export default function DapodikPage({ Header }) {
       case 'sekolah': return <DapodikSekolah data={sekolahData} selectedYear={selectedYear} />;
       case 'guru': return <DapodikGuru data={ptkData} selectedYear={selectedYear} />;
       case 'peserta_didik': return <DapodikPesertaDidik data={sekolahData} selectedYear={selectedYear} />; 
-      case 'rasio': return <DapodikRasio dataSekolah={sekolahData} dataGuru={ptkData} selectedYear={selectedYear} />; // <-- SUNTIKKAN KEDUA DATA KE SINI
+      case 'rasio': return <DapodikRasio dataSekolah={sekolahData} dataGuru={ptkData} selectedYear={selectedYear} />;
       case 'rombel': return <DapodikRombel />;
-      case 'sarpras': return <DapodikSarpras />;
+      case 'sarpras': return <DapodikSarpras selectedYear={selectedYear} />; // <-- SUNTIKKAN TAHUN KE SARPRAS
       default: return <DapodikSekolah data={sekolahData} selectedYear={selectedYear} />;
     }
   };

@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { 
-  Download, BookOpen, MapPin, Search, X, ChevronLeft, ChevronRight 
+  Download, BookOpen, MapPin, Search, X, ChevronLeft, ChevronRight,
+  Building2, School
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
 
@@ -67,20 +68,36 @@ export default function RincianPDJenjangSD({
   initialWilayah = 'SEMUA', 
   displayLastUpdated 
 }) {
+  // STATE MODAL TABS
+  const [activeModalTab, setActiveModalTab] = useState('KECAMATAN'); // 'KECAMATAN' | 'SEKOLAH'
+
+  // STATE FILTERS
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterWilayah, setFilterWilayah] = useState(initialWilayah);
+  const [filterWilayah, setFilterWilayah] = useState(initialWilayah); // Untuk Tab Kecamatan
+  const [filterWilayahSekolah, setFilterWilayahSekolah] = useState('SEMUA'); // Untuk Tab Sekolah
+  const [filterStatus, setFilterStatus] = useState('SEMUA'); 
+
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 15;
 
+  const isModeSemua = initialWilayah === 'SEMUA';
+
   // Sinkronisasi saat modal dibuka
   useEffect(() => {
-    if (isOpen) setFilterWilayah(initialWilayah);
-  }, [isOpen, initialWilayah]);
+    if (isOpen) {
+      setActiveModalTab('KECAMATAN');
+      setSearchTerm('');
+      setFilterWilayah('SEMUA');
+      setFilterWilayahSekolah('SEMUA');
+      setFilterStatus('SEMUA');
+      setCurrentPage(1);
+    }
+  }, [isOpen]);
 
   // Reset pagination saat pencarian atau filter berubah
   useEffect(() => { 
     setCurrentPage(1); 
-  }, [searchTerm, filterWilayah]);
+  }, [searchTerm, filterWilayah, filterWilayahSekolah, filterStatus, activeModalTab]);
 
   // Handle ESC key
   useEffect(() => {
@@ -89,35 +106,53 @@ export default function RincianPDJenjangSD({
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen, onClose]);
 
-  const listKabupaten = useMemo(() => {
-    const unik = [...new Set(data.map(item => cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'))))];
-    return unik.filter(k => k !== 'TIDAK DIKETAHUI').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
-  }, [data]);
+  // Ekstrak Daftar Wilayah (Kabupaten/Kecamatan) untuk Dropdown Filter
+  const listWilayahFilter = useMemo(() => {
+    const validData = data.filter(item => {
+      if (isModeSemua) return true;
+      return cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) === initialWilayah;
+    });
 
-  const isModeSemua = filterWilayah === 'SEMUA';
+    const list = validData.map(item => {
+      return isModeSemua 
+        ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'))
+        : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+    });
 
-  // Proses Agregasi Data Khusus SD
-  const processedData = useMemo(() => {
+    return [...new Set(list)].sort();
+  }, [data, isModeSemua, initialWilayah]);
+
+  // =====================================================================
+  // AGREGASI DATA TAB "PER KECAMATAN"
+  // =====================================================================
+  const dataKecamatan = useMemo(() => {
     if (!data) return [];
 
-    const validData = data.filter(item => {
-      // Filter khusus SD
+    const baseData = data.filter(item => {
+      // 1. Filter Wilayah Base
+      const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+      if (!isModeSemua && kabDb !== initialWilayah) return false;
+
+      // 2. Filter khusus SD
       const group = identifyJenjangGroup(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'));
       if (group !== 'SD') return false;
 
-      // Filter Wilayah
-      const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
-      if (!isModeSemua && kabDb !== filterWilayah) return false;
-
+      // 3. Filter Status Sekolah
+      if (filterStatus !== 'SEMUA') {
+        const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
+        if (statusDb !== filterStatus) return false;
+      }
       return true;
     });
 
     const mapAgg = new Map();
 
-    validData.forEach(item => {
+    baseData.forEach(item => {
       let keyId = isModeSemua 
           ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) 
           : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+
+      if (filterWilayah !== 'SEMUA' && keyId !== filterWilayah) return;
 
       if (!mapAgg.has(keyId)) {
         mapAgg.set(keyId, { 
@@ -150,62 +185,171 @@ export default function RincianPDJenjangSD({
     return isModeSemua 
       ? resultArray.sort((a, b) => getKabupatenRank(a.namaWilayah) - getKabupatenRank(b.namaWilayah)) 
       : resultArray.sort((a, b) => a.namaWilayah.localeCompare(b.namaWilayah));
-  }, [data, isModeSemua, filterWilayah, searchTerm]);
+  }, [data, isModeSemua, initialWilayah, filterWilayah, filterStatus, searchTerm]);
 
-  const columnTotals = useMemo(() => {
-    return processedData.reduce((acc, curr) => {
+  const totalsKecamatan = useMemo(() => {
+    return dataKecamatan.reduce((acc, curr) => {
       acc.sd_1 += curr.sd_1; acc.sd_2 += curr.sd_2; acc.sd_3 += curr.sd_3;
       acc.sd_4 += curr.sd_4; acc.sd_5 += curr.sd_5; acc.sd_6 += curr.sd_6;
       acc.total += curr.total;
       return acc;
     }, { sd_1: 0, sd_2: 0, sd_3: 0, sd_4: 0, sd_5: 0, sd_6: 0, total: 0 });
-  }, [processedData]);
+  }, [dataKecamatan]);
 
-  // Export Excel
-  const downloadExcelRincian = async () => {
-    const workbook = new ExcelJS.Workbook();
-    const sheetName = isModeSemua ? 'Rekap Provinsi' : `Rekap ${filterWilayah}`;
-    const worksheet = workbook.addWorksheet(sheetName);
+  // =====================================================================
+  // AGREGASI DATA TAB "PER SEKOLAH"
+  // =====================================================================
+  const dataSekolah = useMemo(() => {
+    if (!data) return [];
+    
+    let validData = data.filter(item => {
+      const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+      if (!isModeSemua && kabDb !== initialWilayah) return false;
 
-    worksheet.columns = [
-      { header: isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan', key: 'namaWilayah', width: 30 },
-      { header: 'Kelas 1', key: 'sd_1', width: 15 },
-      { header: 'Kelas 2', key: 'sd_2', width: 15 },
-      { header: 'Kelas 3', key: 'sd_3', width: 15 },
-      { header: 'Kelas 4', key: 'sd_4', width: 15 },
-      { header: 'Kelas 5', key: 'sd_5', width: 15 },
-      { header: 'Kelas 6', key: 'sd_6', width: 15 },
-      { header: 'Total Peserta Didik', key: 'total', width: 22 },
-    ];
+      // Filter khusus SD
+      const group = identifyJenjangGroup(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'));
+      if (group !== 'SD') return false;
 
-    processedData.forEach(item => worksheet.addRow(item));
+      // Filter Status Sekolah
+      if (filterStatus !== 'SEMUA') {
+        const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
+        if (statusDb !== filterStatus) return false;
+      }
 
-    const totalRow = worksheet.addRow({
-      namaWilayah: 'TOTAL KESELURUHAN',
-      sd_1: columnTotals.sd_1, sd_2: columnTotals.sd_2, sd_3: columnTotals.sd_3,
-      sd_4: columnTotals.sd_4, sd_5: columnTotals.sd_5, sd_6: columnTotals.sd_6,
-      total: columnTotals.total
+      // Filter Wilayah Khusus Tab Sekolah (Kecamatan/Kabupaten)
+      if (filterWilayahSekolah !== 'SEMUA') {
+        let keyId = isModeSemua 
+          ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) 
+          : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+        if (keyId !== filterWilayahSekolah) return false;
+      }
+
+      // Filter Pencarian
+      if (searchTerm) {
+        const nama = String(getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '').toLowerCase();
+        const npsn = String(getVal(item, 'npsn') || '').toLowerCase();
+        const q = searchTerm.toLowerCase();
+        if (!nama.includes(q) && !npsn.includes(q)) return false;
+      }
+
+      return true;
     });
 
-    // Styling Header
-    worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF059669' } }; // Emerald 600
-    
-    // Styling Baris Total
-    totalRow.font = { bold: true, color: { argb: 'FF064E3B' } }; // Emerald 900
-    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } }; // Emerald 100
+    return validData.map(item => {
+      const t1 = (parseInt(getVal(item, 't1_l')) || 0) + (parseInt(getVal(item, 't1_p')) || 0);
+      const t2 = (parseInt(getVal(item, 't2_l')) || 0) + (parseInt(getVal(item, 't2_p')) || 0);
+      const t3 = (parseInt(getVal(item, 't3_l')) || 0) + (parseInt(getVal(item, 't3_p')) || 0);
+      const t4 = (parseInt(getVal(item, 't4_l')) || 0) + (parseInt(getVal(item, 't4_p')) || 0);
+      const t5 = (parseInt(getVal(item, 't5_l')) || 0) + (parseInt(getVal(item, 't5_p')) || 0);
+      const t6 = (parseInt(getVal(item, 't6_l')) || 0) + (parseInt(getVal(item, 't6_p')) || 0);
 
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `Rincian_PD_SD_${isModeSemua ? 'Provinsi' : filterWilayah}.xlsx`;
-    link.click();
+      return {
+        npsn: getVal(item, 'npsn'),
+        nama_sekolah: getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '-',
+        status: String(getVal(item, 'status_sekolah')).toUpperCase(),
+        kecamatan: String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase(),
+        sd_1: t1,
+        sd_2: t2,
+        sd_3: t3,
+        sd_4: t4,
+        sd_5: t5,
+        sd_6: t6,
+        total: t1 + t2 + t3 + t4 + t5 + t6
+      };
+    }).sort((a, b) => String(a.nama_sekolah).localeCompare(String(b.nama_sekolah)));
+
+  }, [data, isModeSemua, initialWilayah, filterStatus, filterWilayahSekolah, searchTerm]);
+
+  const totalsSekolah = useMemo(() => {
+    return dataSekolah.reduce((acc, curr) => {
+      acc.sd_1 += curr.sd_1; acc.sd_2 += curr.sd_2; acc.sd_3 += curr.sd_3;
+      acc.sd_4 += curr.sd_4; acc.sd_5 += curr.sd_5; acc.sd_6 += curr.sd_6;
+      acc.total += curr.total;
+      return acc;
+    }, { sd_1: 0, sd_2: 0, sd_3: 0, sd_4: 0, sd_5: 0, sd_6: 0, total: 0 });
+  }, [dataSekolah]);
+
+  // =====================================================================
+  // EXPORT EXCEL
+  // =====================================================================
+  const downloadExcelRincian = async () => {
+    const workbook = new ExcelJS.Workbook();
+    
+    if (activeModalTab === 'KECAMATAN') {
+      const sheetName = isModeSemua ? 'Rekap Provinsi' : `Rekap ${initialWilayah}`;
+      const worksheet = workbook.addWorksheet(sheetName);
+
+      worksheet.columns = [
+        { header: isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan', key: 'namaWilayah', width: 30 },
+        { header: 'Kelas 1', key: 'sd_1', width: 15 },
+        { header: 'Kelas 2', key: 'sd_2', width: 15 },
+        { header: 'Kelas 3', key: 'sd_3', width: 15 },
+        { header: 'Kelas 4', key: 'sd_4', width: 15 },
+        { header: 'Kelas 5', key: 'sd_5', width: 15 },
+        { header: 'Kelas 6', key: 'sd_6', width: 15 },
+        { header: 'Total Peserta Didik', key: 'total', width: 22 },
+      ];
+
+      dataKecamatan.forEach(item => worksheet.addRow(item));
+
+      const totalRow = worksheet.addRow({
+        namaWilayah: 'TOTAL KESELURUHAN',
+        sd_1: totalsKecamatan.sd_1, sd_2: totalsKecamatan.sd_2, sd_3: totalsKecamatan.sd_3,
+        sd_4: totalsKecamatan.sd_4, sd_5: totalsKecamatan.sd_5, sd_6: totalsKecamatan.sd_6,
+        total: totalsKecamatan.total
+      });
+
+      // Styling Header
+      worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF059669' } }; // Emerald 600
+      
+      // Styling Baris Total
+      totalRow.font = { bold: true, color: { argb: 'FF064E3B' } }; // Emerald 900
+      totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } }; // Emerald 100
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `Rincian_PD_SD_Kecamatan_${initialWilayah}.xlsx`;
+      link.click();
+    } else {
+      // Tab SEKOLAH
+      const worksheet = workbook.addWorksheet('Daftar Sekolah');
+
+      worksheet.columns = [
+        { header: 'NPSN', key: 'npsn', width: 15 },
+        { header: 'Nama Sekolah', key: 'nama_sekolah', width: 45 },
+        { header: 'Kecamatan', key: 'kecamatan', width: 25 },
+        { header: 'Status', key: 'status', width: 15 },
+        { header: 'Kelas 1', key: 'sd_1', width: 12 },
+        { header: 'Kelas 2', key: 'sd_2', width: 12 },
+        { header: 'Kelas 3', key: 'sd_3', width: 12 },
+        { header: 'Kelas 4', key: 'sd_4', width: 12 },
+        { header: 'Kelas 5', key: 'sd_5', width: 12 },
+        { header: 'Kelas 6', key: 'sd_6', width: 12 },
+        { header: 'Total Peserta Didik', key: 'total', width: 22 },
+      ];
+
+      dataSekolah.forEach(item => worksheet.addRow(item));
+
+      worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF059669' } }; // Emerald 600
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `Daftar_Sekolah_PD_SD_${initialWilayah}.xlsx`;
+      link.click();
+    }
   };
 
-  const totalPages = Math.ceil(processedData.length / rowsPerPage) || 1;
+  // Pagination Logic
+  const activeData = activeModalTab === 'KECAMATAN' ? dataKecamatan : dataSekolah;
+  const totalPages = Math.ceil(activeData.length / rowsPerPage) || 1;
   const startIndex = (currentPage - 1) * rowsPerPage;
-  const currentRows = processedData.slice(startIndex, startIndex + rowsPerPage);
+  const currentRows = activeData.slice(startIndex, startIndex + rowsPerPage);
   
   const goToPage = (page) => {
     if (page >= 1 && page <= totalPages) setCurrentPage(page);
@@ -215,7 +359,7 @@ export default function RincianPDJenjangSD({
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={onClose}>
-      <div className="bg-white w-full max-w-6xl h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-300" onClick={e => e.stopPropagation()}>
+      <div className="bg-white w-full max-w-7xl h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-300" onClick={e => e.stopPropagation()}>
         
         {/* HEADER MODAL */}
         <div className="bg-emerald-600 px-6 py-5 flex items-center justify-between shrink-0">
@@ -226,13 +370,13 @@ export default function RincianPDJenjangSD({
                 Rincian Peserta Didik SD
               </h2>
               <p className="text-emerald-200 text-sm font-bold uppercase tracking-widest mt-1 flex gap-2">
-                <span>{isModeSemua ? 'Provinsi Kalimantan Barat' : `Kecamatan di Kab. ${filterWilayah}`}</span>
+                <span>{isModeSemua ? 'Provinsi Kalimantan Barat' : `Kabupaten ${initialWilayah}`}</span>
               </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={downloadExcelRincian} className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-black text-xs uppercase shadow-md transition-all active:scale-95 border border-emerald-400">
-              <Download size={14} /> Unduh
+            <button onClick={downloadExcelRincian} className="flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-xl font-black text-xs uppercase shadow-md transition-all active:scale-95 border border-blue-400">
+              <Download size={14} /> Unduh Excel
             </button>
             <button onClick={onClose} className="p-2 bg-white/10 hover:bg-red-500 text-white rounded-xl transition-colors">
               <X size={24} />
@@ -240,89 +384,205 @@ export default function RincianPDJenjangSD({
           </div>
         </div>
 
+        {/* TAB NAVIGATION DALAM MODAL */}
+        <div className="bg-emerald-50 px-6 pt-3 flex gap-2 border-b border-emerald-100 shrink-0">
+          <button 
+            onClick={() => setActiveModalTab('KECAMATAN')}
+            className={`px-6 py-2.5 rounded-t-xl font-black uppercase text-xs transition-all border-b-4 ${activeModalTab === 'KECAMATAN' ? 'bg-white text-emerald-700 border-emerald-700 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]' : 'bg-transparent text-emerald-500 border-transparent hover:text-emerald-700 hover:bg-emerald-100/50'}`}
+          >
+            <div className="flex items-center gap-2"><MapPin size={16}/> Per Kecamatan</div>
+          </button>
+          <button 
+            onClick={() => setActiveModalTab('SEKOLAH')}
+            className={`px-6 py-2.5 rounded-t-xl font-black uppercase text-xs transition-all border-b-4 ${activeModalTab === 'SEKOLAH' ? 'bg-white text-emerald-700 border-emerald-700 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]' : 'bg-transparent text-emerald-500 border-transparent hover:text-emerald-700 hover:bg-emerald-100/50'}`}
+          >
+            <div className="flex items-center gap-2"><School size={16}/> Per Sekolah</div>
+          </button>
+        </div>
+
         {/* FILTER BAR */}
-        <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 flex flex-wrap gap-4 items-center shrink-0">
+        <div className="bg-white px-6 py-4 border-b border-gray-200 flex flex-wrap gap-4 items-center shrink-0 shadow-sm z-10">
           <div className="relative flex-1 min-w-[250px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input 
               type="text" 
-              placeholder={`Cari Nama ${isModeSemua ? 'Kabupaten' : 'Kecamatan'}...`} 
+              placeholder={activeModalTab === 'KECAMATAN' ? `Cari ${isModeSemua ? 'Kabupaten' : 'Kecamatan'}...` : "Cari Nama Sekolah atau NPSN..."} 
               value={searchTerm} 
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-gray-200 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 font-bold text-gray-700"
             />
           </div>
+
+          {/* FILTER TAB KECAMATAN */}
+          {activeModalTab === 'KECAMATAN' && (
+            <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
+              <MapPin size={16} className="text-gray-400 mr-2" />
+              <select 
+                value={filterWilayah} 
+                onChange={(e) => setFilterWilayah(e.target.value)} 
+                className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[200px]"
+              >
+                <option value="SEMUA">{isModeSemua ? 'SEMUA KABUPATEN' : 'SEMUA KECAMATAN'}</option>
+                {listWilayahFilter.map(w => <option key={w} value={w}>{w}</option>)}
+              </select>
+            </div>
+          )}
+
+          {/* FILTER TAB SEKOLAH */}
+          {activeModalTab === 'SEKOLAH' && (
+            <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
+              <MapPin size={16} className="text-gray-400 mr-2" />
+              <select 
+                value={filterWilayahSekolah} 
+                onChange={(e) => setFilterWilayahSekolah(e.target.value)} 
+                className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[200px]"
+              >
+                <option value="SEMUA">{isModeSemua ? 'SEMUA KABUPATEN' : 'SEMUA KECAMATAN'}</option>
+                {listWilayahFilter.map(w => <option key={w} value={w}>{w}</option>)}
+              </select>
+            </div>
+          )}
+
+          {/* FILTER STATUS (BERLAKU UNTUK KEDUANYA) */}
           <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
-            <MapPin size={16} className="text-gray-400 mr-2" />
+            <Building2 size={16} className="text-gray-400 mr-2" />
             <select 
-              value={filterWilayah} 
-              onChange={(e) => setFilterWilayah(e.target.value)} 
-              className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[200px]"
+              value={filterStatus} 
+              onChange={(e) => setFilterStatus(e.target.value)} 
+              className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer"
             >
-              <option value="SEMUA">SELURUH PROVINSI</option>
-              {listKabupaten.map(k => <option key={k} value={k}>{k}</option>)}
+              <option value="SEMUA">Semua Status</option>
+              <option value="NEGERI">Negeri</option>
+              <option value="SWASTA">Swasta</option>
             </select>
           </div>
         </div>
 
         {/* TABLE AREA */}
-        <div className="flex-1 overflow-auto bg-white p-4">
-          <table className="w-full text-center border-separate border-spacing-y-2">
-            <thead className="sticky top-0 bg-white z-10 shadow-sm rounded-xl">
-              <tr className="text-[10px] font-black uppercase text-gray-500">
-                <th className="px-4 py-3 text-center rounded-l-xl w-16">No</th>
-                <th className="px-4 py-3 text-left">{isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan'}</th>
-                <th className="px-2 py-3 text-red-500">Kelas 1</th>
-                <th className="px-2 py-3 text-orange-500">Kelas 2</th>
-                <th className="px-2 py-3 text-amber-500">Kelas 3</th>
-                <th className="px-2 py-3 text-emerald-500">Kelas 4</th>
-                <th className="px-2 py-3 text-sky-500">Kelas 5</th>
-                <th className="px-2 py-3 text-blue-500">Kelas 6</th>
-                <th className="px-4 py-3 rounded-r-xl text-gray-800">Total PD</th>
-              </tr>
-            </thead>
-            <tbody>
-              {currentRows.map((row, idx) => (
-                <tr key={idx} className="bg-white shadow-sm hover:shadow-md hover:scale-[1.01] transition-all group">
-                  <td className="px-4 py-4 text-center font-bold text-gray-400 text-xs rounded-l-2xl border-y border-l border-gray-100">{startIndex + idx + 1}</td>
-                  <td className="px-4 py-4 font-black text-gray-800 text-sm uppercase text-left border-y border-gray-100 whitespace-nowrap">{row.namaWilayah}</td>
-                  
-                  <td className="px-2 py-4 font-bold text-red-500 text-sm border-y border-gray-100 bg-red-50/20">{row.sd_1.toLocaleString()}</td>
-                  <td className="px-2 py-4 font-bold text-orange-500 text-sm border-y border-gray-100 bg-orange-50/20">{row.sd_2.toLocaleString()}</td>
-                  <td className="px-2 py-4 font-bold text-amber-500 text-sm border-y border-gray-100 bg-amber-50/20">{row.sd_3.toLocaleString()}</td>
-                  <td className="px-2 py-4 font-bold text-emerald-500 text-sm border-y border-gray-100 bg-emerald-50/20">{row.sd_4.toLocaleString()}</td>
-                  <td className="px-2 py-4 font-bold text-sky-500 text-sm border-y border-gray-100 bg-sky-50/20">{row.sd_5.toLocaleString()}</td>
-                  <td className="px-2 py-4 font-bold text-blue-500 text-sm border-y border-gray-100 bg-blue-50/20">{row.sd_6.toLocaleString()}</td>
-                  
-                  <td className="px-4 py-4 font-black text-gray-800 text-lg border-y border-r border-gray-100 bg-gray-50/50 rounded-r-2xl">
-                    {row.total.toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            
-            {/* TFOOT: BARIS TOTAL KESELURUHAN */}
-            {processedData.length > 0 && (
-              <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
-                <tr className="bg-emerald-100 text-center font-black uppercase text-xs border-t-2 border-emerald-200">
-                  <td colSpan="2" className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-emerald-200 text-emerald-900">
-                    TOTAL {isModeSemua ? 'KESELURUHAN' : 'KECAMATAN'}
-                  </td>
-                  <td className="px-2 py-4 text-red-600 border-y border-emerald-200 text-base">{columnTotals.sd_1.toLocaleString()}</td>
-                  <td className="px-2 py-4 text-orange-600 border-y border-emerald-200 text-base">{columnTotals.sd_2.toLocaleString()}</td>
-                  <td className="px-2 py-4 text-amber-600 border-y border-emerald-200 text-base">{columnTotals.sd_3.toLocaleString()}</td>
-                  <td className="px-2 py-4 text-emerald-600 border-y border-emerald-200 text-base">{columnTotals.sd_4.toLocaleString()}</td>
-                  <td className="px-2 py-4 text-sky-600 border-y border-emerald-200 text-base">{columnTotals.sd_5.toLocaleString()}</td>
-                  <td className="px-2 py-4 text-blue-600 border-y border-emerald-200 text-base">{columnTotals.sd_6.toLocaleString()}</td>
-                  <td className="px-4 py-4 text-emerald-950 text-lg border-y border-r border-emerald-200 rounded-r-2xl bg-emerald-200/50">
-                    {columnTotals.total.toLocaleString()}
-                  </td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
+        <div className="flex-1 overflow-auto bg-gray-50/50 p-4 custom-scrollbar">
           
-          {processedData.length === 0 && (
+          {/* TABEL KECAMATAN */}
+          {activeModalTab === 'KECAMATAN' && (
+            <table className="w-full text-center border-separate border-spacing-y-2">
+              <thead className="sticky top-0 bg-white z-10 shadow-sm rounded-xl">
+                <tr className="text-[10px] font-black uppercase text-gray-500">
+                  <th className="px-4 py-3 text-center rounded-l-xl w-16">No</th>
+                  <th className="px-4 py-3 text-left">{isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan'}</th>
+                  <th className="px-2 py-3 text-red-500">Kelas 1</th>
+                  <th className="px-2 py-3 text-orange-500">Kelas 2</th>
+                  <th className="px-2 py-3 text-amber-500">Kelas 3</th>
+                  <th className="px-2 py-3 text-emerald-500">Kelas 4</th>
+                  <th className="px-2 py-3 text-sky-500">Kelas 5</th>
+                  <th className="px-2 py-3 text-blue-500">Kelas 6</th>
+                  <th className="px-4 py-3 rounded-r-xl text-gray-800">Total PD</th>
+                </tr>
+              </thead>
+              <tbody>
+                {currentRows.map((row, idx) => (
+                  <tr key={idx} className="bg-white shadow-sm hover:shadow-md hover:scale-[1.01] transition-all group">
+                    <td className="px-4 py-4 text-center font-bold text-gray-400 text-xs rounded-l-2xl border-y border-l border-gray-100">{startIndex + idx + 1}</td>
+                    <td className="px-4 py-4 font-black text-gray-800 text-sm uppercase text-left border-y border-gray-100 whitespace-nowrap">{row.namaWilayah}</td>
+                    
+                    <td className="px-2 py-4 font-bold text-red-500 text-sm border-y border-gray-100 bg-red-50/20">{row.sd_1.toLocaleString()}</td>
+                    <td className="px-2 py-4 font-bold text-orange-500 text-sm border-y border-gray-100 bg-orange-50/20">{row.sd_2.toLocaleString()}</td>
+                    <td className="px-2 py-4 font-bold text-amber-500 text-sm border-y border-gray-100 bg-amber-50/20">{row.sd_3.toLocaleString()}</td>
+                    <td className="px-2 py-4 font-bold text-emerald-500 text-sm border-y border-gray-100 bg-emerald-50/20">{row.sd_4.toLocaleString()}</td>
+                    <td className="px-2 py-4 font-bold text-sky-500 text-sm border-y border-gray-100 bg-sky-50/20">{row.sd_5.toLocaleString()}</td>
+                    <td className="px-2 py-4 font-bold text-blue-500 text-sm border-y border-gray-100 bg-blue-50/20">{row.sd_6.toLocaleString()}</td>
+                    
+                    <td className="px-4 py-4 font-black text-gray-800 text-lg border-y border-r border-gray-100 bg-gray-50/50 rounded-r-2xl">
+                      {row.total.toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              
+              {dataKecamatan.length > 0 && (
+                <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
+                  <tr className="bg-emerald-100 text-center font-black uppercase text-xs border-t-2 border-emerald-200">
+                    <td colSpan="2" className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-emerald-200 text-emerald-900">
+                      TOTAL {isModeSemua ? 'KESELURUHAN' : 'KECAMATAN'}
+                    </td>
+                    <td className="px-2 py-4 text-red-600 border-y border-emerald-200 text-base">{totalsKecamatan.sd_1.toLocaleString()}</td>
+                    <td className="px-2 py-4 text-orange-600 border-y border-emerald-200 text-base">{totalsKecamatan.sd_2.toLocaleString()}</td>
+                    <td className="px-2 py-4 text-amber-600 border-y border-emerald-200 text-base">{totalsKecamatan.sd_3.toLocaleString()}</td>
+                    <td className="px-2 py-4 text-emerald-600 border-y border-emerald-200 text-base">{totalsKecamatan.sd_4.toLocaleString()}</td>
+                    <td className="px-2 py-4 text-sky-600 border-y border-emerald-200 text-base">{totalsKecamatan.sd_5.toLocaleString()}</td>
+                    <td className="px-2 py-4 text-blue-600 border-y border-emerald-200 text-base">{totalsKecamatan.sd_6.toLocaleString()}</td>
+                    <td className="px-4 py-4 text-emerald-950 text-lg border-y border-r border-emerald-200 rounded-r-2xl bg-emerald-200/50">
+                      {totalsKecamatan.total.toLocaleString()}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          )}
+
+          {/* TABEL SEKOLAH */}
+          {activeModalTab === 'SEKOLAH' && (
+            <table className="w-full text-center border-separate border-spacing-y-2">
+              <thead className="sticky top-0 bg-white z-10 shadow-sm rounded-xl">
+                <tr className="text-[10px] font-black uppercase text-gray-500">
+                  <th className="px-4 py-3 text-center rounded-l-xl w-16">No</th>
+                  <th className="px-4 py-3 text-left w-24">NPSN</th>
+                  <th className="px-4 py-3 text-left">Nama Sekolah</th>
+                  <th className="px-3 py-3 text-left">Kecamatan</th>
+                  <th className="px-3 py-3 text-orange-600">Status</th>
+                  <th className="px-2 py-3 text-red-500">Kls 1</th>
+                  <th className="px-2 py-3 text-orange-500">Kls 2</th>
+                  <th className="px-2 py-3 text-amber-500">Kls 3</th>
+                  <th className="px-2 py-3 text-emerald-500">Kls 4</th>
+                  <th className="px-2 py-3 text-sky-500">Kls 5</th>
+                  <th className="px-2 py-3 text-blue-500">Kls 6</th>
+                  <th className="px-4 py-3 rounded-r-xl text-gray-800">Total PD</th>
+                </tr>
+              </thead>
+              <tbody>
+                {currentRows.map((row, idx) => (
+                  <tr key={idx} className="bg-white shadow-sm hover:shadow-md hover:scale-[1.01] transition-all group">
+                    <td className="px-4 py-3 text-center font-bold text-gray-400 text-xs rounded-l-2xl border-y border-l border-gray-100">{startIndex + idx + 1}</td>
+                    <td className="px-4 py-3 font-mono text-gray-500 text-sm text-left border-y border-gray-100">{row.npsn}</td>
+                    <td className="px-4 py-3 font-black text-gray-800 text-sm uppercase text-left border-y border-gray-100">{row.nama_sekolah}</td>
+                    
+                    <td className="px-3 py-3 font-bold text-gray-600 text-xs text-left border-y border-gray-100 uppercase">{row.kecamatan}</td>
+                    <td className="px-3 py-3 font-bold text-orange-600 text-xs border-y border-gray-100 uppercase">{row.status}</td>
+                    
+                    <td className="px-2 py-3 font-bold text-red-500 text-sm border-y border-gray-100 bg-red-50/20">{row.sd_1.toLocaleString()}</td>
+                    <td className="px-2 py-3 font-bold text-orange-500 text-sm border-y border-gray-100 bg-orange-50/20">{row.sd_2.toLocaleString()}</td>
+                    <td className="px-2 py-3 font-bold text-amber-500 text-sm border-y border-gray-100 bg-amber-50/20">{row.sd_3.toLocaleString()}</td>
+                    <td className="px-2 py-3 font-bold text-emerald-500 text-sm border-y border-gray-100 bg-emerald-50/20">{row.sd_4.toLocaleString()}</td>
+                    <td className="px-2 py-3 font-bold text-sky-500 text-sm border-y border-gray-100 bg-sky-50/20">{row.sd_5.toLocaleString()}</td>
+                    <td className="px-2 py-3 font-bold text-blue-500 text-sm border-y border-gray-100 bg-blue-50/20">{row.sd_6.toLocaleString()}</td>
+
+                    <td className="px-4 py-3 font-black text-gray-800 text-lg border-y border-r border-gray-100 bg-gray-50/50 rounded-r-2xl">
+                      {row.total.toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              
+              {dataSekolah.length > 0 && (
+                <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
+                  <tr className="bg-emerald-100 text-center font-black uppercase text-xs border-t-2 border-emerald-200">
+                    <td colSpan="4" className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-emerald-200 text-emerald-900">
+                      TOTAL DARI {dataSekolah.length} SEKOLAH
+                    </td>
+                    <td className="px-2 py-4 text-red-600 border-y border-emerald-200 text-base">{totalsSekolah.sd_1.toLocaleString()}</td>
+                    <td className="px-2 py-4 text-orange-600 border-y border-emerald-200 text-base">{totalsSekolah.sd_2.toLocaleString()}</td>
+                    <td className="px-2 py-4 text-amber-600 border-y border-emerald-200 text-base">{totalsSekolah.sd_3.toLocaleString()}</td>
+                    <td className="px-2 py-4 text-emerald-600 border-y border-emerald-200 text-base">{totalsSekolah.sd_4.toLocaleString()}</td>
+                    <td className="px-2 py-4 text-sky-600 border-y border-emerald-200 text-base">{totalsSekolah.sd_5.toLocaleString()}</td>
+                    <td className="px-2 py-4 text-blue-600 border-y border-emerald-200 text-base">{totalsSekolah.sd_6.toLocaleString()}</td>
+                    <td className="px-4 py-4 text-emerald-950 text-lg border-y border-r border-emerald-200 rounded-r-2xl bg-emerald-200/50">
+                      {totalsSekolah.total.toLocaleString()}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          )}
+          
+          {activeData.length === 0 && (
              <div className="py-20 flex flex-col items-center opacity-30 text-gray-500">
                <Search size={64} className="mb-4" />
                <p className="font-black uppercase tracking-widest text-xl">Tidak Ada Data SD</p>
@@ -331,10 +591,10 @@ export default function RincianPDJenjangSD({
         </div>
 
         {/* FOOTER & PAGINATION */}
-        <div className="bg-gray-50 p-4 border-t border-gray-200 flex items-center justify-between shrink-0 rounded-b-3xl">
+        <div className="bg-white p-4 border-t border-gray-200 flex items-center justify-between shrink-0 rounded-b-3xl">
           <div className="flex flex-col">
             <p className="text-xs font-bold text-gray-500">
-              Menampilkan <span className="text-gray-800">{processedData.length === 0 ? 0 : startIndex + 1}</span> - <span className="text-gray-800">{Math.min(startIndex + rowsPerPage, processedData.length)}</span> dari <span className="text-emerald-700 font-black">{processedData.length}</span> baris
+              Menampilkan <span className="text-gray-800">{activeData.length === 0 ? 0 : startIndex + 1}</span> - <span className="text-gray-800">{Math.min(startIndex + rowsPerPage, activeData.length)}</span> dari <span className="text-emerald-700 font-black">{activeData.length}</span> baris
             </p>
             {displayLastUpdated && (
               <p className="text-[10px] font-bold italic text-gray-400 mt-1">
@@ -344,9 +604,9 @@ export default function RincianPDJenjangSD({
           </div>
           
           <div className="flex items-center gap-2">
-            <button disabled={currentPage === 1} onClick={() => goToPage(currentPage - 1)} className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-emerald-50 disabled:opacity-50 transition-colors"><ChevronLeft size={16} /></button>
+            <button disabled={currentPage === 1} onClick={() => goToPage(currentPage - 1)} className="p-2 rounded-xl bg-gray-50 border border-gray-200 hover:bg-emerald-50 disabled:opacity-50 transition-colors"><ChevronLeft size={16} /></button>
             <span className="text-xs font-black text-gray-600 px-2">Hal {currentPage} / {totalPages}</span>
-            <button disabled={currentPage === totalPages || totalPages === 0} onClick={() => goToPage(currentPage + 1)} className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-emerald-50 disabled:opacity-50 transition-colors"><ChevronRight size={16} /></button>
+            <button disabled={currentPage === totalPages || totalPages === 0} onClick={() => goToPage(currentPage + 1)} className="p-2 rounded-xl bg-gray-50 border border-gray-200 hover:bg-emerald-50 disabled:opacity-50 transition-colors"><ChevronRight size={16} /></button>
           </div>
         </div>
 

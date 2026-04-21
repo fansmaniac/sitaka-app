@@ -365,15 +365,15 @@ export default function RasioSekolahVsPD({ selectedYear }) {
         <div className="text-sm text-blue-900 leading-relaxed w-full">
           <strong className="font-black text-base uppercase tracking-widest block mb-3 text-blue-800">Acuan Permendikdasmen No. 14 Tahun 2026</strong>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-3 font-bold opacity-90">
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> PAUD: Max 30 PD / Sekolah</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> SD: Max 168 PD / Sekolah</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> SMP: Max 96 PD / Sekolah</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> SMA/SMK: Max 108 PD / Sekolah</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> SLB: Max 24 PD / Sekolah</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> NON FORMAL: Max 90 PD / Sekolah</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> PAUD: Optimal 30 PD / Sekolah</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> SD: Optimal 168 PD / Sekolah</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> SMP: Optimal 96 PD / Sekolah</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> SMA/SMK: Optimal 108 PD / Sekolah</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> SLB: Optimal 24 PD / Sekolah</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> NON FORMAL: Optimal 90 PD / Sekolah</div>
           </div>
           <div className="mt-4 pt-4 border-t border-blue-200/50 text-xs italic opacity-80 font-bold">
-            * Format Rasio <span className="text-blue-700 font-black">1 : X</span>. Angka <span className="text-blue-700 font-black">1</span> adalah 1 Sekolah, dan <span className="text-red-600 font-black">X</span> adalah Rata-rata PD Aktual.
+            * Format Rasio <span className="text-blue-700 font-black">1 : X</span>. Angka <span className="text-blue-700 font-black">1</span> adalah 1 Sekolah, dan <span className="text-red-600 font-black">X</span> adalah Rata-rata PD Aktual. Jumlah Peserta Didik yang optimal ditampung juga tergantung pada faktor ketersediaan PTK dan Ruang Kelas di Sekolah.
           </div>
         </div>
       </div>

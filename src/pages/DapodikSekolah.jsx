@@ -264,7 +264,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
       mapAgg.set(kab, { 
         wilayah: kab, 
         status_n: 0, status_s: 0, 
-        akr_a: 0, akr_b: 0, akr_c: 0, akr_tt: 0, akr_belum: 0, // PERBAIKAN: Pemisahan TT dan Belum
+        akr_a: 0, akr_b: 0, akr_c: 0, akr_tt: 0, akr_belum: 0, 
         rombel_n: 0, rombel_s: 0,
         total_sek: 0, total_rombel: 0 
       });
@@ -288,11 +288,11 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
        // 1. STATUS SEKOLAH
        if (isNegeri) row.status_n++; else row.status_s++;
        
-       // 2. AKREDITASI (DIPISAH TT DAN BELUM)
+       // 2. AKREDITASI (DIPISAH TT DAN BELUM & SUPPORT STRING PANJANG)
        if (akr === 'A') row.akr_a++;
        else if (akr === 'B') row.akr_b++;
        else if (akr === 'C') row.akr_c++;
-       else if (akr === 'TT') row.akr_tt++;
+       else if (akr === 'TT' || akr === 'TIDAK TERAKREDITASI') row.akr_tt++;
        else row.akr_belum++; // Menampung null, blank, atau nilai asing lainnya
 
        // 3. ROMBEL

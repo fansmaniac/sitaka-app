@@ -187,7 +187,7 @@ export default function RincianAkreditasiSekolah({
       if (akr === 'A') row.akr_a++;
       else if (akr === 'B') row.akr_b++;
       else if (akr === 'C') row.akr_c++;
-      else if (akr === 'TT') row.akr_tt++;
+      else if (akr === 'TT' || akr === 'TIDAK TERAKREDITASI') row.akr_tt++;
       else row.akr_belum++;
       
       row.total++;
@@ -237,6 +237,14 @@ export default function RincianAkreditasiSekolah({
         if (group !== activeJenjangTab) return false;
       }
 
+      // Filter Wilayah Khusus Tab Sekolah (Kecamatan/Kabupaten)
+      if (filterWilayahSekolah !== 'SEMUA') {
+        let keyId = isModeSemua 
+          ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) 
+          : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+        if (keyId !== filterWilayahSekolah) return false;
+      }
+
       if (searchTerm) {
         const nama = String(getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '').toLowerCase();
         const npsn = String(getVal(item, 'npsn') || '').toLowerCase();
@@ -249,19 +257,25 @@ export default function RincianAkreditasiSekolah({
 
     return validData.map(item => {
       const akrRaw = String(getVal(item, 'akreditasi')).trim().toUpperCase();
-      const akrDisplay = ['A', 'B', 'C', 'TT'].includes(akrRaw) ? akrRaw : 'BELUM';
+      let akrDisplay = 'BELUM';
+
+      if (['A', 'B', 'C'].includes(akrRaw)) {
+         akrDisplay = akrRaw;
+      } else if (akrRaw === 'TT' || akrRaw === 'TIDAK TERAKREDITASI') {
+         akrDisplay = 'TT';
+      }
       
       return {
         npsn: getVal(item, 'npsn'),
         nama_sekolah: getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '-',
         jenjang: getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'),
         status: getVal(item, 'status_sekolah'),
-        kecamatan: getVal(item, 'kecamatan'),
+        kecamatan: String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase(),
         akreditasi: akrDisplay
       };
     }).sort((a, b) => String(a.nama_sekolah).localeCompare(String(b.nama_sekolah)));
 
-  }, [data, isModeSemua, initialWilayah, filterStatus, activeJenjangTab, searchTerm]);
+  }, [data, isModeSemua, initialWilayah, filterStatus, activeJenjangTab, filterWilayahSekolah, searchTerm]);
 
 
   // =====================================================================

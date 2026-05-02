@@ -54,19 +54,20 @@ const cleanKabupatenName = (rawName) => {
 };
 
 // =====================================================================
-// PENGELOMPOKAN JENJANG
+// PENGELOMPOKAN JENJANG (SUDAH DIPISAH SMA DAN SMK)
 // =====================================================================
 const JENJANG_GROUPS = {
   'SEMUA': [],
   'PAUD': ['TK', 'KB', 'PAUD'],
   'SD': ['SD', 'SPK SD'],
   'SMP': ['SMP', 'SPK SMP'],
-  'SMA/SMK': ['SMA', 'SPK SMA', 'SMK'],
+  'SMA': ['SMA', 'SPK SMA'],
+  'SMK': ['SMK'],
   'SLB (Inklusif)': ['SLB'],
   'NON FORMAL': ['PKBM', 'SKB', 'SPS', 'TPA']
 };
 
-const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'NON FORMAL'];
+const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
 
 const identifyJenjangGroup = (jenjangDb) => {
   const j = String(jenjangDb).trim().toUpperCase();
@@ -263,7 +264,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
       mapAgg.set(kab, { 
         wilayah: kab, 
         status_n: 0, status_s: 0, 
-        akr_a: 0, akr_b: 0, akr_c: 0, akr_belum: 0,
+        akr_a: 0, akr_b: 0, akr_c: 0, akr_tt: 0, akr_belum: 0, // PERBAIKAN: Pemisahan TT dan Belum
         rombel_n: 0, rombel_s: 0,
         total_sek: 0, total_rombel: 0 
       });
@@ -287,11 +288,12 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
        // 1. STATUS SEKOLAH
        if (isNegeri) row.status_n++; else row.status_s++;
        
-       // 2. AKREDITASI
+       // 2. AKREDITASI (DIPISAH TT DAN BELUM)
        if (akr === 'A') row.akr_a++;
        else if (akr === 'B') row.akr_b++;
        else if (akr === 'C') row.akr_c++;
-       else row.akr_belum++;
+       else if (akr === 'TT') row.akr_tt++;
+       else row.akr_belum++; // Menampung null, blank, atau nilai asing lainnya
 
        // 3. ROMBEL
        if (isNegeri) row.rombel_n += rombelTotal; else row.rombel_s += rombelTotal;
@@ -310,6 +312,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
       acc.akr_a += curr.akr_a;
       acc.akr_b += curr.akr_b;
       acc.akr_c += curr.akr_c;
+      acc.akr_tt += curr.akr_tt;
       acc.akr_belum += curr.akr_belum;
       acc.rombel_n += curr.rombel_n;
       acc.rombel_s += curr.rombel_s;
@@ -317,7 +320,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
       acc.total_rombel += curr.total_rombel;
       return acc;
     }, { 
-      status_n: 0, status_s: 0, akr_a: 0, akr_b: 0, akr_c: 0, akr_belum: 0, 
+      status_n: 0, status_s: 0, akr_a: 0, akr_b: 0, akr_c: 0, akr_tt: 0, akr_belum: 0, 
       rombel_n: 0, rombel_s: 0, total_sek: 0, total_rombel: 0 
     });
   }, [aggregatedData]);
@@ -337,7 +340,8 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
        { name: 'Akreditasi A', value: grandTotals.akr_a, color: '#10b981' }, 
        { name: 'Akreditasi B', value: grandTotals.akr_b, color: '#3b82f6' }, 
        { name: 'Akreditasi C', value: grandTotals.akr_c, color: '#f59e0b' }, 
-       { name: 'Belum/TT', value: grandTotals.akr_belum, color: '#ef4444' } 
+       { name: 'TT', value: grandTotals.akr_tt, color: '#ef4444' },
+       { name: 'Belum', value: grandTotals.akr_belum, color: '#64748b' } // Slate 500 untuk Belum/Kosong
      ];
      pieTotal = grandTotals.total_sek;
   } else if (activeView === 'ROMBEL') {
@@ -365,7 +369,8 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
          { header: 'Akreditasi A', key: 'akr_a', width: 15 },
          { header: 'Akreditasi B', key: 'akr_b', width: 15 },
          { header: 'Akreditasi C', key: 'akr_c', width: 15 },
-         { header: 'Belum/Lainnya', key: 'akr_belum', width: 15 },
+         { header: 'TT (Tidak Terakreditasi)', key: 'akr_tt', width: 25 },
+         { header: 'Belum Terakreditasi', key: 'akr_belum', width: 20 },
          { header: 'Jumlah Unit', key: 'total_sek', width: 15 },
        ];
     } else if (activeView === 'ROMBEL') {
@@ -383,7 +388,12 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
     if (activeView === 'STATUS') {
        totalRowData.status_n = grandTotals.status_n; totalRowData.status_s = grandTotals.status_s; totalRowData.total_sek = grandTotals.total_sek;
     } else if (activeView === 'AKREDITASI') {
-       totalRowData.akr_a = grandTotals.akr_a; totalRowData.akr_b = grandTotals.akr_b; totalRowData.akr_c = grandTotals.akr_c; totalRowData.akr_belum = grandTotals.akr_belum; totalRowData.total_sek = grandTotals.total_sek;
+       totalRowData.akr_a = grandTotals.akr_a; 
+       totalRowData.akr_b = grandTotals.akr_b; 
+       totalRowData.akr_c = grandTotals.akr_c; 
+       totalRowData.akr_tt = grandTotals.akr_tt; 
+       totalRowData.akr_belum = grandTotals.akr_belum; 
+       totalRowData.total_sek = grandTotals.total_sek;
     } else if (activeView === 'ROMBEL') {
        totalRowData.rombel_n = grandTotals.rombel_n; totalRowData.rombel_s = grandTotals.rombel_s; totalRowData.total_rombel = grandTotals.total_rombel;
     }
@@ -427,7 +437,8 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
     orange: { bg: 'bg-orange-50', border: 'border-orange-100', hover: 'hover:bg-orange-100', dot: 'bg-orange-500', textMain: 'text-orange-900', textVal: 'text-orange-600', textPct: 'text-orange-400' },
     emerald: { bg: 'bg-emerald-50', border: 'border-emerald-100', hover: 'hover:bg-emerald-100', dot: 'bg-emerald-500', textMain: 'text-emerald-900', textVal: 'text-emerald-600', textPct: 'text-emerald-500' },
     amber: { bg: 'bg-amber-50', border: 'border-amber-100', hover: 'hover:bg-amber-100', dot: 'bg-amber-500', textMain: 'text-amber-900', textVal: 'text-amber-600', textPct: 'text-amber-500' },
-    red: { bg: 'bg-red-50', border: 'border-red-100', hover: 'hover:bg-red-100', dot: 'bg-red-500', textMain: 'text-red-900', textVal: 'text-red-600', textPct: 'text-red-500' }
+    red: { bg: 'bg-red-50', border: 'border-red-100', hover: 'hover:bg-red-100', dot: 'bg-red-500', textMain: 'text-red-900', textVal: 'text-red-600', textPct: 'text-red-500' },
+    slate: { bg: 'bg-slate-50', border: 'border-slate-200', hover: 'hover:bg-slate-100', dot: 'bg-slate-500', textMain: 'text-slate-700', textVal: 'text-slate-600', textPct: 'text-slate-500' }
   };
 
   return (
@@ -468,10 +479,10 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
         {/* KOLOM KIRI: TABEL REKAPITULASI */}
         <div className="flex-1 lg:w-2/3 p-4 md:p-6 flex flex-col min-h-0 overflow-hidden border-r border-gray-200">
           <div className="bg-white rounded-3xl shadow-sm border border-gray-100 flex-1 flex flex-col overflow-hidden relative">
-            <div className="flex-1 overflow-auto p-4">
+            <div className="flex-1 overflow-auto p-4 custom-scrollbar">
               <table className="w-full text-center border-separate border-spacing-y-2">
                 <thead className="sticky top-0 bg-gray-50 z-10 shadow-sm rounded-xl">
-                  <tr className="text-[10px] font-black uppercase text-gray-500">
+                  <tr className="text-[10px] font-black uppercase text-gray-500 whitespace-nowrap">
                     <th className="px-4 py-3 text-left rounded-l-xl">Wilayah</th>
                     
                     {activeView === 'STATUS' && (
@@ -479,7 +490,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
                     )}
                     
                     {activeView === 'AKREDITASI' && (
-                      <><th className="px-2 py-3 text-emerald-600">A</th><th className="px-2 py-3 text-blue-600">B</th><th className="px-2 py-3 text-amber-600">C</th><th className="px-2 py-3 text-red-600">Belum / TT</th><th className="px-4 py-3 text-gray-800">Total Unit</th></>
+                      <><th className="px-2 py-3 text-emerald-600">A</th><th className="px-2 py-3 text-blue-600">B</th><th className="px-2 py-3 text-amber-600">C</th><th className="px-2 py-3 text-red-600">TT</th><th className="px-2 py-3 text-slate-500">Belum</th><th className="px-4 py-3 text-gray-800">Total Unit</th></>
                     )}
 
                     {activeView === 'ROMBEL' && (
@@ -507,7 +518,8 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
                           <td className="px-2 py-3 font-black text-emerald-600 text-sm border-y border-gray-100 bg-emerald-50/30">{row.akr_a.toLocaleString()}</td>
                           <td className="px-2 py-3 font-black text-blue-600 text-sm border-y border-gray-100 bg-blue-50/30">{row.akr_b.toLocaleString()}</td>
                           <td className="px-2 py-3 font-black text-amber-600 text-sm border-y border-gray-100 bg-amber-50/30">{row.akr_c.toLocaleString()}</td>
-                          <td className="px-2 py-3 font-bold text-red-500 text-sm border-y border-gray-100 bg-red-50/20">{row.akr_belum.toLocaleString()}</td>
+                          <td className="px-2 py-3 font-bold text-red-500 text-sm border-y border-gray-100 bg-red-50/20">{row.akr_tt.toLocaleString()}</td>
+                          <td className="px-2 py-3 font-bold text-slate-500 text-sm border-y border-gray-100 bg-slate-50/50">{row.akr_belum.toLocaleString()}</td>
                           <td className="px-4 py-3 font-black text-gray-800 text-base border-y border-gray-100 bg-gray-50/50">{row.total_sek.toLocaleString()}</td>
                         </>
                       )}
@@ -537,7 +549,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
                     )}
 
                     {activeView === 'AKREDITASI' && (
-                      <><td className="px-2 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.akr_a.toLocaleString()}</td><td className="px-2 py-4 text-blue-700 border-y border-gray-300">{grandTotals.akr_b.toLocaleString()}</td><td className="px-2 py-4 text-amber-700 border-y border-gray-300">{grandTotals.akr_c.toLocaleString()}</td><td className="px-2 py-4 text-red-700 border-y border-gray-300">{grandTotals.akr_belum.toLocaleString()}</td><td className="px-4 py-4 text-gray-900 border-y border-gray-300 text-base">{grandTotals.total_sek.toLocaleString()}</td></>
+                      <><td className="px-2 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.akr_a.toLocaleString()}</td><td className="px-2 py-4 text-blue-700 border-y border-gray-300">{grandTotals.akr_b.toLocaleString()}</td><td className="px-2 py-4 text-amber-700 border-y border-gray-300">{grandTotals.akr_c.toLocaleString()}</td><td className="px-2 py-4 text-red-700 border-y border-gray-300">{grandTotals.akr_tt.toLocaleString()}</td><td className="px-2 py-4 text-slate-700 border-y border-gray-300">{grandTotals.akr_belum.toLocaleString()}</td><td className="px-4 py-4 text-gray-900 border-y border-gray-300 text-base">{grandTotals.total_sek.toLocaleString()}</td></>
                     )}
 
                     {activeView === 'ROMBEL' && (
@@ -560,16 +572,16 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
         </div>
 
         {/* KOLOM KANAN: PREMIUM PIE CHART & KARTU REKAP */}
-        <div className="lg:w-1/3 flex flex-col bg-white border-l border-gray-100 relative">
+        <div className="lg:w-1/3 flex flex-col bg-white border-l border-gray-100 relative overflow-y-auto custom-scrollbar">
           
-          <div className="text-center w-full px-4 pt-8 pb-4 shrink-0">
+          <div className="text-center w-full px-4 pt-6 pb-2 shrink-0">
             <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">Proporsi {activeView}</h2>
             <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mt-1">
               Jenjang {activeJenjang}
             </p>
           </div>
 
-          <div className="flex-1 flex items-center justify-center min-h-[250px] relative px-4">
+          <div className="flex-1 flex items-center justify-center min-h-[250px] relative px-4 shrink-0">
              <PremiumPieChart segments={pieSegments} total={pieTotal} />
           </div>
 
@@ -582,11 +594,16 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
              )}
 
              {activeView === 'AKREDITASI' && (
-                <div className="grid grid-cols-2 gap-3">
-                   <StatCard label="Akreditasi A" value={grandTotals.akr_a} percentage={pieTotal > 0 ? ((grandTotals.akr_a/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.emerald} />
-                   <StatCard label="Akreditasi B" value={grandTotals.akr_b} percentage={pieTotal > 0 ? ((grandTotals.akr_b/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
-                   <StatCard label="Akreditasi C" value={grandTotals.akr_c} percentage={pieTotal > 0 ? ((grandTotals.akr_c/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.amber} />
-                   <StatCard label="Belum/Lainnya" value={grandTotals.akr_belum} percentage={pieTotal > 0 ? ((grandTotals.akr_belum/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.red} />
+                <div className="flex flex-col gap-3">
+                  <div className="grid grid-cols-2 gap-3">
+                     <StatCard label="Akreditasi A" value={grandTotals.akr_a} percentage={pieTotal > 0 ? ((grandTotals.akr_a/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.emerald} />
+                     <StatCard label="Akreditasi B" value={grandTotals.akr_b} percentage={pieTotal > 0 ? ((grandTotals.akr_b/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
+                  </div>
+                  <StatCard label="Akreditasi C" value={grandTotals.akr_c} percentage={pieTotal > 0 ? ((grandTotals.akr_c/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.amber} />
+                  <div className="grid grid-cols-2 gap-3">
+                     <StatCard label="TT" value={grandTotals.akr_tt} percentage={pieTotal > 0 ? ((grandTotals.akr_tt/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.red} />
+                     <StatCard label="Belum" value={grandTotals.akr_belum} percentage={pieTotal > 0 ? ((grandTotals.akr_belum/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.slate} />
+                  </div>
                 </div>
              )}
 

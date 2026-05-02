@@ -74,19 +74,20 @@ const calculateAge = (birthDateString) => {
 };
 
 // =====================================================================
-// PENGELOMPOKAN JENJANG
+// PENGELOMPOKAN JENJANG (SUDAH DIPISAH SMA DAN SMK)
 // =====================================================================
 const JENJANG_GROUPS = {
   'SEMUA': [],
   'PAUD': ['TK', 'KB', 'PAUD'],
   'SD': ['SD', 'SPK SD'],
   'SMP': ['SMP', 'SPK SMP'],
-  'SMA/SMK': ['SMA', 'SPK SMA', 'SMK'],
+  'SMA': ['SMA', 'SPK SMA'],
+  'SMK': ['SMK'],
   'SLB (Inklusif)': ['SLB'],
   'NON FORMAL': ['PKBM', 'SKB', 'SPS', 'TPA']
 };
 
-const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'NON FORMAL'];
+const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
 
 const identifyJenjangGroup = (jenjangDb) => {
   const j = String(jenjangDb).trim().toUpperCase();

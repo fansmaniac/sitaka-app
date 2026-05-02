@@ -59,22 +59,23 @@ const getKabupatenRank = (kabName) => {
   return 99;
 };
 
-// Definisi Group Jenjang Modal Internal
-const JENJANG_GROUPS = {
-  'PAUD': ['TK', 'KB', 'PAUD', 'SPS', 'TPA'],
-  'SD': ['SD', 'SPK SD'],
-  'SMP': ['SMP', 'SPK SMP'],
-  'SMA': ['SMA', 'SPK SMA', 'SMK'],
-  'SLB': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
-  'NON FORMAL': ['PKBM', 'SKB']
+// =====================================================================
+// MAPPING STRUKTUR JENJANG BARU (SINKRON DENGAN DASHBOARD)
+// =====================================================================
+const KATEGORI_MAPPING = {
+  'PAUD': ['TK', 'KB', 'PAUD'],
+  'DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
+  'MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
+  'INKLUSIF': ['SLB'],
+  'NON FORMAL': ['PKBM', 'TPA', 'SPS', 'SKB']
 };
 
-const identifyJenjangGroup = (jenjangDb) => {
-  const j = String(jenjangDb).trim().toUpperCase();
-  for (const [key, arr] of Object.entries(JENJANG_GROUPS)) {
-    if (arr.includes(j)) return key;
+const isJenjangValid = (jenjangDb, targetJenjang) => {
+  if (targetJenjang === 'SEMUA') return true;
+  if (KATEGORI_MAPPING[targetJenjang]) {
+      return KATEGORI_MAPPING[targetJenjang].includes(jenjangDb);
   }
-  return null;
+  return jenjangDb === targetJenjang;
 };
 
 // =====================================================================
@@ -88,14 +89,7 @@ export default function RincianRombelSekolah({
   activeJenjang = 'SEMUA', // Context Header/Awal
   displayLastUpdated 
 }) {
-  // Fungsi penerjemah untuk mengatasi perbedaan penamaan parent vs modal internal
-  const normalizeJenjang = (j) => {
-    if (j === 'SMA/SMK') return 'SMA';
-    if (j === 'SLB (Inklusif)') return 'SLB';
-    return j;
-  };
-
-  const mappedJenjang = normalizeJenjang(activeJenjang);
+  const mappedJenjang = activeJenjang === 'SLB (Inklusif)' ? 'INKLUSIF' : activeJenjang;
 
   // STATE MODAL TABS
   const [activeModalTab, setActiveModalTab] = useState('KECAMATAN'); // 'KECAMATAN' | 'SEKOLAH'
@@ -118,7 +112,7 @@ export default function RincianRombelSekolah({
       setSearchTerm('');
       setFilterWilayah('SEMUA');
       setFilterStatus('SEMUA');
-      setActiveJenjangTab(mappedJenjang); // Gunakan jenjang yang sudah diterjemahkan
+      setActiveJenjangTab(mappedJenjang); 
       setCurrentPage(1);
     }
   }, [isOpen, mappedJenjang]);
@@ -134,6 +128,17 @@ export default function RincianRombelSekolah({
     if (isOpen) window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen, onClose]);
+
+  // Dinamika Tab Jenjang di dalam Modal
+  const availableTabs = useMemo(() => {
+    if (mappedJenjang === 'SEMUA') return Object.keys(KATEGORI_MAPPING);
+    if (KATEGORI_MAPPING[mappedJenjang]) return KATEGORI_MAPPING[mappedJenjang];
+    
+    for (const [kat, arr] of Object.entries(KATEGORI_MAPPING)) {
+        if (arr.includes(mappedJenjang)) return arr; 
+    }
+    return [];
+  }, [mappedJenjang]);
 
   // Ekstrak Daftar Wilayah (Kabupaten/Kecamatan) untuk Dropdown Filter
   const listWilayahFilter = useMemo(() => {
@@ -162,12 +167,8 @@ export default function RincianRombelSekolah({
       const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
       if (!isModeSemua && kabDb !== initialWilayah) return false;
 
-      // Pada Tab Kecamatan, Jenjang mematuhi mappedJenjang dari Parent
-      if (mappedJenjang !== 'SEMUA') {
-         const validJenjangList = JENJANG_GROUPS[mappedJenjang] || [];
-         const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
-         if (!validJenjangList.includes(jenjangDb)) return false;
-      }
+      const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+      if (!isJenjangValid(jenjangDb, mappedJenjang)) return false;
 
       if (filterStatus !== 'SEMUA') {
         const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
@@ -237,11 +238,8 @@ export default function RincianRombelSekolah({
         if (statusDb !== filterStatus) return false;
       }
 
-      // Mematuhi Tab Jenjang di UI
-      if (activeJenjangTab !== 'SEMUA') {
-        const group = identifyJenjangGroup(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'));
-        if (group !== activeJenjangTab) return false;
-      }
+      const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+      if (!isJenjangValid(jenjangDb, activeJenjangTab)) return false;
 
       if (searchTerm) {
         const nama = String(getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '').toLowerCase();
@@ -328,7 +326,7 @@ export default function RincianRombelSekolah({
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `Daftar_Sekolah_Rombel_${initialWilayah}_${activeJenjangTab.replace(' ','_')}.xlsx`;
+      link.download = `Daftar_Sekolah_Rombel_${initialWilayah}_${activeJenjangTab.replace(/\//g,'-')}.xlsx`;
       link.click();
     }
   };
@@ -388,16 +386,16 @@ export default function RincianRombelSekolah({
           </button>
         </div>
 
-        {/* TAB JENJANG KHUSUS PER SEKOLAH */}
+        {/* TAB JENJANG KHUSUS PER SEKOLAH (DINAMIS SESUAI PARENT) */}
         {activeModalTab === 'SEKOLAH' && (
           <div className="bg-white px-6 pt-4 pb-0 flex gap-2 overflow-x-auto scrollbar-hide shrink-0 z-10 relative">
             <button 
-              onClick={() => setActiveJenjangTab('SEMUA')}
-              className={`px-5 py-2 rounded-xl font-black uppercase text-[10px] md:text-xs transition-all whitespace-nowrap border ${activeJenjangTab === 'SEMUA' ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
+              onClick={() => setActiveJenjangTab(mappedJenjang)}
+              className={`px-5 py-2 rounded-xl font-black uppercase text-[10px] md:text-xs transition-all whitespace-nowrap border ${activeJenjangTab === mappedJenjang ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
             >
-              Semua Jenjang
+              {mappedJenjang === 'SEMUA' ? 'Semua Jenjang' : `SEMUA ${mappedJenjang}`}
             </button>
-            {Object.keys(JENJANG_GROUPS).map(j => (
+            {availableTabs.map(j => (
               <button 
                 key={j}
                 onClick={() => setActiveJenjangTab(j)}

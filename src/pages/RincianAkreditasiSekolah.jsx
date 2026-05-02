@@ -48,23 +48,23 @@ const getKabupatenRank = (kabName) => {
   return 99;
 };
 
-// SUDAH DIPISAHKAN SMA DAN SMK
-const JENJANG_GROUPS = {
-  'PAUD': ['TK', 'KB', 'PAUD', 'SPS', 'TPA'],
-  'SD': ['SD', 'SPK SD'],
-  'SMP': ['SMP', 'SPK SMP'],
-  'SMA': ['SMA', 'SPK SMA'],
-  'SMK': ['SMK'],
-  'SLB': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
-  'NON FORMAL': ['PKBM', 'SKB']
+// =====================================================================
+// MAPPING STRUKTUR JENJANG BARU (SINKRON DENGAN DASHBOARD)
+// =====================================================================
+const KATEGORI_MAPPING = {
+  'PAUD': ['TK', 'KB', 'PAUD'],
+  'DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
+  'MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
+  'INKLUSIF': ['SLB'],
+  'NON FORMAL': ['PKBM', 'TPA', 'SPS', 'SKB']
 };
 
-const identifyJenjangGroup = (jenjangDb) => {
-  const j = String(jenjangDb).trim().toUpperCase();
-  for (const [key, arr] of Object.entries(JENJANG_GROUPS)) {
-    if (arr.includes(j)) return key;
+const isJenjangValid = (jenjangDb, targetJenjang) => {
+  if (targetJenjang === 'SEMUA') return true;
+  if (KATEGORI_MAPPING[targetJenjang]) {
+      return KATEGORI_MAPPING[targetJenjang].includes(jenjangDb);
   }
-  return null;
+  return jenjangDb === targetJenjang;
 };
 
 // =====================================================================
@@ -78,23 +78,17 @@ export default function RincianAkreditasiSekolah({
   activeJenjang = 'SEMUA', // Context Header/Awal
   displayLastUpdated 
 }) {
-  // Fungsi penerjemah jenjang (Jaga-jaga jika parent mengirimkan nama yang berbeda)
-  const normalizeJenjang = (j) => {
-    if (j === 'SLB (Inklusif)') return 'SLB';
-    return j;
-  };
-
-  const mappedJenjang = normalizeJenjang(activeJenjang);
+  const mappedJenjang = activeJenjang === 'SLB (Inklusif)' ? 'INKLUSIF' : activeJenjang;
 
   // STATE MODAL TABS
-  const [activeModalTab, setActiveModalTab] = useState('KECAMATAN'); // 'KECAMATAN' | 'SEKOLAH'
+  const [activeModalTab, setActiveModalTab] = useState('KECAMATAN'); 
   
   // STATE FILTERS
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterWilayah, setFilterWilayah] = useState('SEMUA'); // Tab Kecamatan
-  const [filterWilayahSekolah, setFilterWilayahSekolah] = useState('SEMUA'); // Tab Sekolah
-  const [filterStatus, setFilterStatus] = useState('SEMUA'); // Tab Kecamatan & Sekolah
-  const [activeJenjangTab, setActiveJenjangTab] = useState('SEMUA'); // Tab Menu Jenjang (Khusus Tab Sekolah)
+  const [filterWilayah, setFilterWilayah] = useState('SEMUA'); 
+  const [filterWilayahSekolah, setFilterWilayahSekolah] = useState('SEMUA'); 
+  const [filterStatus, setFilterStatus] = useState('SEMUA'); 
+  const [activeJenjangTab, setActiveJenjangTab] = useState('SEMUA'); 
 
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 15;
@@ -109,7 +103,7 @@ export default function RincianAkreditasiSekolah({
       setFilterWilayah('SEMUA');
       setFilterWilayahSekolah('SEMUA');
       setFilterStatus('SEMUA');
-      setActiveJenjangTab(mappedJenjang); // Inisialisasi jenjang dari parent
+      setActiveJenjangTab(mappedJenjang); 
       setCurrentPage(1);
     }
   }, [isOpen, mappedJenjang]);
@@ -126,7 +120,18 @@ export default function RincianAkreditasiSekolah({
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen, onClose]);
 
-  // Ekstrak Daftar Wilayah (Kabupaten/Kecamatan) untuk Dropdown Filter
+  // Dinamika Tab Jenjang di dalam Modal
+  const availableTabs = useMemo(() => {
+    if (mappedJenjang === 'SEMUA') return Object.keys(KATEGORI_MAPPING);
+    if (KATEGORI_MAPPING[mappedJenjang]) return KATEGORI_MAPPING[mappedJenjang];
+    
+    for (const [kat, arr] of Object.entries(KATEGORI_MAPPING)) {
+        if (arr.includes(mappedJenjang)) return arr; 
+    }
+    return [];
+  }, [mappedJenjang]);
+
+  // Ekstrak Daftar Wilayah 
   const listWilayahFilter = useMemo(() => {
     const validData = data.filter(item => {
       if (isModeSemua) return true;
@@ -148,19 +153,13 @@ export default function RincianAkreditasiSekolah({
   const dataKecamatan = useMemo(() => {
     if (!data) return [];
     
-    // Filter Base
     const baseData = data.filter(item => {
       const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
       if (!isModeSemua && kabDb !== initialWilayah) return false;
 
-      // Filter Jenjang
-      if (mappedJenjang !== 'SEMUA') {
-         const validJenjangList = JENJANG_GROUPS[mappedJenjang] || []; 
-         const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
-         if (!validJenjangList.includes(jenjangDb)) return false;
-      }
+      const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+      if (!isJenjangValid(jenjangDb, mappedJenjang)) return false;
 
-      // Filter Status
       if (filterStatus !== 'SEMUA') {
         const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
         if (statusDb !== filterStatus) return false;
@@ -231,13 +230,9 @@ export default function RincianAkreditasiSekolah({
         if (statusDb !== filterStatus) return false;
       }
 
-      // Mematuhi Tab Jenjang di UI
-      if (activeJenjangTab !== 'SEMUA') {
-        const group = identifyJenjangGroup(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'));
-        if (group !== activeJenjangTab) return false;
-      }
+      const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+      if (!isJenjangValid(jenjangDb, activeJenjangTab)) return false;
 
-      // Filter Wilayah Khusus Tab Sekolah (Kecamatan/Kabupaten)
       if (filterWilayahSekolah !== 'SEMUA') {
         let keyId = isModeSemua 
           ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) 
@@ -311,7 +306,7 @@ export default function RincianAkreditasiSekolah({
       });
 
       worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF059669' } }; // Emerald 600
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF059669' } }; 
       totalRow.font = { bold: true, color: { argb: 'FF064E3B' } }; 
       totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } }; 
 
@@ -322,7 +317,6 @@ export default function RincianAkreditasiSekolah({
       link.download = `Rincian_Akreditasi_Kecamatan_${initialWilayah}.xlsx`;
       link.click();
     } else {
-      // Tab SEKOLAH
       const worksheet = workbook.addWorksheet('Daftar Sekolah');
 
       worksheet.columns = [
@@ -337,13 +331,13 @@ export default function RincianAkreditasiSekolah({
       dataSekolah.forEach(item => worksheet.addRow(item));
 
       worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF059669' } }; // Emerald 600
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF059669' } }; 
 
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `Daftar_Sekolah_Akreditasi_${initialWilayah}_${activeJenjangTab.replace(' ','_')}.xlsx`;
+      link.download = `Daftar_Sekolah_Akreditasi_${initialWilayah}_${activeJenjangTab.replace(/\//g,'-')}.xlsx`;
       link.click();
     }
   };
@@ -403,16 +397,16 @@ export default function RincianAkreditasiSekolah({
           </button>
         </div>
 
-        {/* TAB JENJANG KHUSUS PER SEKOLAH */}
+        {/* TAB JENJANG KHUSUS PER SEKOLAH (DINAMIS SESUAI PARENT) */}
         {activeModalTab === 'SEKOLAH' && (
           <div className="bg-white px-6 pt-4 pb-0 flex gap-2 overflow-x-auto scrollbar-hide shrink-0 z-10 relative">
             <button 
-              onClick={() => setActiveJenjangTab('SEMUA')}
-              className={`px-5 py-2 rounded-xl font-black uppercase text-[10px] md:text-xs transition-all whitespace-nowrap border ${activeJenjangTab === 'SEMUA' ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
+              onClick={() => setActiveJenjangTab(mappedJenjang)}
+              className={`px-5 py-2 rounded-xl font-black uppercase text-[10px] md:text-xs transition-all whitespace-nowrap border ${activeJenjangTab === mappedJenjang ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
             >
-              Semua Jenjang
+              {mappedJenjang === 'SEMUA' ? 'Semua Jenjang' : `SEMUA ${mappedJenjang}`}
             </button>
-            {Object.keys(JENJANG_GROUPS).map(j => (
+            {availableTabs.map(j => (
               <button 
                 key={j}
                 onClick={() => setActiveJenjangTab(j)}
@@ -553,7 +547,7 @@ export default function RincianAkreditasiSekolah({
               </thead>
               <tbody>
                 {currentRows.map((row, idx) => {
-                  let badgeColor = 'bg-slate-100 text-slate-600 border-slate-200'; // Default Belum
+                  let badgeColor = 'bg-slate-100 text-slate-600 border-slate-200'; 
                   if (row.akreditasi === 'A') badgeColor = 'bg-emerald-100 text-emerald-700 border-emerald-200';
                   else if (row.akreditasi === 'B') badgeColor = 'bg-blue-100 text-blue-700 border-blue-200';
                   else if (row.akreditasi === 'C') badgeColor = 'bg-amber-100 text-amber-700 border-amber-200';

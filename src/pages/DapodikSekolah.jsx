@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Download, School, MapPin, Eye, FileSpreadsheet, 
-  Search, X, ChevronLeft, ChevronRight, Building2, Layers, Award
+  Search, X, ChevronLeft, ChevronRight, Building2, Layers, Award, GraduationCap
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import { db } from '../firebase/config';
@@ -54,10 +54,11 @@ const cleanKabupatenName = (rawName) => {
 };
 
 // =====================================================================
-// PENGELOMPOKAN JENJANG (SUDAH DIPISAH SMA DAN SMK)
+// MAPPING STRUKTUR JENJANG DAN TAB MENU (UPDATE BARU)
 // =====================================================================
+
+// Digunakan ketika user memilih tab spesifik di mode Kategori "SEMUA"
 const JENJANG_GROUPS = {
-  'SEMUA': [],
   'PAUD': ['TK', 'KB', 'PAUD'],
   'SD': ['SD', 'SPK SD'],
   'SMP': ['SMP', 'SPK SMP'],
@@ -67,14 +68,23 @@ const JENJANG_GROUPS = {
   'NON FORMAL': ['PKBM', 'SKB', 'SPS', 'TPA']
 };
 
-const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
+// Digunakan untuk filter massal jika user memilih kategori tertentu tapi memilih tab "SEMUA (Kategori)"
+const KATEGORI_BENTUK = {
+  'PAUD': ['TK', 'KB'],
+  'DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
+  'MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
+  'INKLUSIF': ['SLB'],
+  'NON FORMAL': ['PKBM', 'TPA', 'SPS', 'SKB']
+};
 
-const identifyJenjangGroup = (jenjangDb) => {
-  const j = String(jenjangDb).trim().toUpperCase();
-  for (const group of JENJANG_KEYS) {
-    if (JENJANG_GROUPS[group].includes(j)) return group;
-  }
-  return null;
+// Daftar Tab Menu berdasarkan Kategori yang aktif di Dropdown
+const TABS_MAPPING = {
+  'SEMUA': ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'],
+  'PAUD': ['TK', 'KB'],
+  'DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
+  'MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
+  'INKLUSIF': ['SLB'],
+  'NON FORMAL': ['PKBM', 'TPA', 'SPS', 'SKB']
 };
 
 // =====================================================================
@@ -214,7 +224,11 @@ const PremiumPieChart = ({ segments, total }) => {
 // =====================================================================
 export default function DapodikSekolah({ data = [], selectedYear = '2026', lastUpdatedDate }) {
   const [activeView, setActiveView] = useState('STATUS'); // STATUS, AKREDITASI, ROMBEL
-  const [activeJenjang, setActiveJenjang] = useState('SEMUA'); 
+  
+  // STATE BARU: Kategori Dropdown & Tab Menu
+  const [activeKategori, setActiveKategori] = useState('SEMUA'); 
+  const [activeTab, setActiveTab] = useState('SEMUA'); 
+
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedWilayah, setSelectedWilayah] = useState('SEMUA');
 
@@ -251,12 +265,25 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
 
   // ENGINE AGREGASI MASTER UNTUK KETIGA TAB
   const aggregatedData = useMemo(() => {
-    const validJenjangList = JENJANG_GROUPS[activeJenjang];
-
     const filteredData = data.filter(item => {
-      if (activeJenjang === 'SEMUA') return true;
-      const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
-      return validJenjangList.includes(jenjangDb);
+      const bentukDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+      
+      // LOGIKA FILTER BERDASARKAN KATEGORI & TAB
+      if (activeKategori === 'SEMUA') {
+         if (activeTab === 'SEMUA') return true;
+         // activeTab berisi nama grup (misal: 'SD', 'SMA', 'NON FORMAL')
+         const allowed = JENJANG_GROUPS[activeTab] || [];
+         return allowed.includes(bentukDb);
+      } else {
+         if (activeTab === 'SEMUA') {
+            // Filter semua sekolah yang masuk dalam Kategori yang dipilih
+            const allowed = KATEGORI_BENTUK[activeKategori] || [];
+            return allowed.includes(bentukDb);
+         } else {
+            // Filter sangat spesifik, langsung cocokkan dengan nama tab (misal: 'TK', 'SPK SD')
+            return bentukDb === activeTab;
+         }
+      }
     });
 
     const mapAgg = new Map();
@@ -288,12 +315,12 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
        // 1. STATUS SEKOLAH
        if (isNegeri) row.status_n++; else row.status_s++;
        
-       // 2. AKREDITASI (DIPISAH TT DAN BELUM & SUPPORT STRING PANJANG)
+       // 2. AKREDITASI 
        if (akr === 'A') row.akr_a++;
        else if (akr === 'B') row.akr_b++;
        else if (akr === 'C') row.akr_c++;
        else if (akr === 'TT' || akr === 'TIDAK TERAKREDITASI') row.akr_tt++;
-       else row.akr_belum++; // Menampung null, blank, atau nilai asing lainnya
+       else row.akr_belum++; 
 
        // 3. ROMBEL
        if (isNegeri) row.rombel_n += rombelTotal; else row.rombel_s += rombelTotal;
@@ -303,7 +330,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
     });
 
     return Array.from(mapAgg.values()).sort((a, b) => getKabupatenRank(a.wilayah) - getKabupatenRank(b.wilayah));
-  }, [data, activeJenjang, listKabupaten]);
+  }, [data, activeKategori, activeTab, listKabupaten]);
 
   const grandTotals = useMemo(() => {
     return aggregatedData.reduce((acc, curr) => {
@@ -325,6 +352,14 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
     });
   }, [aggregatedData]);
 
+  // PENENTUAN LABEL UNTUK EKSPOR DAN JUDUL PIE CHART
+  let activeLabel = 'SEMUA';
+  if (activeKategori === 'SEMUA') {
+      activeLabel = activeTab; // 'SEMUA', 'PAUD', 'SD', dll
+  } else {
+      activeLabel = activeTab === 'SEMUA' ? activeKategori : activeTab; // 'DASAR', 'TK', 'SPK SD', dll
+  }
+
   // DINAMIKA PIE CHART BERDASARKAN MODE
   let pieSegments = [];
   let pieTotal = 0;
@@ -341,7 +376,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
        { name: 'Akreditasi B', value: grandTotals.akr_b, color: '#3b82f6' }, 
        { name: 'Akreditasi C', value: grandTotals.akr_c, color: '#f59e0b' }, 
        { name: 'TT', value: grandTotals.akr_tt, color: '#ef4444' },
-       { name: 'Belum', value: grandTotals.akr_belum, color: '#64748b' } // Slate 500 untuk Belum/Kosong
+       { name: 'Belum', value: grandTotals.akr_belum, color: '#64748b' }
      ];
      pieTotal = grandTotals.total_sek;
   } else if (activeView === 'ROMBEL') {
@@ -354,7 +389,8 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
 
   const downloadExcel = async () => {
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet(`Rekap ${activeView} - ${activeJenjang}`);
+    const safeLabel = activeLabel.replace(/\//g, '-');
+    const worksheet = workbook.addWorksheet(`Rekap ${activeView} - ${safeLabel}`);
 
     if (activeView === 'STATUS') {
        worksheet.columns = [
@@ -409,7 +445,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Rekap_${activeView}_${activeJenjang === 'SEMUA' ? 'Keseluruhan' : activeJenjang.replace('/', '-')}_${selectedYear}.xlsx`;
+    link.download = `Rekap_${activeView}_${activeLabel === 'SEMUA' ? 'Keseluruhan' : safeLabel}_${selectedYear}.xlsx`;
     link.click();
   };
 
@@ -444,7 +480,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
   return (
     <div className="h-full flex flex-col animate-in fade-in duration-500">
       
-      {/* TABS HEADER: 2 BARIS FILTER */}
+      {/* TABS HEADER: FILTER KATEGORI & VIEW */}
       <div className="bg-white px-4 md:px-6 py-4 border-b border-gray-100 flex flex-col gap-4 shrink-0 shadow-sm z-20">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
            {/* MAIN VIEW TOGGLE */}
@@ -459,15 +495,47 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
                 <Layers size={16} /> Rombongan Belajar
              </button>
            </div>
-           <button onClick={downloadExcel} className="flex items-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white px-5 py-2.5 rounded-xl font-black uppercase text-xs shadow-sm border border-blue-200 transition-all active:scale-95 shrink-0 w-full md:w-auto justify-center">
-             <FileSpreadsheet size={16} /> Unduh Rekap
-           </button>
+           
+           {/* DROPDOWN KATEGORI & UNDUH */}
+           <div className="flex items-center gap-3 w-full md:w-auto">
+              <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm w-full md:w-auto transition-colors focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100">
+                <GraduationCap size={16} className="text-gray-400 mr-2" />
+                <select 
+                  value={activeKategori} 
+                  onChange={(e) => { 
+                    setActiveKategori(e.target.value); 
+                    setActiveTab('SEMUA'); 
+                  }} 
+                  className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer w-full"
+                >
+                  <option value="SEMUA">Semua Jenjang</option>
+                  <option value="PAUD">PAUD</option>
+                  <option value="DASAR">Pendidikan Dasar</option>
+                  <option value="MENENGAH">Pendidikan Menengah</option>
+                  <option value="INKLUSIF">Pendidikan Inklusif</option>
+                  <option value="NON FORMAL">Pendidikan Non Formal</option>
+                </select>
+              </div>
+              <button onClick={downloadExcel} className="flex items-center justify-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white px-5 py-2.5 rounded-xl font-black uppercase text-xs shadow-sm border border-blue-200 transition-all active:scale-95 shrink-0">
+                <FileSpreadsheet size={16} /> Unduh
+              </button>
+           </div>
         </div>
 
-        {/* JENJANG FILTER */}
-        <div className="flex items-center gap-1.5 md:gap-2 overflow-x-auto pb-1">
-          {Object.keys(JENJANG_GROUPS).map(tab => (
-            <button key={tab} onClick={() => setActiveJenjang(tab)} className={`px-4 py-1.5 rounded-lg font-black text-[10px] md:text-xs transition-all duration-300 whitespace-nowrap border ${activeJenjang === tab ? 'bg-gray-800 text-white border-gray-800 shadow-md' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
+        {/* TABS SUB-JENJANG (BENTUK PENDIDIKAN) */}
+        <div className="flex items-center gap-1.5 md:gap-2 overflow-x-auto pb-1 mt-1">
+          <button 
+            onClick={() => setActiveTab('SEMUA')} 
+            className={`px-4 py-1.5 rounded-lg font-black text-[10px] md:text-xs transition-all duration-300 whitespace-nowrap border ${activeTab === 'SEMUA' ? 'bg-gray-800 text-white border-gray-800 shadow-md' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
+          >
+            {activeKategori === 'SEMUA' ? 'SEMUA JENJANG' : `SEMUA ${activeKategori}`}
+          </button>
+          {TABS_MAPPING[activeKategori].map(tab => (
+            <button 
+              key={tab} 
+              onClick={() => setActiveTab(tab)} 
+              className={`px-4 py-1.5 rounded-lg font-black text-[10px] md:text-xs transition-all duration-300 whitespace-nowrap border ${activeTab === tab ? 'bg-gray-800 text-white border-gray-800 shadow-md' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
+            >
               {tab}
             </button>
           ))}
@@ -577,7 +645,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
           <div className="text-center w-full px-4 pt-6 pb-2 shrink-0">
             <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">Proporsi {activeView}</h2>
             <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mt-1">
-              Jenjang {activeJenjang}
+              Jenjang {activeLabel}
             </p>
           </div>
 
@@ -626,7 +694,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
           onClose={() => setModalOpen(false)}
           data={data}
           initialWilayah={selectedWilayah}
-          activeJenjang={activeJenjang}
+          activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
         />
       )}
@@ -637,7 +705,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
           onClose={() => setModalOpen(false)}
           data={data}
           initialWilayah={selectedWilayah}
-          activeJenjang={activeJenjang}
+          activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
         />
       )}
@@ -648,7 +716,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
           onClose={() => setModalOpen(false)}
           data={data}
           initialWilayah={selectedWilayah}
-          activeJenjang={activeJenjang}
+          activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
         />
       )}

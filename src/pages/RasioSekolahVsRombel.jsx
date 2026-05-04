@@ -56,6 +56,7 @@ const renderRatio = (sekCount, rombelCount, jenjang) => {
 // =====================================================================
 export default function RasioSekolahVsRombel({ selectedYear }) {
   const [filterWilayah, setFilterWilayah] = useState('SEMUA');
+  const [filterStatusTab2, setFilterStatusTab2] = useState('SEMUA'); // STATE BARU FILTER STATUS TABEL 2
   
   const [tab2DataRaw, setTab2DataRaw] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -75,7 +76,7 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
           const data = docSnap.data();
           setTab2DataRaw(data.tabel2 || []);
           
-          // Format tanggal last_updated
+          // Format tanggal last_updated (Sudah diperbaiki error bracket-nya!)
           if (data.last_updated) {
             const d = new Date(data.last_updated);
             const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
@@ -137,10 +138,20 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
     }, { sek_n: 0, rombel_n: 0, sek_s: 0, rombel_s: 0, total_sek: 0, total_rombel: 0 });
   }, [tab1Data]);
 
-  // --- ENGINE TABEL 2 ---
+  // --- ENGINE TABEL 2 DENGAN FILTER STATUS SAKTI ---
   const tab2Data = useMemo(() => {
     if (!tab2DataRaw || tab2DataRaw.length === 0) return [];
     
+    // Helper fungsi menentukan kolom yg akan ditarik (SEMUA, _n, _s)
+    const getSuffix = (baseType) => {
+      if (filterStatusTab2 === 'NEGERI') return `${baseType}_n`;
+      if (filterStatusTab2 === 'SWASTA') return `${baseType}_s`;
+      return baseType; 
+    };
+
+    const sekKey = getSuffix('sek');
+    const rombelKey = getSuffix('rombel');
+
     if (isModeSemua) {
       const mapKab = new Map();
       tab2DataRaw.forEach(row => {
@@ -152,8 +163,8 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
          }
          const aggRow = mapKab.get(kab);
          JENJANG_KEYS.forEach(k => { 
-             aggRow[`${k}_sek`] += (row[`${k}_sek`] || 0); 
-             aggRow[`${k}_rombel`] += (row[`${k}_rombel`] || 0); 
+             aggRow[`${k}_sek`] += (row[`${k}_${sekKey}`] || 0); 
+             aggRow[`${k}_rombel`] += (row[`${k}_${rombelKey}`] || 0); 
          });
       });
       return Array.from(mapKab.values()).sort((a, b) => {
@@ -162,9 +173,18 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
          return (rankA !== -1 ? rankA : 99) - (rankB !== -1 ? rankB : 99);
       });
     } else {
-      return tab2DataRaw.filter(r => r.wilayah === filterWilayah).sort((a,b) => a.kecamatan.localeCompare(b.kecamatan));
+      // Pada tingkat kecamatan, remap ke variabel penampung default (_sek, _rombel) agar seragam renderingnya
+      const filtered = tab2DataRaw.filter(r => r.wilayah === filterWilayah).sort((a,b) => a.kecamatan.localeCompare(b.kecamatan));
+      return filtered.map(row => {
+        const mappedRow = { ...row };
+        JENJANG_KEYS.forEach(k => {
+           mappedRow[`${k}_sek`] = row[`${k}_${sekKey}`] || 0;
+           mappedRow[`${k}_rombel`] = row[`${k}_${rombelKey}`] || 0;
+        });
+        return mappedRow;
+      });
     }
-  }, [tab2DataRaw, filterWilayah, isModeSemua]);
+  }, [tab2DataRaw, filterWilayah, isModeSemua, filterStatusTab2]);
 
   // --- EXCEL ---
   const handleUnduhTab1 = async () => {
@@ -235,7 +255,7 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Analisa_Rasio_Sekolah_Rombel_${filterWilayah}_${selectedYear}.xlsx`;
+    link.download = `Analisa_Rasio_Sekolah_Rombel_${filterWilayah}_${filterStatusTab2}_${selectedYear}.xlsx`;
     link.click();
   };
 
@@ -260,6 +280,7 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
   return (
     <div className="w-full flex flex-col gap-8 animate-in slide-in-from-bottom-8 duration-500">
       
+      {/* HEADER & FILTER */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100">
         <div>
           <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">Sekolah <span className="text-rose-500">VS</span> Rombel</h2>
@@ -345,14 +366,30 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
 
       {/* TABEL 2 */}
       <div className="bg-white rounded-3xl shadow-md border border-gray-100 overflow-hidden">
-        <div className="bg-rose-900 px-6 py-5 border-b border-rose-800 flex items-center justify-between gap-3">
+        <div className="bg-rose-900 px-6 py-5 border-b border-rose-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <Activity className="text-rose-200" size={24} />
             <h3 className="font-black text-lg text-white uppercase tracking-tighter">Tabel 2: Hasil Analisa Rasio Sekolah per Rombel</h3>
           </div>
-          <button onClick={handleUnduhTab2} className="flex items-center gap-2 text-xs font-black uppercase text-rose-900 bg-white px-4 py-2 rounded-xl hover:bg-rose-50 transition-colors">
-            <Download size={14} /> Unduh
-          </button>
+          
+          {/* FILTER STATUS & TOMBOL UNDUH TABEL 2 */}
+          <div className="flex items-center gap-3 w-full md:w-auto">
+            <div className="flex items-center bg-white/10 border border-rose-500/50 rounded-xl px-3 py-1.5 shadow-sm transition-all focus-within:ring-2 focus-within:ring-rose-400 w-full md:w-auto">
+              <School size={16} className="text-rose-200 mr-2" />
+              <select 
+                value={filterStatusTab2} 
+                onChange={(e) => setFilterStatusTab2(e.target.value)} 
+                className="bg-transparent text-xs font-black uppercase text-white outline-none cursor-pointer w-full [&>option]:bg-rose-800 [&>option]:text-white"
+              >
+                <option value="SEMUA">Semua Status</option>
+                <option value="NEGERI">Negeri</option>
+                <option value="SWASTA">Swasta</option>
+              </select>
+            </div>
+            <button onClick={handleUnduhTab2} className="flex items-center justify-center gap-2 text-xs font-black uppercase text-rose-900 bg-white px-4 py-2 rounded-xl hover:bg-rose-50 transition-colors w-full md:w-auto shrink-0 shadow-sm">
+              <Download size={14} /> Unduh
+            </button>
+          </div>
         </div>
         <div className="overflow-x-auto p-4">
           <table className="w-full text-center border-separate border-spacing-y-2">

@@ -7,7 +7,8 @@ import {
   School, 
   LogIn, 
   UserCheck,
-  Building2 
+  Building2,
+  Map
 } from 'lucide-react';
 
 import DapodikPage from './pages/DapodikPage';
@@ -60,7 +61,7 @@ export default function App() {
       <div className="flex-1 overflow-hidden mx-4 md:mx-8 hidden md:block text-center">
         <div className="whitespace-nowrap animate-marquee">
           <span className="text-lg font-bold tracking-wide italic text-blue-100">
-            SITAKA | Referensi Data Pendidikan BPMP Provinsi Kalbar — Monitoring Data Pendidikan Terpadu Se-Kalimantan Barat — Sinergi Menuju Pendidikan Berkualitas — 
+            D-PENA KALBAR | Referensi Data Pendidikan BPMP Provinsi Kalbar — Monitoring Data Pendidikan Terpadu Se-Kalimantan Barat — Sinergi Menuju Pendidikan Berkualitas — 
           </span>
         </div>
       </div>
@@ -95,9 +96,11 @@ export default function App() {
 
   // --- HALAMAN UTAMA ---
   const HomePage = () => (
-    <div className="h-screen flex flex-col bg-gray-100 overflow-y-auto md:overflow-hidden">
+    // PERBAIKAN: Menggunakan h-screen dan overflow-y-auto agar selalu bisa di-scroll di HP
+    <div className="h-screen w-full flex flex-col bg-gray-100 overflow-y-auto overflow-x-hidden">
       <Header />
-      <main className="flex-1 flex flex-col items-center justify-start md:justify-center p-4 md:p-6 text-center pt-8 md:pt-4">
+      {/* PERBAIKAN: Tambah pb-24 untuk ruang scroll ekstra di HP */}
+      <main className="flex-1 w-full flex flex-col items-center justify-start md:justify-center p-4 md:p-6 text-center pt-8 md:pt-4 pb-24 md:pb-8">
         
         {/* HERO SECTION */}
         <div className="mb-6 md:mb-8 flex flex-col items-center">
@@ -106,19 +109,19 @@ export default function App() {
                 <School className="w-10 h-10 md:w-16 md:h-16 text-white" />
              </div>
              <h1 className="text-5xl sm:text-7xl md:text-8xl font-black text-gray-900 leading-none uppercase tracking-tighter">
-               SITAKA
+               D-PENA KALBAR
              </h1>
           </div>
           <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-blue-600 tracking-[0.1em] md:tracking-[0.2em] px-2">
-            referenSI daTA pendidiKAn
+            Dashboard Pendidikan Kalimantan Barat Berbasis Analisis
           </h2>
           <p className="text-gray-500 text-sm md:text-base mt-2 md:mt-4 max-w-xl mx-auto font-medium italic px-4">
             Sistem Informasi Terpadu Kalimantan Barat. <br className="hidden md:block" /> Silakan pilih menu untuk memulai monitoring data.
           </p>
         </div>
 
-        {/* CARDS GRID - Dioptimalkan tingginya agar muat di layar 1366x768 */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 w-full max-w-7xl px-2 md:px-4 text-center pb-12 md:pb-0">
+        {/* CARDS GRID */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 w-full max-w-7xl px-2 md:px-4 text-center">
           
           <button onClick={() => navigateTo('dapodik')} className="group bg-white p-5 md:p-6 lg:p-8 rounded-[2rem] md:rounded-[2rem] shadow-xl border-2 md:border-4 border-transparent hover:border-blue-500 transition-all active:scale-95 h-40 md:h-56 lg:h-64 flex flex-col justify-between text-left">
             <div className="bg-blue-600 text-white p-3 md:p-4 rounded-2xl w-fit shadow-md md:shadow-lg group-hover:scale-110 transition-transform">
@@ -159,6 +162,21 @@ export default function App() {
               <p className="text-gray-400 font-bold uppercase tracking-wider text-[9px] md:text-[10px] leading-tight">Sarana Prasarana Sekolah</p>
             </div>
           </button>
+
+          {/* MENU BARU: DAYA TAMPUNG SEKOLAH (Membuka URL di Tab Baru) */}
+          <button 
+            onClick={() => window.open('https://dashboard-info-sekolah.netlify.app/', '_blank')} 
+            className="group bg-white p-5 md:p-6 lg:p-8 rounded-[2rem] md:rounded-[2rem] shadow-xl border-2 md:border-4 border-transparent hover:border-pink-500 transition-all active:scale-95 h-40 md:h-56 lg:h-64 flex flex-col justify-between text-left"
+          >
+            <div className="bg-pink-600 text-white p-3 md:p-4 rounded-2xl w-fit shadow-md md:shadow-lg group-hover:scale-110 transition-transform">
+              <Map className="w-6 h-6 md:w-8 md:h-8" />
+            </div>
+            <div>
+              <h3 className="text-xl md:text-2xl font-black text-gray-800 mb-0.5 md:mb-1 uppercase">Daya Tampung</h3>
+              <p className="text-gray-400 font-bold uppercase tracking-wider text-[9px] md:text-[10px] leading-tight">Analisa Daya Tampung SPMB</p>
+            </div>
+          </button>
+
         </div>
       </main>
     </div>

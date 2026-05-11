@@ -32,15 +32,19 @@ const cleanKabupatenName = (rawName) => {
   return name; 
 };
 
+// =====================================================================
+// PERBAIKAN: PEMISAHAN JENJANG SMA DAN SMK PADA MESIN UTAMA ADMIN
+// =====================================================================
 const JENJANG_GROUPS = {
   'PAUD': ['TK', 'KB', 'SPS', 'TPA', 'PAUD'],
   'SD': ['SD', 'SPK SD'],
   'SMP': ['SMP', 'SPK SMP'],
-  'SMA/SMK': ['SMA', 'SPK SMA', 'SMK'],
+  'SMA': ['SMA', 'SPK SMA'],
+  'SMK': ['SMK'],
   'SLB (Inklusif)': ['SLB'],
   'NON FORMAL': ['PKBM', 'SKB']
 };
-const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'NON FORMAL'];
+const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
 
 const identifyJenjangGroup = (jenjangDb) => {
   const j = String(jenjangDb).trim().toUpperCase();
@@ -221,7 +225,6 @@ export default function AdminDashboard({ Header }) {
         for (let i = 0; i < allDocs.length; i++) await deleteDoc(allDocs[i].ref);
       }
 
-      // CATAT WAKTU UPLOAD SAAT INI UNTUK SEMUA JENIS UPLOAD
       const currentTime = new Date().toISOString();
 
       if (totalRowsInExcel === 0) {
@@ -288,12 +291,10 @@ export default function AdminDashboard({ Header }) {
   // =====================================================================
   // FUNGSI UNDUH FORMAT EXCEL 
   // =====================================================================
-  
   const handleDownloadFormatSekolah = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Satuan Pendidikan');
     
-    // UPDATE: Kolom disesuaikan SANGAT SPESIFIK dengan format Satuan Pendidikan
     const columns = [
       'npsn', 'nama_satuan_pendidikan', 'status_sekolah', 'bentuk_pendidikan', 'alamat', 
       'desa', 'kecamatan', 'kabupaten', 'lintang', 'bujur', 'npwp', 'nama_kepala_sekolah', 
@@ -312,9 +313,8 @@ export default function AdminDashboard({ Header }) {
     ];
 
     worksheet.columns = columns.map(col => ({ header: col, key: col, width: 15 }));
-    
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } }; // Blue
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -335,9 +335,8 @@ export default function AdminDashboard({ Header }) {
     ];
 
     worksheet.columns = columns.map(col => ({ header: col, key: col, width: 18 }));
-
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3B82F6' } }; // Light Blue
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3B82F6' } }; 
     
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -374,9 +373,8 @@ export default function AdminDashboard({ Header }) {
     ];
 
     worksheet.columns = columns.map(col => ({ header: col, key: col, width: 25 }));
-
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF9333EA' } }; // Purple
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF9333EA' } }; 
     
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -387,7 +385,7 @@ export default function AdminDashboard({ Header }) {
   };
 
   // =====================================================================
-  // MESIN PRE-CALCULATION RASIO
+  // MESIN PRE-CALCULATION RASIO DENGAN PENANGANAN SPESIFIK SMA DAN SMK
   // =====================================================================
   
   // 1. SEKOLAH VS PD (PD / SEKOLAH)
@@ -412,6 +410,7 @@ export default function AdminDashboard({ Header }) {
 
       setUploadProgress(50);
 
+      // PERBAIKAN: Struktur tab1Data awal dipisah SMA dan SMK
       const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, sek_n: 0, pd_n: 0, sek_s: 0, pd_s: 0 }));
       const mapWilayah = new Map();
 
@@ -449,8 +448,10 @@ export default function AdminDashboard({ Header }) {
         }
 
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
-        if (isNegeri) { rowTab1.sek_n++; rowTab1.pd_n += pd; } 
-        else { rowTab1.sek_s++; rowTab1.pd_s += pd; }
+        if (rowTab1) {
+           if (isNegeri) { rowTab1.sek_n++; rowTab1.pd_n += pd; } 
+           else { rowTab1.sek_s++; rowTab1.pd_s += pd; }
+        }
 
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
@@ -553,8 +554,10 @@ export default function AdminDashboard({ Header }) {
         const guruAktual = item.guru_aktual;
 
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
-        if (isNegeri) { rowTab1.sek_n++; rowTab1.guru_n += guruAktual; } 
-        else { rowTab1.sek_s++; rowTab1.guru_s += guruAktual; }
+        if (rowTab1) {
+           if (isNegeri) { rowTab1.sek_n++; rowTab1.guru_n += guruAktual; } 
+           else { rowTab1.sek_s++; rowTab1.guru_s += guruAktual; }
+        }
 
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
@@ -572,7 +575,6 @@ export default function AdminDashboard({ Header }) {
         }
 
         const rowTab2 = mapWilayah.get(uniqueId);
-        
         rowTab2[`${group}_sek`]++;
         rowTab2[`${group}_guru`] += guruAktual;
         
@@ -667,8 +669,10 @@ export default function AdminDashboard({ Header }) {
         const guruAktual = item.guru_aktual;
 
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
-        if (isNegeri) { rowTab1.rombel_n += rombelTotal; rowTab1.guru_n += guruAktual; } 
-        else { rowTab1.rombel_s += rombelTotal; rowTab1.guru_s += guruAktual; }
+        if (rowTab1) {
+           if (isNegeri) { rowTab1.rombel_n += rombelTotal; rowTab1.guru_n += guruAktual; } 
+           else { rowTab1.rombel_s += rombelTotal; rowTab1.guru_s += guruAktual; }
+        }
 
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
@@ -754,12 +758,12 @@ export default function AdminDashboard({ Header }) {
             }
         });
 
-        // Update Tab 1 Global
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
-        if (isNegeri) { rowTab1.sek_n++; rowTab1.rombel_n += rombelTotal; } 
-        else { rowTab1.sek_s++; rowTab1.rombel_s += rombelTotal; }
+        if (rowTab1) {
+           if (isNegeri) { rowTab1.sek_n++; rowTab1.rombel_n += rombelTotal; } 
+           else { rowTab1.sek_s++; rowTab1.rombel_s += rombelTotal; }
+        }
 
-        // Update Tab 2
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
         const uniqueId = `${kabDb}_${keyKec}`;
@@ -872,8 +876,10 @@ export default function AdminDashboard({ Header }) {
         });
 
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
-        if (isNegeri) { rowTab1.rombel_n += rombelTotal; rowTab1.pd_n += pd; } 
-        else { rowTab1.rombel_s += rombelTotal; rowTab1.pd_s += pd; }
+        if (rowTab1) {
+           if (isNegeri) { rowTab1.rombel_n += rombelTotal; rowTab1.pd_n += pd; } 
+           else { rowTab1.rombel_s += rombelTotal; rowTab1.pd_s += pd; }
+        }
 
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
@@ -952,7 +958,6 @@ export default function AdminDashboard({ Header }) {
 
       setUploadProgress(40);
 
-      // Map Sarpras untuk mencari Ruang Kelas per NPSN.
       const mapSarpras = new Map();
       allSarprasData.forEach(s => {
          const npsn = String(getVal(s, 'npsn')).trim();
@@ -988,8 +993,10 @@ export default function AdminDashboard({ Header }) {
         const kelasTotal = mapSarpras.get(npsn) || 0;
 
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
-        if (isNegeri) { rowTab1.rombel_n += rombelTotal; rowTab1.kelas_n += kelasTotal; } 
-        else { rowTab1.rombel_s += rombelTotal; rowTab1.kelas_s += kelasTotal; }
+        if (rowTab1) {
+           if (isNegeri) { rowTab1.rombel_n += rombelTotal; rowTab1.kelas_n += kelasTotal; } 
+           else { rowTab1.rombel_s += rombelTotal; rowTab1.kelas_s += kelasTotal; }
+        }
 
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
@@ -1124,8 +1131,10 @@ export default function AdminDashboard({ Header }) {
         const guruAktual = item.guru_aktual;
 
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
-        if (isNegeri) { rowTab1.guru_n += guruAktual; rowTab1.pd_n += pdTotal; } 
-        else { rowTab1.guru_s += guruAktual; rowTab1.pd_s += pdTotal; }
+        if (rowTab1) {
+           if (isNegeri) { rowTab1.guru_n += guruAktual; rowTab1.pd_n += pdTotal; } 
+           else { rowTab1.guru_s += guruAktual; rowTab1.pd_s += pdTotal; }
+        }
 
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();

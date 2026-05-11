@@ -59,19 +59,20 @@ const getKabupatenRank = (kabName) => {
 };
 
 // =====================================================================
-// PENGELOMPOKAN JENJANG
+// PENGELOMPOKAN JENJANG (SUDAH DIPISAH SMA DAN SMK)
 // =====================================================================
 const JENJANG_GROUPS = {
   'SEMUA': [],
   'PAUD': ['TK', 'KB', 'PAUD'],
   'SD': ['SD', 'SPK SD'],
   'SMP': ['SMP', 'SPK SMP'],
-  'SMA/SMK': ['SMA', 'SPK SMA', 'SMK'],
+  'SMA': ['SMA', 'SPK SMA'],
+  'SMK': ['SMK'],
   'SLB (Inklusif)': ['SLB'],
   'NON FORMAL': ['PKBM', 'SKB', 'SPS', 'TPA']
 };
 
-const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'NON FORMAL'];
+const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
 
 const identifyJenjangGroup = (jenjangDb) => {
   const j = String(jenjangDb).trim().toUpperCase();
@@ -86,7 +87,7 @@ const identifyJenjangGroup = (jenjangDb) => {
 // =====================================================================
 export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', lastUpdatedDate }) {
   const [activeView, setActiveView] = useState('STATUS'); 
-  // STATUS, PAUD, SD, SMP, SMA, NON_FORMAL
+  // STATUS, PAUD, SD, SMP, SMA, SMK, NON_FORMAL
 
   // activeJenjang hanya relevan jika activeView === 'STATUS'
   const [activeJenjang, setActiveJenjang] = useState('SEMUA'); 
@@ -134,6 +135,7 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
         sd_1: 0, sd_2: 0, sd_3: 0, sd_4: 0, sd_5: 0, sd_6: 0,
         smp_7: 0, smp_8: 0, smp_9: 0,
         sma_10: 0, sma_11: 0, sma_12: 0,
+        smk_10: 0, smk_11: 0, smk_12: 0, // Variabel penampung terpisah untuk SMK
         nf_l: 0, nf_p: 0,
         total: 0 
       });
@@ -144,7 +146,8 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
        if (!mapAgg.has(kab)) return; 
        
        const row = mapAgg.get(kab);
-       const group = identifyJenjangGroup(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'));
+       const bentukDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+       const group = identifyJenjangGroup(bentukDb);
        if (!group) return;
 
        const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
@@ -153,8 +156,8 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
        const pd_total = parseInt(getVal(item, 'pd_total')) || (pd_l + pd_p);
 
        if (activeView === 'STATUS') {
-          const validJenjangList = JENJANG_GROUPS[activeJenjang];
-          if (activeJenjang === 'SEMUA' || validJenjangList.includes(group)) {
+          const validJenjangList = JENJANG_GROUPS[activeJenjang] || [];
+          if (activeJenjang === 'SEMUA' || validJenjangList.includes(bentukDb)) {
              if (isNegeri) row.status_n += pd_total; else row.status_s += pd_total;
              row.total += pd_total;
           }
@@ -183,12 +186,21 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
           row.smp_7 += t7; row.smp_8 += t8; row.smp_9 += t9;
           row.total += (t7+t8+t9);
        } 
-       else if (activeView === 'SMA' && group === 'SMA/SMK') {
+       // LOGIKA PEMISAHAN TAB UTAMA SMA DAN SMK
+       else if (activeView === 'SMA' && group === 'SMA') {
           const t10 = (parseInt(getVal(item, 't10_l')) || 0) + (parseInt(getVal(item, 't10_p')) || 0);
           const t11 = (parseInt(getVal(item, 't11_l')) || 0) + (parseInt(getVal(item, 't11_p')) || 0);
           const t12 = (parseInt(getVal(item, 't12_l')) || 0) + (parseInt(getVal(item, 't12_p')) || 0);
           
           row.sma_10 += t10; row.sma_11 += t11; row.sma_12 += t12;
+          row.total += (t10+t11+t12);
+       } 
+       else if (activeView === 'SMK' && group === 'SMK') {
+          const t10 = (parseInt(getVal(item, 't10_l')) || 0) + (parseInt(getVal(item, 't10_p')) || 0);
+          const t11 = (parseInt(getVal(item, 't11_l')) || 0) + (parseInt(getVal(item, 't11_p')) || 0);
+          const t12 = (parseInt(getVal(item, 't12_l')) || 0) + (parseInt(getVal(item, 't12_p')) || 0);
+          
+          row.smk_10 += t10; row.smk_11 += t11; row.smk_12 += t12;
           row.total += (t10+t11+t12);
        } 
        else if (activeView === 'NON_FORMAL' && group === 'NON FORMAL') {
@@ -208,6 +220,7 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
       acc.sd_1 += curr.sd_1; acc.sd_2 += curr.sd_2; acc.sd_3 += curr.sd_3; acc.sd_4 += curr.sd_4; acc.sd_5 += curr.sd_5; acc.sd_6 += curr.sd_6;
       acc.smp_7 += curr.smp_7; acc.smp_8 += curr.smp_8; acc.smp_9 += curr.smp_9;
       acc.sma_10 += curr.sma_10; acc.sma_11 += curr.sma_11; acc.sma_12 += curr.sma_12;
+      acc.smk_10 += curr.smk_10; acc.smk_11 += curr.smk_11; acc.smk_12 += curr.smk_12;
       acc.nf_l += curr.nf_l; acc.nf_p += curr.nf_p;
       acc.total += curr.total;
       return acc;
@@ -215,14 +228,15 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
       status_n: 0, status_s: 0, paud_l: 0, paud_p: 0, 
       sd_1: 0, sd_2: 0, sd_3: 0, sd_4: 0, sd_5: 0, sd_6: 0,
       smp_7: 0, smp_8: 0, smp_9: 0, sma_10: 0, sma_11: 0, sma_12: 0, 
-      nf_l: 0, nf_p: 0, total: 0 
+      smk_10: 0, smk_11: 0, smk_12: 0, nf_l: 0, nf_p: 0, total: 0 
     });
   }, [aggregatedData]);
 
   // EXPORT EXCEL
   const downloadExcel = async () => {
     const workbook = new ExcelJS.Workbook();
-    const sheetName = activeView === 'STATUS' ? `PD Status - ${activeJenjang}` : `PD ${activeView}`;
+    const safeJenjang = activeJenjang.replace(/\//g, '-');
+    const sheetName = activeView === 'STATUS' ? `PD Status - ${safeJenjang}` : `PD ${activeView}`;
     const worksheet = workbook.addWorksheet(sheetName);
 
     let columns = [{ header: 'Wilayah (Kabupaten/Kota)', key: 'wilayah', width: 30 }];
@@ -232,6 +246,7 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
     else if (activeView === 'SD') columns.push({header:'Kelas 1',key:'sd_1',width:15}, {header:'Kelas 2',key:'sd_2',width:15}, {header:'Kelas 3',key:'sd_3',width:15}, {header:'Kelas 4',key:'sd_4',width:15}, {header:'Kelas 5',key:'sd_5',width:15}, {header:'Kelas 6',key:'sd_6',width:15});
     else if (activeView === 'SMP') columns.push({header:'Kelas 7',key:'smp_7',width:15}, {header:'Kelas 8',key:'smp_8',width:15}, {header:'Kelas 9',key:'smp_9',width:15});
     else if (activeView === 'SMA') columns.push({header:'Kelas 10',key:'sma_10',width:15}, {header:'Kelas 11',key:'sma_11',width:15}, {header:'Kelas 12',key:'sma_12',width:15});
+    else if (activeView === 'SMK') columns.push({header:'Kelas 10',key:'smk_10',width:15}, {header:'Kelas 11',key:'smk_11',width:15}, {header:'Kelas 12',key:'smk_12',width:15});
     else if (activeView === 'NON_FORMAL') columns.push({header:'Laki-laki',key:'nf_l',width:15}, {header:'Perempuan',key:'nf_p',width:15});
 
     columns.push({ header: 'Total Peserta Didik', key: 'total', width: 22 });
@@ -251,7 +266,7 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Rekap_PD_${activeView}_${activeView === 'STATUS' ? activeJenjang : ''}_${selectedYear}.xlsx`;
+    link.download = `Rekap_PD_${activeView}_${activeView === 'STATUS' ? safeJenjang : ''}_${selectedYear}.xlsx`;
     link.click();
   };
 
@@ -260,12 +275,14 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
     setModalOpen(true);
   };
 
+  // UPDATE BARU: DAFTAR TAB UTAMA TELAH DIPISAH SMA DAN SMK
   const TABS = [
     { id: 'STATUS', label: 'Status Sekolah', icon: Building2, color: 'text-blue-700' },
     { id: 'PAUD', label: 'Jenjang PAUD', icon: Shapes, color: 'text-pink-600' },
     { id: 'SD', label: 'Jenjang SD', icon: BookOpen, color: 'text-emerald-600' },
     { id: 'SMP', label: 'Jenjang SMP', icon: Library, color: 'text-indigo-600' },
     { id: 'SMA', label: 'Jenjang SMA', icon: GraduationCap, color: 'text-rose-600' },
+    { id: 'SMK', label: 'Jenjang SMK', icon: GraduationCap, color: 'text-purple-600' },
     { id: 'NON_FORMAL', label: 'Non Formal', icon: Tent, color: 'text-teal-600' },
   ];
 
@@ -308,7 +325,7 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
         )}
       </div>
 
-      {/* AREA TABEL UTAMA - FULL WIDTH KARENA DIAGRAM DIHAPUS */}
+      {/* AREA TABEL UTAMA */}
       <div className="flex-1 flex flex-col min-h-0 bg-gray-50/50 p-4 md:p-6">
         <div className="bg-white rounded-3xl shadow-sm border border-gray-100 flex-1 flex flex-col overflow-hidden relative">
           <div className="flex-1 overflow-auto p-4 custom-scrollbar">
@@ -329,7 +346,7 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
                   {activeView === 'SMP' && (
                     <><th className="px-4 py-3 text-indigo-500">Kelas 7</th><th className="px-4 py-3 text-violet-500">Kelas 8</th><th className="px-4 py-3 text-fuchsia-500">Kelas 9</th></>
                   )}
-                  {activeView === 'SMA' && (
+                  {(activeView === 'SMA' || activeView === 'SMK') && (
                     <><th className="px-4 py-3 text-rose-500">Kelas 10</th><th className="px-4 py-3 text-pink-500">Kelas 11</th><th className="px-4 py-3 text-purple-500">Kelas 12</th></>
                   )}
 
@@ -356,6 +373,9 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
                     )}
                     {activeView === 'SMA' && (
                       <><td className="px-4 py-3 font-bold text-rose-500 text-sm border-y border-gray-100 bg-rose-50/20">{row.sma_10.toLocaleString()}</td><td className="px-4 py-3 font-bold text-pink-500 text-sm border-y border-gray-100 bg-pink-50/20">{row.sma_11.toLocaleString()}</td><td className="px-4 py-3 font-bold text-purple-500 text-sm border-y border-gray-100 bg-purple-50/20">{row.sma_12.toLocaleString()}</td></>
+                    )}
+                    {activeView === 'SMK' && (
+                      <><td className="px-4 py-3 font-bold text-rose-500 text-sm border-y border-gray-100 bg-purple-50/20">{row.smk_10.toLocaleString()}</td><td className="px-4 py-3 font-bold text-pink-500 text-sm border-y border-gray-100 bg-purple-50/20">{row.smk_11.toLocaleString()}</td><td className="px-4 py-3 font-bold text-purple-500 text-sm border-y border-gray-100 bg-purple-50/20">{row.smk_12.toLocaleString()}</td></>
                     )}
 
                     <td className="px-4 py-3 font-black text-gray-800 text-base border-y border-r border-gray-100 bg-gray-50/80">
@@ -388,6 +408,9 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
                   )}
                   {activeView === 'SMA' && (
                     <><td className="px-4 py-4 text-rose-600 border-y border-gray-300">{grandTotals.sma_10.toLocaleString()}</td><td className="px-4 py-4 text-pink-600 border-y border-gray-300">{grandTotals.sma_11.toLocaleString()}</td><td className="px-4 py-4 text-purple-600 border-y border-gray-300">{grandTotals.sma_12.toLocaleString()}</td></>
+                  )}
+                  {activeView === 'SMK' && (
+                    <><td className="px-4 py-4 text-rose-600 border-y border-gray-300">{grandTotals.smk_10.toLocaleString()}</td><td className="px-4 py-4 text-pink-600 border-y border-gray-300">{grandTotals.smk_11.toLocaleString()}</td><td className="px-4 py-4 text-purple-600 border-y border-gray-300">{grandTotals.smk_12.toLocaleString()}</td></>
                   )}
 
                   <td className="px-4 py-4 text-gray-900 border-y border-gray-300 text-base">
@@ -450,7 +473,8 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
         />
       )}
 
-      {activeView === 'SMA' && (
+      {/* SEMENTARA SMA DAN SMK MENGGUNAKAN MODAL YANG SAMA KARENA STRUKTUR KELAS 10-12 NYA IDENTIK */}
+      {(activeView === 'SMA' || activeView === 'SMK') && (
         <RincianPDJenjangSMA 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}

@@ -95,12 +95,13 @@ const getKabupatenRank = (kabName) => {
   return 99;
 };
 
-// Pengelompokan Jenjang Sesuai Instruksi
+// PEMISAHAN JENJANG SMA DAN SMK
 const JENJANG_GROUPS = {
   'PAUD': ['KB', 'TK'],
   'SD': ['SD', 'SPK SD'],
   'SMP': ['SMP', 'SPK SMP'],
   'SMA': ['SMA', 'SPK SMA'],
+  'SMK': ['SMK'],
   'SLB': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
   'NON FORMAL': ['PKBM', 'SPS', 'SKB', 'TPA']
 };

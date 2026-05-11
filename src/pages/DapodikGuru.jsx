@@ -74,27 +74,14 @@ const calculateAge = (birthDateString) => {
 };
 
 // =====================================================================
-// PENGELOMPOKAN JENJANG (SUDAH DIPISAH SMA DAN SMK)
+// PENGELOMPOKAN KATEGORI DROPDOWN SINKRON DENGAN DAPODIK SEKOLAH
 // =====================================================================
-const JENJANG_GROUPS = {
-  'SEMUA': [],
-  'PAUD': ['TK', 'KB', 'PAUD'],
-  'SD': ['SD', 'SPK SD'],
-  'SMP': ['SMP', 'SPK SMP'],
-  'SMA': ['SMA', 'SPK SMA'],
-  'SMK': ['SMK'],
-  'SLB (Inklusif)': ['SLB'],
-  'NON FORMAL': ['PKBM', 'SKB', 'SPS', 'TPA']
-};
-
-const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
-
-const identifyJenjangGroup = (jenjangDb) => {
-  const j = String(jenjangDb).trim().toUpperCase();
-  for (const group of JENJANG_KEYS) {
-    if (JENJANG_GROUPS[group].includes(j)) return group;
-  }
-  return null;
+const KATEGORI_MAPPING = {
+  'PAUD': ['TK', 'KB'],
+  'PENDIDIKAN DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
+  'PENDIDIKAN MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
+  'PENDIDIKAN INKLUSIF': ['SLB'],
+  'PENDIDIKAN NON FORMAL': ['PKBM', 'TPA', 'SPS', 'SKB']
 };
 
 // =====================================================================
@@ -197,9 +184,11 @@ const PremiumPieChart = ({ segments, total }) => {
 export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpdatedDate }) {
   // 7 TAB MENU UTAMA
   const [activeView, setActiveView] = useState('STATUS'); 
-  // STATUS, GENDER, KUALIFIKASI, KEPEGAWAIAN, SERTIFIKASI, USIA, PENSIUN
+  
+  // STATE BARU: Kategori Dropdown & Tab Menu Dinamis
+  const [activeKategori, setActiveKategori] = useState('SEMUA'); 
+  const [activeBentuk, setActiveBentuk] = useState('SEMUA'); 
 
-  const [activeJenjang, setActiveJenjang] = useState('SEMUA'); 
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedWilayah, setSelectedWilayah] = useState('SEMUA');
   const [fetchedDate, setFetchedDate] = useState('');
@@ -244,14 +233,24 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
     return unik.filter(k => k !== 'TIDAK DIKETAHUI').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
   }, [data]);
 
+  // PENENTU LABEL AKTIF UNTUK EXPORT & PIE CHART
+  const activeLabel = activeKategori === 'SEMUA' ? 'SEMUA JENJANG' : (activeBentuk === 'SEMUA' ? activeKategori : activeBentuk);
+
   // ENGINE AGREGASI RAKSASA UNTUK 7 TABS
   const aggregatedData = useMemo(() => {
-    const validJenjangList = JENJANG_GROUPS[activeJenjang];
-
     const filteredData = data.filter(item => {
-      if (activeJenjang === 'SEMUA') return true;
-      const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
-      return validJenjangList.includes(jenjangDb);
+      const bentukDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+      
+      // LOGIKA FILTER BARU BERDASARKAN KATEGORI DROPDOWN DAN BENTUK PENDIDIKAN
+      if (activeKategori !== 'SEMUA') {
+        if (activeBentuk !== 'SEMUA') {
+           if (bentukDb !== activeBentuk) return false;
+        } else {
+           const allowedBentuk = KATEGORI_MAPPING[activeKategori] || [];
+           if (!allowedBentuk.includes(bentukDb)) return false;
+        }
+      }
+      return true;
     });
 
     const mapAgg = new Map();
@@ -330,7 +329,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
     });
 
     return Array.from(mapAgg.values()).sort((a, b) => getKabupatenRank(a.wilayah) - getKabupatenRank(b.wilayah));
-  }, [data, activeJenjang, listKabupaten]);
+  }, [data, activeKategori, activeBentuk, listKabupaten]);
 
   const grandTotals = useMemo(() => {
     return aggregatedData.reduce((acc, curr) => {
@@ -408,9 +407,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
   // EXPORT EXCEL
   const downloadExcel = async () => {
     const workbook = new ExcelJS.Workbook();
-    
-    // PERBAIKAN: Ganti karakter "/" dengan "-" agar Excel tidak error
-    const safeJenjangName = activeJenjang.replace(/\//g, '-');
+    const safeJenjangName = activeLabel.replace(/\//g, '-');
     const worksheet = workbook.addWorksheet(`Rekap ${activeView} - ${safeJenjangName}`);
 
     let columns = [{ header: 'Wilayah (Kabupaten/Kota)', key: 'wilayah', width: 30 }];
@@ -448,7 +445,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Rekap_Guru_${activeView}_${activeJenjang === 'SEMUA' ? 'Keseluruhan' : safeJenjangName}_${selectedYear}.xlsx`;
+    link.download = `Rekap_Guru_${activeView}_${safeJenjangName}_${selectedYear}.xlsx`;
     link.click();
   };
 
@@ -498,6 +495,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
       <div className="bg-white px-4 md:px-6 py-4 border-b border-gray-100 flex flex-col gap-4 shrink-0 shadow-sm z-20">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
            
+           {/* TABS MENU */}
            <div className="flex items-center gap-2 bg-gray-100 p-1.5 rounded-2xl w-full md:w-auto overflow-x-auto custom-scrollbar pb-1">
              {TABS.map(t => (
                 <button 
@@ -510,19 +508,53 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
              ))}
            </div>
 
-           <button onClick={downloadExcel} className="flex items-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white px-5 py-2.5 rounded-xl font-black uppercase text-[10px] md:text-xs shadow-sm border border-blue-200 transition-all active:scale-95 shrink-0 w-full md:w-auto justify-center">
-             <FileSpreadsheet size={16} /> Unduh
-           </button>
+           {/* DROPDOWN KATEGORI & UNDUH */}
+           <div className="flex items-center gap-3 w-full md:w-auto">
+              <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm w-full md:w-auto transition-colors focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100">
+                <GraduationCap size={16} className="text-gray-400 mr-2" />
+                <select 
+                  value={activeKategori} 
+                  onChange={(e) => { 
+                    setActiveKategori(e.target.value); 
+                    setActiveBentuk('SEMUA'); 
+                  }} 
+                  className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer w-full"
+                >
+                  <option value="SEMUA">Semua Jenjang</option>
+                  <option value="PAUD">PAUD</option>
+                  <option value="PENDIDIKAN DASAR">Pendidikan Dasar</option>
+                  <option value="PENDIDIKAN MENENGAH">Pendidikan Menengah</option>
+                  <option value="PENDIDIKAN INKLUSIF">Pendidikan Inklusif</option>
+                  <option value="PENDIDIKAN NON FORMAL">Pendidikan Non Formal</option>
+                </select>
+              </div>
+
+              <button onClick={downloadExcel} className="flex items-center justify-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white px-5 py-2.5 rounded-xl font-black uppercase text-[10px] md:text-xs shadow-sm border border-blue-200 transition-all active:scale-95 shrink-0 w-full md:w-auto">
+                <FileSpreadsheet size={16} /> Unduh
+              </button>
+           </div>
         </div>
 
-        {/* JENJANG FILTER */}
-        <div className="flex items-center gap-1.5 md:gap-2 overflow-x-auto pb-1 custom-scrollbar">
-          {Object.keys(JENJANG_GROUPS).map(tab => (
-            <button key={tab} onClick={() => setActiveJenjang(tab)} className={`px-4 py-1.5 rounded-lg font-black text-[10px] md:text-xs transition-all duration-300 whitespace-nowrap border ${activeJenjang === tab ? 'bg-gray-800 text-white border-gray-800 shadow-md' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
-              {tab}
+        {/* TABS SUB-JENJANG (BENTUK PENDIDIKAN) */}
+        {activeKategori !== 'SEMUA' && (
+          <div className="flex items-center gap-1.5 md:gap-2 overflow-x-auto pb-1 mt-1">
+            <button 
+              onClick={() => setActiveBentuk('SEMUA')} 
+              className={`px-4 py-1.5 rounded-lg font-black text-[10px] md:text-xs transition-all duration-300 whitespace-nowrap border ${activeBentuk === 'SEMUA' ? 'bg-gray-800 text-white border-gray-800 shadow-md' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
+            >
+              SEMUA {activeKategori}
             </button>
-          ))}
-        </div>
+            {KATEGORI_MAPPING[activeKategori].map(tab => (
+              <button 
+                key={tab} 
+                onClick={() => setActiveBentuk(tab)} 
+                className={`px-4 py-1.5 rounded-lg font-black text-[10px] md:text-xs transition-all duration-300 whitespace-nowrap border ${activeBentuk === tab ? 'bg-gray-800 text-white border-gray-800 shadow-md' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 flex flex-col lg:flex-row min-h-0 bg-gray-50/50">
@@ -651,7 +683,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
           <div className="text-center w-full px-4 pt-6 pb-2 shrink-0">
             <h2 className="text-xl font-black text-gray-800 uppercase tracking-tighter">Proporsi {activeView}</h2>
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">
-              Jenjang {activeJenjang}
+              Jenjang {activeLabel}
             </p>
           </div>
 
@@ -740,7 +772,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
           onClose={() => setModalOpen(false)}
           data={data}
           initialWilayah={selectedWilayah}
-          activeJenjang={activeJenjang}
+          activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
         />
       )}
@@ -751,7 +783,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
           onClose={() => setModalOpen(false)}
           data={data}
           initialWilayah={selectedWilayah}
-          activeJenjang={activeJenjang}
+          activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
         />
       )}
@@ -762,7 +794,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
           onClose={() => setModalOpen(false)}
           data={data}
           initialWilayah={selectedWilayah}
-          activeJenjang={activeJenjang}
+          activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
         />
       )}
@@ -773,7 +805,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
           onClose={() => setModalOpen(false)}
           data={data}
           initialWilayah={selectedWilayah}
-          activeJenjang={activeJenjang}
+          activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
         />
       )}
@@ -784,7 +816,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
           onClose={() => setModalOpen(false)}
           data={data}
           initialWilayah={selectedWilayah}
-          activeJenjang={activeJenjang}
+          activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
         />
       )}
@@ -795,7 +827,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
           onClose={() => setModalOpen(false)}
           data={data}
           initialWilayah={selectedWilayah}
-          activeJenjang={activeJenjang}
+          activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
         />
       )}
@@ -806,7 +838,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
           onClose={() => setModalOpen(false)}
           data={data}
           initialWilayah={selectedWilayah}
-          activeJenjang={activeJenjang}
+          activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
         />
       )}

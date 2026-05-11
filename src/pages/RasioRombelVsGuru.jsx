@@ -13,7 +13,8 @@ const KABUPATEN_LIST = [
   "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
 ];
 
-const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'NON FORMAL'];
+// PEMISAHAN JENJANG SMA DAN SMK
+const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
 
 // Fungsi hitung angka rasio mentah (Jumlah Guru / Jumlah Rombel)
 const getRawRatio = (rombelCount, guruCount) => {
@@ -105,13 +106,14 @@ export default function RasioRombelVsGuru({ selectedYear }) {
 
       JENJANG_KEYS.forEach(k => {
         const agg = resMap.get(k);
-        agg.rombel_n += (row[`${k}_rombel_n`] || 0);
-        agg.guru_n += (row[`${k}_guru_n`] || 0);
-        agg.rombel_s += (row[`${k}_rombel_s`] || 0);
-        agg.guru_s += (row[`${k}_guru_s`] || 0);
+        const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+        agg.rombel_n += (row[`${baseK}_rombel_n`] || 0);
+        agg.guru_n += (row[`${baseK}_guru_n`] || 0);
+        agg.rombel_s += (row[`${baseK}_rombel_s`] || 0);
+        agg.guru_s += (row[`${baseK}_guru_s`] || 0);
         
-        agg.total_rombel += (row[`${k}_rombel`] || 0);
-        agg.total_guru += (row[`${k}_guru`] || 0);
+        agg.total_rombel += (row[`${baseK}_rombel`] || 0);
+        agg.total_guru += (row[`${baseK}_guru`] || 0);
       });
     });
 
@@ -159,8 +161,9 @@ export default function RasioRombelVsGuru({ selectedYear }) {
          }
          const aggRow = mapKab.get(kab);
          JENJANG_KEYS.forEach(k => { 
-             aggRow[`${k}_rombel`] += (row[`${k}_${rombelKey}`] || 0); 
-             aggRow[`${k}_guru`] += (row[`${k}_${guruKey}`] || 0); 
+             const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+             aggRow[`${k}_rombel`] += (row[`${baseK}_${rombelKey}`] || 0); 
+             aggRow[`${k}_guru`] += (row[`${baseK}_${guruKey}`] || 0); 
          });
       });
       return Array.from(mapKab.values()).sort((a, b) => {
@@ -174,8 +177,9 @@ export default function RasioRombelVsGuru({ selectedYear }) {
       return filtered.map(row => {
         const mappedRow = { ...row };
         JENJANG_KEYS.forEach(k => {
-           mappedRow[`${k}_rombel`] = row[`${k}_${rombelKey}`] || 0;
-           mappedRow[`${k}_guru`] = row[`${k}_${guruKey}`] || 0;
+           const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+           mappedRow[`${k}_rombel`] = row[`${baseK}_${rombelKey}`] || 0;
+           mappedRow[`${k}_guru`] = row[`${baseK}_${guruKey}`] || 0;
         });
         return mappedRow;
       });
@@ -449,6 +453,7 @@ export default function RasioRombelVsGuru({ selectedYear }) {
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> SD: Min. 6 Guru</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> SMP: Min. 3 Guru</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> SMA: Min. 3 Guru</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> SMK: Min. 3 Guru</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> SLB: Min. 3 Guru</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> NON FORMAL: Min. 3 Guru</div>
           </div>

@@ -13,7 +13,8 @@ const KABUPATEN_LIST = [
   "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
 ];
 
-const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'NON FORMAL'];
+// PEMISAHAN JENJANG SMA DAN SMK
+const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
 
 // Fungsi hitung angka rasio mentah (Jumlah Kelas / Jumlah Rombel)
 const getRawRatio = (rombelCount, kelasCount) => {
@@ -102,13 +103,14 @@ export default function RasioRombelVsKelas({ selectedYear }) {
 
       JENJANG_KEYS.forEach(k => {
         const agg = resMap.get(k);
-        agg.rombel_n += (row[`${k}_rombel_n`] || 0);
-        agg.kelas_n += (row[`${k}_kelas_n`] || 0);
-        agg.rombel_s += (row[`${k}_rombel_s`] || 0);
-        agg.kelas_s += (row[`${k}_kelas_s`] || 0);
+        const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+        agg.rombel_n += (row[`${baseK}_rombel_n`] || 0);
+        agg.kelas_n += (row[`${baseK}_kelas_n`] || 0);
+        agg.rombel_s += (row[`${baseK}_rombel_s`] || 0);
+        agg.kelas_s += (row[`${baseK}_kelas_s`] || 0);
         
-        agg.total_rombel += (row[`${k}_rombel`] || 0);
-        agg.total_kelas += (row[`${k}_kelas`] || 0);
+        agg.total_rombel += (row[`${baseK}_rombel`] || 0);
+        agg.total_kelas += (row[`${baseK}_kelas`] || 0);
       });
     });
 
@@ -156,8 +158,9 @@ export default function RasioRombelVsKelas({ selectedYear }) {
          }
          const aggRow = mapKab.get(kab);
          JENJANG_KEYS.forEach(k => { 
-             aggRow[`${k}_rombel`] += (row[`${k}_${rombelKey}`] || 0); 
-             aggRow[`${k}_kelas`] += (row[`${k}_${kelasKey}`] || 0); 
+             const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+             aggRow[`${k}_rombel`] += (row[`${baseK}_${rombelKey}`] || 0); 
+             aggRow[`${k}_kelas`] += (row[`${baseK}_${kelasKey}`] || 0); 
          });
       });
       return Array.from(mapKab.values()).sort((a, b) => {
@@ -171,8 +174,9 @@ export default function RasioRombelVsKelas({ selectedYear }) {
       return filtered.map(row => {
         const mappedRow = { ...row };
         JENJANG_KEYS.forEach(k => {
-           mappedRow[`${k}_rombel`] = row[`${k}_${rombelKey}`] || 0;
-           mappedRow[`${k}_kelas`] = row[`${k}_${kelasKey}`] || 0;
+           const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+           mappedRow[`${k}_rombel`] = row[`${baseK}_${rombelKey}`] || 0;
+           mappedRow[`${k}_kelas`] = row[`${baseK}_${kelasKey}`] || 0;
         });
         return mappedRow;
       });

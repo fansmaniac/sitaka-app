@@ -13,14 +13,16 @@ const KABUPATEN_LIST = [
   "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
 ];
 
-const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'NON FORMAL'];
+// PEMISAHAN JENJANG SMA DAN SMK
+const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
 
 // BEBAN MAKSIMAL PESERTA DIDIK PER 1 GURU (Permendikdasmen No.14/2026)
 const MAX_PD_PER_GURU = {
   'PAUD': 15,          
   'SD': 28,            
   'SMP': 32,           
-  'SMA/SMK': 36,       
+  'SMA': 36,       
+  'SMK': 36,       
   'SLB (Inklusif)': 8, 
   'NON FORMAL': 30     
 };
@@ -113,13 +115,14 @@ export default function RasioGuruVsPD({ selectedYear }) {
 
       JENJANG_KEYS.forEach(k => {
         const agg = resMap.get(k);
-        agg.guru_n += (row[`${k}_guru_n`] || 0);
-        agg.pd_n += (row[`${k}_pd_n`] || 0);
-        agg.guru_s += (row[`${k}_guru_s`] || 0);
-        agg.pd_s += (row[`${k}_pd_s`] || 0);
+        const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+        agg.guru_n += (row[`${baseK}_guru_n`] || 0);
+        agg.pd_n += (row[`${baseK}_pd_n`] || 0);
+        agg.guru_s += (row[`${baseK}_guru_s`] || 0);
+        agg.pd_s += (row[`${baseK}_pd_s`] || 0);
         
-        agg.total_guru += (row[`${k}_guru`] || 0);
-        agg.total_pd += (row[`${k}_pd`] || 0);
+        agg.total_guru += (row[`${baseK}_guru`] || 0);
+        agg.total_pd += (row[`${baseK}_pd`] || 0);
       });
     });
 
@@ -167,8 +170,9 @@ export default function RasioGuruVsPD({ selectedYear }) {
          }
          const aggRow = mapKab.get(kab);
          JENJANG_KEYS.forEach(k => { 
-             aggRow[`${k}_guru`] += (row[`${k}_${guruKey}`] || 0); 
-             aggRow[`${k}_pd`] += (row[`${k}_${pdKey}`] || 0); 
+             const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+             aggRow[`${k}_guru`] += (row[`${baseK}_${guruKey}`] || 0); 
+             aggRow[`${k}_pd`] += (row[`${baseK}_${pdKey}`] || 0); 
          });
       });
       return Array.from(mapKab.values()).sort((a, b) => {
@@ -182,8 +186,9 @@ export default function RasioGuruVsPD({ selectedYear }) {
       return filtered.map(row => {
         const mappedRow = { ...row };
         JENJANG_KEYS.forEach(k => {
-           mappedRow[`${k}_guru`] = row[`${k}_${guruKey}`] || 0;
-           mappedRow[`${k}_pd`] = row[`${k}_${pdKey}`] || 0;
+           const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+           mappedRow[`${k}_guru`] = row[`${baseK}_${guruKey}`] || 0;
+           mappedRow[`${k}_pd`] = row[`${baseK}_${pdKey}`] || 0;
         });
         return mappedRow;
       });
@@ -452,7 +457,8 @@ export default function RasioGuruVsPD({ selectedYear }) {
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> PAUD: Max 15 PD / Guru</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SD: Max 28 PD / Guru</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SMP: Max 32 PD / Guru</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SMA/SMK: Max 36 PD / Guru</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SMA: Max 36 PD / Guru</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SMK: Max 36 PD / Guru</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SLB: Max 8 PD / Guru</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> NON FORMAL: Max 30 PD / Guru</div>
           </div>

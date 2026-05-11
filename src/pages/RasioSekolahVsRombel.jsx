@@ -13,14 +13,16 @@ const KABUPATEN_LIST = [
   "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
 ];
 
-const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'NON FORMAL'];
+// PEMISAHAN JENJANG SMA DAN SMK
+const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
 
 // Standar Minimal & Maksimal Rombel per Sekolah
 const STANDAR_ROMBEL = {
   'PAUD': { min: 2, max: 16 },
   'SD': { min: 6, max: 24 },
   'SMP': { min: 3, max: 33 },
-  'SMA/SMK': { min: 3, max: 72 }, 
+  'SMA': { min: 3, max: 72 }, 
+  'SMK': { min: 3, max: 72 }, 
   'SLB (Inklusif)': { min: 3, max: 30 },
   'NON FORMAL': { min: 3, max: 36 } 
 };
@@ -76,7 +78,6 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
           const data = docSnap.data();
           setTab2DataRaw(data.tabel2 || []);
           
-          // Format tanggal last_updated (Sudah diperbaiki error bracket-nya!)
           if (data.last_updated) {
             const d = new Date(data.last_updated);
             const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
@@ -112,13 +113,14 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
 
       JENJANG_KEYS.forEach(k => {
         const agg = resMap.get(k);
-        agg.sek_n += (row[`${k}_sek_n`] || 0);
-        agg.rombel_n += (row[`${k}_rombel_n`] || 0);
-        agg.sek_s += (row[`${k}_sek_s`] || 0);
-        agg.rombel_s += (row[`${k}_rombel_s`] || 0);
+        const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+        agg.sek_n += (row[`${baseK}_sek_n`] || 0);
+        agg.rombel_n += (row[`${baseK}_rombel_n`] || 0);
+        agg.sek_s += (row[`${baseK}_sek_s`] || 0);
+        agg.rombel_s += (row[`${baseK}_rombel_s`] || 0);
         
-        agg.total_sek += (row[`${k}_sek`] || 0);
-        agg.total_rombel += (row[`${k}_rombel`] || 0);
+        agg.total_sek += (row[`${baseK}_sek`] || 0);
+        agg.total_rombel += (row[`${baseK}_rombel`] || 0);
       });
     });
 
@@ -163,8 +165,9 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
          }
          const aggRow = mapKab.get(kab);
          JENJANG_KEYS.forEach(k => { 
-             aggRow[`${k}_sek`] += (row[`${k}_${sekKey}`] || 0); 
-             aggRow[`${k}_rombel`] += (row[`${k}_${rombelKey}`] || 0); 
+             const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+             aggRow[`${k}_sek`] += (row[`${baseK}_${sekKey}`] || 0); 
+             aggRow[`${k}_rombel`] += (row[`${baseK}_${rombelKey}`] || 0); 
          });
       });
       return Array.from(mapKab.values()).sort((a, b) => {
@@ -178,8 +181,9 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
       return filtered.map(row => {
         const mappedRow = { ...row };
         JENJANG_KEYS.forEach(k => {
-           mappedRow[`${k}_sek`] = row[`${k}_${sekKey}`] || 0;
-           mappedRow[`${k}_rombel`] = row[`${k}_${rombelKey}`] || 0;
+           const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+           mappedRow[`${k}_sek`] = row[`${baseK}_${sekKey}`] || 0;
+           mappedRow[`${k}_rombel`] = row[`${baseK}_${rombelKey}`] || 0;
         });
         return mappedRow;
       });
@@ -447,7 +451,8 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500"></div> PAUD: Min 2 - Max 16 Rombel</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500"></div> SD: Min 6 - Max 24 Rombel</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500"></div> SMP: Min 3 - Max 33 Rombel</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500"></div> SMA/SMK: Min 3 - Max 72 Rombel</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500"></div> SMA: Min 3 - Max 72 Rombel</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500"></div> SMK: Min 3 - Max 72 Rombel</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500"></div> SLB: Min 3 - Max 30 Rombel</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500"></div> NON FORMAL: Min 3 - Max 36 Rombel</div>
           </div>

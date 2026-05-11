@@ -5,6 +5,8 @@ import {
   Building2, School
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
+import { db } from '../firebase/config';
+import { collection, query, getDocs } from 'firebase/firestore';
 
 // =====================================================================
 // UTILITY FUNCTIONS
@@ -48,58 +50,88 @@ const getKabupatenRank = (kabName) => {
   return 99;
 };
 
-// SUDAH DIPISAHKAN SMA DAN SMK
-const JENJANG_GROUPS = {
+// =====================================================================
+// MAPPING STRUKTUR KATEGORI BARU (SINKRON DENGAN DASHBOARD GURU)
+// =====================================================================
+const KATEGORI_MAPPING = {
   'PAUD': ['TK', 'KB', 'PAUD', 'SPS', 'TPA'],
-  'SD': ['SD', 'SPK SD'],
-  'SMP': ['SMP', 'SPK SMP'],
-  'SMA': ['SMA', 'SPK SMA'],
-  'SMK': ['SMK'],
-  'SLB': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
-  'NON FORMAL': ['PKBM', 'SKB']
+  'PENDIDIKAN DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
+  'PENDIDIKAN MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
+  'PENDIDIKAN INKLUSIF': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
+  'PENDIDIKAN NON FORMAL': ['PKBM', 'SKB']
 };
 
-const identifyJenjangGroup = (jenjangDb) => {
-  const j = String(jenjangDb).trim().toUpperCase();
-  for (const [key, arr] of Object.entries(JENJANG_GROUPS)) {
-    if (arr.includes(j)) return key;
+const isJenjangValid = (jenjangDb, targetJenjang) => {
+  if (targetJenjang === 'SEMUA' || targetJenjang === 'SEMUA JENJANG') return true;
+  if (KATEGORI_MAPPING[targetJenjang]) {
+      return KATEGORI_MAPPING[targetJenjang].includes(jenjangDb);
   }
-  return null;
+  return jenjangDb === targetJenjang;
 };
 
 // =====================================================================
-// MAIN COMPONENT
+// MAIN COMPONENT: RINCIAN GENDER GURU
 // =====================================================================
 export default function RincianGenderGuru({ 
   isOpen, 
   onClose, 
   data = [], 
   initialWilayah = 'SEMUA', 
-  activeJenjang = 'SEMUA', // Context Header/Awal
+  activeJenjang = 'SEMUA', // Context dari parent
   displayLastUpdated 
 }) {
-  // Fungsi penerjemah jenjang
-  const normalizeJenjang = (j) => {
-    if (j === 'SLB (Inklusif)') return 'SLB';
-    return j;
-  };
-
-  const mappedJenjang = normalizeJenjang(activeJenjang);
+  let mappedJenjang = activeJenjang;
+  if (mappedJenjang === 'SLB (Inklusif)') mappedJenjang = 'PENDIDIKAN INKLUSIF';
+  if (mappedJenjang === 'SEMUA') mappedJenjang = 'SEMUA JENJANG';
 
   // STATE MODAL TABS
-  const [activeModalTab, setActiveModalTab] = useState('KECAMATAN'); // 'KECAMATAN' | 'SEKOLAH'
+  const [activeModalTab, setActiveModalTab] = useState('KECAMATAN'); 
   
   // STATE FILTERS
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterWilayah, setFilterWilayah] = useState('SEMUA'); // Tab Kecamatan
-  const [filterWilayahSekolah, setFilterWilayahSekolah] = useState('SEMUA'); // Tab Sekolah
-  const [filterStatus, setFilterStatus] = useState('SEMUA'); // Tab Kecamatan & Sekolah
-  const [activeJenjangTab, setActiveJenjangTab] = useState('SEMUA'); // Tab Menu Jenjang (Khusus Tab Sekolah)
+  const [filterWilayah, setFilterWilayah] = useState('SEMUA'); 
+  const [filterWilayahSekolah, setFilterWilayahSekolah] = useState('SEMUA'); 
+  const [filterStatus, setFilterStatus] = useState('SEMUA'); 
+  const [activeJenjangTab, setActiveJenjangTab] = useState('SEMUA'); 
+
+  // STATE MAPPING NAMA SEKOLAH (NPSN -> Nama Sekolah)
+  const [mapNamaSekolah, setMapNamaSekolah] = useState(new Map());
 
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 15;
 
   const isModeSemua = initialWilayah === 'SEMUA';
+
+  // --- FETCH MAPPING NAMA SEKOLAH SECARA MANDIRI ---
+  useEffect(() => {
+    const fetchNamaSekolah = async () => {
+      try {
+        const q = query(collection(db, 'dapodik_sekolah_chunks'));
+        const snap = await getDocs(q);
+        const newMap = new Map();
+        
+        snap.forEach(doc => {
+          const chunk = doc.data();
+          if (chunk && Array.isArray(chunk.data)) {
+            chunk.data.forEach(s => {
+              const npsn = String(s.npsn || '').trim();
+              const nama = s.nama_satuan_pendidikan || s.nama_sekolah || '';
+              if (npsn && nama) {
+                newMap.set(npsn, nama);
+              }
+            });
+          }
+        });
+        setMapNamaSekolah(newMap);
+      } catch (err) {
+        console.error("Gagal menarik mapping nama sekolah:", err);
+      }
+    };
+
+    if (isOpen) {
+      fetchNamaSekolah();
+    }
+  }, [isOpen]);
 
   // Sinkronisasi saat modal dibuka
   useEffect(() => {
@@ -109,12 +141,12 @@ export default function RincianGenderGuru({
       setFilterWilayah('SEMUA');
       setFilterWilayahSekolah('SEMUA');
       setFilterStatus('SEMUA');
-      setActiveJenjangTab(mappedJenjang); // Inisialisasi jenjang dari parent
+      setActiveJenjangTab(mappedJenjang); 
       setCurrentPage(1);
     }
   }, [isOpen, mappedJenjang]);
 
-  // Reset pagination saat pencarian atau filter berubah
+  // Reset pagination
   useEffect(() => { 
     setCurrentPage(1); 
   }, [searchTerm, filterWilayah, filterWilayahSekolah, filterStatus, activeJenjangTab, activeModalTab]);
@@ -126,7 +158,18 @@ export default function RincianGenderGuru({
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen, onClose]);
 
-  // Ekstrak Daftar Wilayah (Kabupaten/Kecamatan) untuk Dropdown Filter
+  // Dinamika Tab Jenjang di dalam Modal
+  const availableTabs = useMemo(() => {
+    if (mappedJenjang === 'SEMUA JENJANG') return Object.keys(KATEGORI_MAPPING);
+    if (KATEGORI_MAPPING[mappedJenjang]) return KATEGORI_MAPPING[mappedJenjang];
+    
+    for (const [kat, arr] of Object.entries(KATEGORI_MAPPING)) {
+        if (arr.includes(mappedJenjang)) return arr;
+    }
+    return [];
+  }, [mappedJenjang]);
+
+  // Ekstrak Daftar Wilayah
   const listWilayahFilter = useMemo(() => {
     const validData = data.filter(item => {
       if (isModeSemua) return true;
@@ -148,19 +191,13 @@ export default function RincianGenderGuru({
   const dataKecamatan = useMemo(() => {
     if (!data) return [];
     
-    // Filter Base
     const baseData = data.filter(item => {
       const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
       if (!isModeSemua && kabDb !== initialWilayah) return false;
 
-      // Pada Tab Kecamatan, Jenjang mematuhi mappedJenjang dari Parent
-      if (mappedJenjang !== 'SEMUA') {
-         const validJenjangList = JENJANG_GROUPS[mappedJenjang] || []; 
-         const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
-         if (!validJenjangList.includes(jenjangDb)) return false;
-      }
+      const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+      if (!isJenjangValid(jenjangDb, mappedJenjang)) return false;
 
-      // Filter Status
       if (filterStatus !== 'SEMUA') {
         const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
         if (statusDb !== filterStatus) return false;
@@ -211,67 +248,59 @@ export default function RincianGenderGuru({
   }, [dataKecamatan]);
 
   // =====================================================================
-  // AGREGASI DATA TAB "PER SEKOLAH"
-  // Karena data berasal dari PTK, kita GROUP BY NPSN/Sekolah
+  // AGREGASI DATA TAB "PER SEKOLAH" DENGAN MAPPING NAMA SINKRON
   // =====================================================================
   const dataSekolah = useMemo(() => {
     if (!data) return [];
     
-    let validData = data.filter(item => {
+    const mapSekolah = new Map();
+
+    data.forEach(item => {
       const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
-      if (!isModeSemua && kabDb !== initialWilayah) return false;
+      if (!isModeSemua && kabDb !== initialWilayah) return;
 
       if (filterStatus !== 'SEMUA') {
         const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
-        if (statusDb !== filterStatus) return false;
+        if (statusDb !== filterStatus) return;
       }
 
-      // Mematuhi Tab Jenjang di UI
-      if (activeJenjangTab !== 'SEMUA') {
-        const validJenjangList = JENJANG_GROUPS[activeJenjangTab] || []; 
-        const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
-        if (!validJenjangList.includes(jenjangDb)) return false;
-      }
+      const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+      if (!isJenjangValid(jenjangDb, activeJenjangTab)) return;
 
-      // Filter Wilayah Khusus Tab Sekolah (Kecamatan/Kabupaten)
+      const kecDb = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
       if (filterWilayahSekolah !== 'SEMUA') {
-        let keyId = isModeSemua 
-          ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) 
-          : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
-        if (keyId !== filterWilayahSekolah) return false;
+        let keyId = isModeSemua ? kabDb : kecDb;
+        if (keyId !== filterWilayahSekolah) return;
+      }
+
+      const npsn = getVal(item, 'npsn') || '-';
+      let namaSekolah = getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '';
+      
+      // SUNTIKAN KECERDASAN: Ambil dari mapping jika kosong
+      if (!namaSekolah || namaSekolah === '-') {
+         namaSekolah = mapNamaSekolah.get(String(npsn).trim()) || '-';
       }
 
       if (searchTerm) {
-        const nama = String(getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '').toLowerCase();
-        const npsn = String(getVal(item, 'npsn') || '').toLowerCase();
         const q = searchTerm.toLowerCase();
-        if (!nama.includes(q) && !npsn.includes(q)) return false;
+        if (!namaSekolah.toLowerCase().includes(q) && !String(npsn).toLowerCase().includes(q)) return;
       }
 
-      return true;
-    });
-
-    const mapSekolah = new Map();
-
-    validData.forEach(item => {
-      const npsn = getVal(item, 'npsn');
-      const nama = getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '-';
-      const keyId = npsn || nama; // Fallback jika NPSN kosong
-
-      if (!mapSekolah.has(keyId)) {
-        mapSekolah.set(keyId, {
+      const uniqueKey = `${npsn}_${namaSekolah}`;
+      if (!mapSekolah.has(uniqueKey)) {
+        mapSekolah.set(uniqueKey, {
           npsn: npsn,
-          nama_sekolah: nama,
-          jenjang: getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'),
+          nama_sekolah: namaSekolah,
+          kecamatan: kecDb,
+          jenjang: jenjangDb,
           status: String(getVal(item, 'status_sekolah')).toUpperCase(),
-          kecamatan: String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase(),
           gen_l: 0,
           gen_p: 0,
           total: 0
         });
       }
       
-      const row = mapSekolah.get(keyId);
+      const row = mapSekolah.get(uniqueKey);
       const gender = String(getVal(item, 'gender') || getVal(item, 'jenis_kelamin')).trim().toUpperCase();
       
       if (gender === 'L' || gender === 'LAKI-LAKI') row.gen_l++;
@@ -280,9 +309,8 @@ export default function RincianGenderGuru({
       row.total++;
     });
 
-    return Array.from(mapSekolah.values()).sort((a, b) => String(a.nama_sekolah).localeCompare(String(b.nama_sekolah)));
-
-  }, [data, isModeSemua, initialWilayah, filterStatus, activeJenjangTab, filterWilayahSekolah, searchTerm]);
+    return Array.from(mapSekolah.values()).sort((a, b) => a.nama_sekolah.localeCompare(b.nama_sekolah));
+  }, [data, isModeSemua, initialWilayah, filterStatus, activeJenjangTab, filterWilayahSekolah, searchTerm, mapNamaSekolah]);
 
   const totalGuruSekolah = useMemo(() => {
     return dataSekolah.reduce((acc, curr) => {
@@ -298,42 +326,28 @@ export default function RincianGenderGuru({
   // =====================================================================
   const downloadExcelRincian = async () => {
     const workbook = new ExcelJS.Workbook();
+    const safeName = activeJenjangTab.replace(/\//g, '-');
     
     if (activeModalTab === 'KECAMATAN') {
-      const sheetName = isModeSemua ? 'Rekap Provinsi' : `Rekap ${initialWilayah}`;
-      const worksheet = workbook.addWorksheet(sheetName);
-
+      const worksheet = workbook.addWorksheet('Rekap Gender Wilayah');
       worksheet.columns = [
         { header: isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan', key: 'namaWilayah', width: 30 },
         { header: 'Guru Laki-Laki', key: 'gen_l', width: 20 },
         { header: 'Guru Perempuan', key: 'gen_p', width: 20 },
         { header: 'Total Guru', key: 'total', width: 18 },
       ];
-
       dataKecamatan.forEach(item => worksheet.addRow(item));
-
-      const totalRow = worksheet.addRow({
-        namaWilayah: 'TOTAL KESELURUHAN',
-        gen_l: totalsKecamatan.gen_l,
-        gen_p: totalsKecamatan.gen_p,
-        total: totalsKecamatan.total
-      });
-
+      const totalRow = worksheet.addRow({ namaWilayah: 'TOTAL', gen_l: totalsKecamatan.gen_l, gen_p: totalsKecamatan.gen_p, total: totalsKecamatan.total });
       worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDB2777' } }; // Pink 600
-      totalRow.font = { bold: true, color: { argb: 'FF831843' } }; 
-      totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE7F3' } }; 
-
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDB2777' } };
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `Rincian_Guru_Gender_Kecamatan_${initialWilayah}.xlsx`;
+      link.download = `Rincian_Guru_Gender_${initialWilayah}_${safeName}.xlsx`;
       link.click();
     } else {
-      // Tab SEKOLAH
-      const worksheet = workbook.addWorksheet('Daftar Sekolah');
-
+      const worksheet = workbook.addWorksheet('Daftar Sekolah & Gender');
       worksheet.columns = [
         { header: 'NPSN', key: 'npsn', width: 15 },
         { header: 'Nama Sekolah', key: 'nama_sekolah', width: 45 },
@@ -344,17 +358,14 @@ export default function RincianGenderGuru({
         { header: 'Guru Perempuan', key: 'gen_p', width: 18 },
         { header: 'Total Guru', key: 'total', width: 18 },
       ];
-
       dataSekolah.forEach(item => worksheet.addRow(item));
-
       worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDB2777' } }; // Pink 600
-
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDB2777' } };
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `Daftar_Sekolah_Guru_Gender_${initialWilayah}_${activeJenjangTab.replace(' ','_')}.xlsx`;
+      link.download = `Daftar_Guru_Sekolah_Gender_${initialWilayah}_${safeName}.xlsx`;
       link.click();
     }
   };
@@ -365,9 +376,7 @@ export default function RincianGenderGuru({
   const startIndex = (currentPage - 1) * rowsPerPage;
   const currentRows = activeData.slice(startIndex, startIndex + rowsPerPage);
   
-  const goToPage = (page) => {
-    if (page >= 1 && page <= totalPages) setCurrentPage(page);
-  };
+  const goToPage = (page) => { if (page >= 1 && page <= totalPages) setCurrentPage(page); };
 
   if (!isOpen) return null;
 
@@ -418,12 +427,12 @@ export default function RincianGenderGuru({
         {activeModalTab === 'SEKOLAH' && (
           <div className="bg-white px-6 pt-4 pb-0 flex gap-2 overflow-x-auto scrollbar-hide shrink-0 z-10 relative">
             <button 
-              onClick={() => setActiveJenjangTab('SEMUA')}
-              className={`px-5 py-2 rounded-xl font-black uppercase text-[10px] md:text-xs transition-all whitespace-nowrap border ${activeJenjangTab === 'SEMUA' ? 'bg-pink-600 text-white border-pink-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
+              onClick={() => setActiveJenjangTab(mappedJenjang)}
+              className={`px-5 py-2 rounded-xl font-black uppercase text-[10px] md:text-xs transition-all whitespace-nowrap border ${activeJenjangTab === mappedJenjang ? 'bg-pink-600 text-white border-pink-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
             >
-              Semua Jenjang
+              {mappedJenjang === 'SEMUA JENJANG' ? 'Semua Jenjang' : `SEMUA ${mappedJenjang}`}
             </button>
-            {Object.keys(JENJANG_GROUPS).map(j => (
+            {availableTabs.map(j => (
               <button 
                 key={j}
                 onClick={() => setActiveJenjangTab(j)}
@@ -448,37 +457,18 @@ export default function RincianGenderGuru({
             />
           </div>
 
-          {/* FILTER TAB KECAMATAN */}
-          {activeModalTab === 'KECAMATAN' && (
-            <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
-              <MapPin size={16} className="text-gray-400 mr-2" />
-              <select 
-                value={filterWilayah} 
-                onChange={(e) => setFilterWilayah(e.target.value)} 
-                className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[200px]"
-              >
-                <option value="SEMUA">{isModeSemua ? 'SEMUA KABUPATEN' : 'SEMUA KECAMATAN'}</option>
-                {listWilayahFilter.map(w => <option key={w} value={w}>{w}</option>)}
-              </select>
-            </div>
-          )}
+          <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
+            <MapPin size={16} className="text-gray-400 mr-2" />
+            <select 
+              value={activeModalTab === 'KECAMATAN' ? filterWilayah : filterWilayahSekolah} 
+              onChange={(e) => activeModalTab === 'KECAMATAN' ? setFilterWilayah(e.target.value) : setFilterWilayahSekolah(e.target.value)} 
+              className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[200px]"
+            >
+              <option value="SEMUA">{isModeSemua ? 'SEMUA KABUPATEN' : 'SEMUA KECAMATAN'}</option>
+              {listWilayahFilter.map(w => <option key={w} value={w}>{w}</option>)}
+            </select>
+          </div>
 
-          {/* FILTER TAB SEKOLAH */}
-          {activeModalTab === 'SEKOLAH' && (
-            <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
-              <MapPin size={16} className="text-gray-400 mr-2" />
-              <select 
-                value={filterWilayahSekolah} 
-                onChange={(e) => setFilterWilayahSekolah(e.target.value)} 
-                className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[200px]"
-              >
-                <option value="SEMUA">{isModeSemua ? 'SEMUA KABUPATEN' : 'SEMUA KECAMATAN'}</option>
-                {listWilayahFilter.map(w => <option key={w} value={w}>{w}</option>)}
-              </select>
-            </div>
-          )}
-
-          {/* FILTER STATUS (BERLAKU UNTUK KEDUANYA) */}
           <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
             <Building2 size={16} className="text-gray-400 mr-2" />
             <select 
@@ -495,109 +485,78 @@ export default function RincianGenderGuru({
 
         {/* TABLE AREA */}
         <div className="flex-1 overflow-auto bg-gray-50/50 p-4 custom-scrollbar">
-          
-          {/* TABEL KECAMATAN */}
-          {activeModalTab === 'KECAMATAN' && (
-            <table className="w-full text-center border-separate border-spacing-y-2">
-              <thead className="sticky top-0 bg-white z-10 shadow-sm rounded-xl">
-                <tr className="text-[10px] font-black uppercase text-gray-500">
-                  <th className="px-4 py-3 text-center rounded-l-xl w-16">No</th>
-                  <th className="px-4 py-3 text-left">{isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan'}</th>
-                  <th className="px-4 py-3 text-blue-600">Guru Laki-Laki</th>
-                  <th className="px-4 py-3 text-pink-600">Guru Perempuan</th>
-                  <th className="px-4 py-3 rounded-r-xl text-gray-800">Total Guru</th>
+          <table className="w-full text-center border-separate border-spacing-y-2">
+            <thead className="sticky top-0 bg-white z-10 shadow-sm rounded-xl">
+              <tr className="text-[10px] font-black uppercase text-gray-500">
+                <th className="px-4 py-3 text-center rounded-l-xl w-16">No</th>
+                {activeModalTab === 'KECAMATAN' ? (
+                  <>
+                    <th className="px-4 py-3 text-left">{isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan'}</th>
+                    <th className="px-4 py-3 text-blue-600">Guru Laki-Laki</th>
+                    <th className="px-4 py-3 text-pink-600">Guru Perempuan</th>
+                  </>
+                ) : (
+                  <>
+                    <th className="px-4 py-3 text-left">NPSN</th>
+                    <th className="px-4 py-3 text-left">Nama Sekolah</th>
+                    <th className="px-3 py-3 text-left">Jenjang</th>
+                    <th className="px-3 py-3 text-orange-600 text-center">Status</th>
+                    <th className="px-4 py-3 text-blue-600 text-center">Laki-Laki</th>
+                    <th className="px-4 py-3 text-pink-600 text-center">Perempuan</th>
+                  </>
+                )}
+                <th className="px-4 py-3 rounded-r-xl text-gray-800 text-center">{activeModalTab === 'KECAMATAN' ? 'Total Guru' : 'Jumlah Guru'}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentRows.map((row, idx) => (
+                <tr key={idx} className="bg-white shadow-sm hover:shadow-md hover:scale-[1.01] transition-all group">
+                  <td className="px-4 py-4 text-center font-bold text-gray-400 text-xs rounded-l-2xl border-y border-l border-gray-100">{startIndex + idx + 1}</td>
+                  {activeModalTab === 'KECAMATAN' ? (
+                    <>
+                      <td className="px-4 py-4 font-black text-gray-800 text-sm uppercase text-left border-y border-gray-100 whitespace-nowrap">{row.namaWilayah}</td>
+                      <td className="px-4 py-4 font-bold text-blue-600 text-base border-y border-gray-100 bg-blue-50/30">{row.gen_l.toLocaleString()}</td>
+                      <td className="px-4 py-4 font-bold text-pink-600 text-base border-y border-gray-100 bg-pink-50/30">{row.gen_p.toLocaleString()}</td>
+                      <td className="px-4 py-4 font-black text-gray-800 text-lg border-y border-r border-gray-100 bg-gray-50/50 rounded-r-2xl">{row.total.toLocaleString()}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="px-4 py-3 font-mono text-gray-500 text-sm text-left border-y border-gray-100">{row.npsn}</td>
+                      <td className="px-4 py-3 font-black text-gray-800 text-sm uppercase text-left border-y border-gray-100">{row.nama_sekolah}</td>
+                      <td className="px-3 py-3 font-bold text-blue-600 text-[10px] border-y border-gray-100 uppercase">{row.jenjang}</td>
+                      <td className="px-3 py-3 font-bold text-orange-600 text-[10px] border-y border-gray-100 uppercase">{row.status}</td>
+                      <td className="px-4 py-3 font-bold text-blue-600 text-sm border-y border-gray-100 bg-blue-50/20">{row.gen_l.toLocaleString()}</td>
+                      <td className="px-4 py-3 font-bold text-pink-600 text-sm border-y border-gray-100 bg-pink-50/20">{row.gen_p.toLocaleString()}</td>
+                      <td className="px-4 py-3 font-black text-gray-800 text-base border-y border-r border-gray-100 rounded-r-2xl bg-gray-50">{row.total.toLocaleString()}</td>
+                    </>
+                  )}
                 </tr>
-              </thead>
-              <tbody>
-                {currentRows.map((row, idx) => (
-                  <tr key={idx} className="bg-white shadow-sm hover:shadow-md hover:scale-[1.01] transition-all group">
-                    <td className="px-4 py-4 text-center font-bold text-gray-400 text-xs rounded-l-2xl border-y border-l border-gray-100">{startIndex + idx + 1}</td>
-                    <td className="px-4 py-4 font-black text-gray-800 text-sm uppercase text-left border-y border-gray-100 whitespace-nowrap">{row.namaWilayah}</td>
-                    
-                    <td className="px-4 py-4 font-black text-blue-600 text-base border-y border-gray-100 bg-blue-50/30">
-                      {row.gen_l.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-4 font-black text-pink-600 text-base border-y border-gray-100 bg-pink-50/30">
-                      {row.gen_p.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-4 font-black text-gray-800 text-lg border-y border-r border-gray-100 bg-gray-50/50 rounded-r-2xl">
-                      {row.total.toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              
-              {dataKecamatan.length > 0 && (
-                <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
-                  <tr className="bg-pink-100 text-center font-black uppercase text-xs border-t-2 border-pink-200">
-                    <td colSpan="2" className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-pink-200 text-pink-900">
-                      TOTAL {isModeSemua ? 'KESELURUHAN' : 'KECAMATAN'}
-                    </td>
-                    <td className="px-4 py-4 text-blue-800 text-base border-y border-pink-200">{totalsKecamatan.gen_l.toLocaleString()}</td>
-                    <td className="px-4 py-4 text-pink-800 text-base border-y border-pink-200">{totalsKecamatan.gen_p.toLocaleString()}</td>
-                    <td className="px-4 py-4 text-pink-950 text-lg border-y border-r border-pink-200 rounded-r-2xl bg-pink-200/50">
-                      {totalsKecamatan.total.toLocaleString()}
-                    </td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          )}
-
-          {/* TABEL SEKOLAH */}
-          {activeModalTab === 'SEKOLAH' && (
-            <table className="w-full text-center border-separate border-spacing-y-2">
-              <thead className="sticky top-0 bg-white z-10 shadow-sm rounded-xl">
-                <tr className="text-[10px] font-black uppercase text-gray-500">
-                  <th className="px-4 py-3 text-center rounded-l-xl w-16">No</th>
-                  <th className="px-4 py-3 text-left w-24">NPSN</th>
-                  <th className="px-4 py-3 text-left">Nama Sekolah</th>
-                  <th className="px-3 py-3 text-left">Kecamatan</th>
-                  <th className="px-3 py-3 text-pink-600">Jenjang</th>
-                  <th className="px-3 py-3 text-orange-600">Status</th>
-                  <th className="px-4 py-3 text-blue-600">Laki-Laki</th>
-                  <th className="px-4 py-3 text-pink-600">Perempuan</th>
-                  <th className="px-4 py-3 rounded-r-xl text-gray-800">Total Guru</th>
+              ))}
+            </tbody>
+            {activeData.length > 0 && (
+              <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
+                <tr className="bg-pink-100 text-center font-black uppercase text-xs border-t-2 border-pink-200">
+                  <td colSpan={activeModalTab === 'KECAMATAN' ? 2 : 6} className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-pink-200 text-pink-900">
+                    TOTAL KESELURUHAN
+                  </td>
+                  {activeModalTab === 'KECAMATAN' ? (
+                    <>
+                      <td className="px-4 py-4 text-blue-800 text-base border-y border-pink-200">{totalsKecamatan.gen_l.toLocaleString()}</td>
+                      <td className="px-4 py-4 text-pink-800 text-base border-y border-pink-200">{totalsKecamatan.gen_p.toLocaleString()}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="px-4 py-4 text-blue-800 text-base border-y border-pink-200">{totalGuruSekolah.gen_l.toLocaleString()}</td>
+                      <td className="px-4 py-4 text-pink-800 text-base border-y border-pink-200">{totalGuruSekolah.gen_p.toLocaleString()}</td>
+                    </>
+                  )}
+                  <td className="px-4 py-4 text-pink-950 text-lg border-y border-r border-pink-200 rounded-r-2xl bg-pink-200/50">
+                    {activeModalTab === 'KECAMATAN' ? totalsKecamatan.total.toLocaleString() : totalGuruSekolah.total.toLocaleString()}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {currentRows.map((row, idx) => (
-                  <tr key={idx} className="bg-white shadow-sm hover:shadow-md hover:scale-[1.01] transition-all group">
-                    <td className="px-4 py-3 text-center font-bold text-gray-400 text-xs rounded-l-2xl border-y border-l border-gray-100">{startIndex + idx + 1}</td>
-                    <td className="px-4 py-3 font-mono text-gray-500 text-sm text-left border-y border-gray-100">{row.npsn}</td>
-                    <td className="px-4 py-3 font-black text-gray-800 text-sm uppercase text-left border-y border-gray-100">{row.nama_sekolah}</td>
-                    
-                    <td className="px-3 py-3 font-bold text-gray-600 text-xs text-left border-y border-gray-100 uppercase">{row.kecamatan}</td>
-                    <td className="px-3 py-3 font-bold text-pink-600 text-xs border-y border-gray-100 uppercase">{row.jenjang}</td>
-                    <td className="px-3 py-3 font-bold text-orange-600 text-xs border-y border-gray-100 uppercase">{row.status}</td>
-                    
-                    <td className="px-4 py-3 font-bold text-blue-600 text-sm border-y border-gray-100 bg-blue-50/20">{row.gen_l.toLocaleString()}</td>
-                    <td className="px-4 py-3 font-bold text-pink-600 text-sm border-y border-gray-100 bg-pink-50/20">{row.gen_p.toLocaleString()}</td>
-
-                    <td className="px-4 py-3 font-black text-gray-800 text-lg border-y border-r border-gray-100 bg-gray-50/50 rounded-r-2xl">
-                      {row.total.toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              
-              {dataSekolah.length > 0 && (
-                <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
-                  <tr className="bg-pink-100 text-center font-black uppercase text-xs border-t-2 border-pink-200">
-                    <td colSpan="6" className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-pink-200 text-pink-900">
-                      TOTAL GURU DARI {dataSekolah.length} SEKOLAH
-                    </td>
-                    <td className="px-4 py-4 text-blue-800 text-base border-y border-pink-200">{totalGuruSekolah.gen_l.toLocaleString()}</td>
-                    <td className="px-4 py-4 text-pink-800 text-base border-y border-pink-200">{totalGuruSekolah.gen_p.toLocaleString()}</td>
-                    <td className="px-4 py-4 text-pink-950 text-lg border-y border-r border-pink-200 rounded-r-2xl bg-pink-200/50">
-                      {totalGuruSekolah.total.toLocaleString()}
-                    </td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          )}
-          
+              </tfoot>
+            )}
+          </table>
           {activeData.length === 0 && (
              <div className="py-20 flex flex-col items-center opacity-30 text-gray-500">
                <Search size={64} className="mb-4" />
@@ -612,11 +571,7 @@ export default function RincianGenderGuru({
             <p className="text-xs font-bold text-gray-500">
               Menampilkan <span className="text-gray-800">{activeData.length === 0 ? 0 : startIndex + 1}</span> - <span className="text-gray-800">{Math.min(startIndex + rowsPerPage, activeData.length)}</span> dari <span className="text-pink-700 font-black">{activeData.length}</span> baris
             </p>
-            {displayLastUpdated && (
-              <p className="text-[10px] font-bold italic text-gray-400 mt-1">
-                Sumber : Data Dapodik Update Pada {displayLastUpdated}
-              </p>
-            )}
+            <p className="text-[10px] font-bold italic text-gray-400 mt-1">Sumber : Data Dapodik Update Pada {displayLastUpdated}</p>
           </div>
           
           <div className="flex items-center gap-2">

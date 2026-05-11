@@ -13,14 +13,16 @@ const KABUPATEN_LIST = [
   "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
 ];
 
-const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'NON FORMAL'];
+// PEMISAHAN JENJANG SMA DAN SMK
+const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
 
 // BEBAN MAKSIMAL PESERTA DIDIK PER 1 ROMBEL (Permendikdasmen No.14/2026)
 const MAX_PD_PER_ROMBEL = {
   'PAUD': 15,          
   'SD': 28,            
   'SMP': 32,           
-  'SMA/SMK': 36,       
+  'SMA': 36,       
+  'SMK': 36,       
   'SLB (Inklusif)': 8, 
   'NON FORMAL': 30     
 };
@@ -114,13 +116,14 @@ export default function RasioRombelVsPD({ selectedYear }) {
 
       JENJANG_KEYS.forEach(k => {
         const agg = resMap.get(k);
-        agg.rombel_n += (row[`${k}_rombel_n`] || 0);
-        agg.pd_n += (row[`${k}_pd_n`] || 0);
-        agg.rombel_s += (row[`${k}_rombel_s`] || 0);
-        agg.pd_s += (row[`${k}_pd_s`] || 0);
+        const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+        agg.rombel_n += (row[`${baseK}_rombel_n`] || 0);
+        agg.pd_n += (row[`${baseK}_pd_n`] || 0);
+        agg.rombel_s += (row[`${baseK}_rombel_s`] || 0);
+        agg.pd_s += (row[`${baseK}_pd_s`] || 0);
         
-        agg.total_rombel += (row[`${k}_rombel`] || 0);
-        agg.total_pd += (row[`${k}_pd`] || 0);
+        agg.total_rombel += (row[`${baseK}_rombel`] || 0);
+        agg.total_pd += (row[`${baseK}_pd`] || 0);
       });
     });
 
@@ -167,8 +170,9 @@ export default function RasioRombelVsPD({ selectedYear }) {
          }
          const aggRow = mapKab.get(kab);
          JENJANG_KEYS.forEach(k => { 
-             aggRow[`${k}_rombel`] += (row[`${k}_${rombelKey}`] || 0); 
-             aggRow[`${k}_pd`] += (row[`${k}_${pdKey}`] || 0); 
+             const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+             aggRow[`${k}_rombel`] += (row[`${baseK}_${rombelKey}`] || 0); 
+             aggRow[`${k}_pd`] += (row[`${baseK}_${pdKey}`] || 0); 
          });
       });
       return Array.from(mapKab.values()).sort((a, b) => {
@@ -182,8 +186,9 @@ export default function RasioRombelVsPD({ selectedYear }) {
       return filtered.map(row => {
         const mappedRow = { ...row };
         JENJANG_KEYS.forEach(k => {
-           mappedRow[`${k}_rombel`] = row[`${k}_${rombelKey}`] || 0;
-           mappedRow[`${k}_pd`] = row[`${k}_${pdKey}`] || 0;
+           const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+           mappedRow[`${k}_rombel`] = row[`${baseK}_${rombelKey}`] || 0;
+           mappedRow[`${k}_pd`] = row[`${baseK}_${pdKey}`] || 0;
         });
         return mappedRow;
       });
@@ -452,7 +457,8 @@ export default function RasioRombelVsPD({ selectedYear }) {
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> PAUD: Max 15 PD / Rombel</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> SD: Max 28 PD / Rombel</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> SMP: Max 32 PD / Rombel</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> SMA/SMK: Max 36 PD / Rombel</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> SMA: Max 36 PD / Rombel</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> SMK: Max 36 PD / Rombel</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> SLB: Max 8 PD / Rombel</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500"></div> NON FORMAL: Max 30 PD / Rombel</div>
           </div>

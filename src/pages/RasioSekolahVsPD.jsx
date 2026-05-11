@@ -13,14 +13,16 @@ const KABUPATEN_LIST = [
   "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
 ];
 
-const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'NON FORMAL'];
+// PEMISAHAN JENJANG SMA DAN SMK
+const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
 
 // KAPASITAS IDEAL PER 1 SEKOLAH BERDASARKAN PERMENDIKDASMEN 14/2026
 const IDEAL_CAPACITY = {
   'PAUD': 2 * 15,          
   'SD': 6 * 28,            
   'SMP': 3 * 32,           
-  'SMA/SMK': 3 * 36,       
+  'SMA': 3 * 36,       
+  'SMK': 3 * 36,       
   'SLB (Inklusif)': 3 * 8, 
   'NON FORMAL': 3 * 30     
 };
@@ -106,12 +108,14 @@ export default function RasioSekolahVsPD({ selectedYear }) {
       if (!isModeSemua && row.wilayah !== filterWilayah) return;
       JENJANG_KEYS.forEach(k => {
         const agg = resMap.get(k);
-        agg.sek_n += (row[`${k}_sek_n`] || 0);
-        agg.pd_n += (row[`${k}_pd_n`] || 0);
-        agg.sek_s += (row[`${k}_sek_s`] || 0);
-        agg.pd_s += (row[`${k}_pd_s`] || 0);
-        agg.total_sek += (row[`${k}_sek`] || 0);
-        agg.total_pd += (row[`${k}_pd`] || 0);
+        // Tangkap key agregasi mentah, gunakan nama standar dari db
+        const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+        agg.sek_n += (row[`${baseK}_sek_n`] || 0);
+        agg.pd_n += (row[`${baseK}_pd_n`] || 0);
+        agg.sek_s += (row[`${baseK}_sek_s`] || 0);
+        agg.pd_s += (row[`${baseK}_pd_s`] || 0);
+        agg.total_sek += (row[`${baseK}_sek`] || 0);
+        agg.total_pd += (row[`${baseK}_pd`] || 0);
       });
     });
     return Array.from(resMap.values());
@@ -155,8 +159,9 @@ export default function RasioSekolahVsPD({ selectedYear }) {
          }
          const aggRow = mapKab.get(kab);
          JENJANG_KEYS.forEach(k => { 
-             aggRow[`${k}_sek`] += (row[`${k}_${sekKey}`] || 0); 
-             aggRow[`${k}_pd`] += (row[`${k}_${pdKey}`] || 0); 
+             const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+             aggRow[`${k}_sek`] += (row[`${baseK}_${sekKey}`] || 0); 
+             aggRow[`${k}_pd`] += (row[`${baseK}_${pdKey}`] || 0); 
          });
       });
       return Array.from(mapKab.values()).sort((a, b) => {
@@ -170,8 +175,9 @@ export default function RasioSekolahVsPD({ selectedYear }) {
       return filtered.map(row => {
         const mappedRow = { ...row };
         JENJANG_KEYS.forEach(k => {
-           mappedRow[`${k}_sek`] = row[`${k}_${sekKey}`] || 0;
-           mappedRow[`${k}_pd`] = row[`${k}_${pdKey}`] || 0;
+           const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+           mappedRow[`${k}_sek`] = row[`${baseK}_${sekKey}`] || 0;
+           mappedRow[`${k}_pd`] = row[`${baseK}_${pdKey}`] || 0;
         });
         return mappedRow;
       });
@@ -406,7 +412,8 @@ export default function RasioSekolahVsPD({ selectedYear }) {
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> PAUD: Optimal 30 PD / Sekolah</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> SD: Optimal 168 PD / Sekolah</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> SMP: Optimal 96 PD / Sekolah</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> SMA/SMK: Optimal 108 PD / Sekolah</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> SMA: Optimal 108 PD / Sekolah</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> SMK: Optimal 108 PD / Sekolah</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> SLB: Optimal 24 PD / Sekolah</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> NON FORMAL: Optimal 90 PD / Sekolah</div>
           </div>

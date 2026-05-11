@@ -13,14 +13,16 @@ const KABUPATEN_LIST = [
   "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
 ];
 
-const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA/SMK', 'SLB (Inklusif)', 'NON FORMAL'];
+// PEMISAHAN JENJANG SMA DAN SMK
+const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
 
 // Standar Minimal Guru per Sekolah (Acuan Dasar)
 const MIN_GURU_PER_SEKOLAH = {
   'PAUD': 2,
   'SD': 6,
   'SMP': 5,
-  'SMA/SMK': 7,
+  'SMA': 7,
+  'SMK': 7,
   'SLB (Inklusif)': 4,
   'NON FORMAL': 3
 };
@@ -113,13 +115,14 @@ export default function RasioSekolahVsGuru({ selectedYear }) {
 
       JENJANG_KEYS.forEach(k => {
         const agg = resMap.get(k);
-        agg.sek_n += (row[`${k}_sek_n`] || 0);
-        agg.guru_n += (row[`${k}_guru_n`] || 0);
-        agg.sek_s += (row[`${k}_sek_s`] || 0);
-        agg.guru_s += (row[`${k}_guru_s`] || 0);
+        const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+        agg.sek_n += (row[`${baseK}_sek_n`] || 0);
+        agg.guru_n += (row[`${baseK}_guru_n`] || 0);
+        agg.sek_s += (row[`${baseK}_sek_s`] || 0);
+        agg.guru_s += (row[`${baseK}_guru_s`] || 0);
         
-        agg.total_sek += (row[`${k}_sek`] || 0);
-        agg.total_guru += (row[`${k}_guru`] || 0);
+        agg.total_sek += (row[`${baseK}_sek`] || 0);
+        agg.total_guru += (row[`${baseK}_guru`] || 0);
       });
     });
 
@@ -166,8 +169,9 @@ export default function RasioSekolahVsGuru({ selectedYear }) {
          }
          const aggRow = mapKab.get(kab);
          JENJANG_KEYS.forEach(k => { 
-             aggRow[`${k}_sek`] += (row[`${k}_${sekKey}`] || 0); 
-             aggRow[`${k}_guru`] += (row[`${k}_${guruKey}`] || 0); 
+             const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+             aggRow[`${k}_sek`] += (row[`${baseK}_${sekKey}`] || 0); 
+             aggRow[`${k}_guru`] += (row[`${baseK}_${guruKey}`] || 0); 
          });
       });
       return Array.from(mapKab.values()).sort((a, b) => {
@@ -181,8 +185,9 @@ export default function RasioSekolahVsGuru({ selectedYear }) {
       return filtered.map(row => {
         const mappedRow = { ...row };
         JENJANG_KEYS.forEach(k => {
-           mappedRow[`${k}_sek`] = row[`${k}_${sekKey}`] || 0;
-           mappedRow[`${k}_guru`] = row[`${k}_${guruKey}`] || 0;
+           const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
+           mappedRow[`${k}_sek`] = row[`${baseK}_${sekKey}`] || 0;
+           mappedRow[`${k}_guru`] = row[`${baseK}_${guruKey}`] || 0;
         });
         return mappedRow;
       });
@@ -455,7 +460,8 @@ export default function RasioSekolahVsGuru({ selectedYear }) {
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> PAUD: Min. 2 Guru / Sekolah</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SD: Min. 6 Guru / Sekolah</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SMP: Min. 5 Guru / Sekolah</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SMA/SMK: Min. 7 Guru / Sekolah</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SMA: Min. 7 Guru / Sekolah</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SMK: Min. 7 Guru / Sekolah</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SLB: Min. 4 Guru / Sekolah</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> NON FORMAL: Min. 3 Guru / Sekolah</div>
           </div>

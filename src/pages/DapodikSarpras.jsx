@@ -6,6 +6,9 @@ import ExcelJS from 'exceljs';
 import { db } from '../firebase/config';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 
+// IMPORT KOMPONEN MODAL RINCIAN SARPRAS
+import RincianSarpras from './RincianSarpras';
+
 // =====================================================================
 // UTILITY: CACHING LOKAL
 // =====================================================================
@@ -133,6 +136,10 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
   // STATE FILTER & TRANSITION UNTUK PERFORMA HALUS
   const [filterStatusSekolah, setFilterStatusSekolah] = useState('SEMUA'); 
   const [isPending, startTransition] = useTransition();
+
+  // STATE KONTROL MODAL RINCIAN
+  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedWilayah, setSelectedWilayah] = useState('SEMUA');
   
   const [dataSarpras, setDataSarpras] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -179,6 +186,12 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
     startTransition(() => {
       setActiveSubTab(targetTab);
     });
+  };
+
+  // Handler Pembuka Modal
+  const handleBukaRincian = (wilayah) => {
+    setSelectedWilayah(wilayah);
+    setModalOpen(true);
   };
 
   // Engine Agregasi Data
@@ -293,7 +306,6 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
     );
   }
 
-  // Definisi deret Tab Navigasi Compact
   const SUB_TABS = ['SEMUA', 'PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'NON FORMAL'];
 
   return (
@@ -358,7 +370,7 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
                 </span>
               )}
 
-              {/* Dropdown Filter Status Sekolah (Ditambahkan pr-6 sebagai pengaman ekstra Autofill) */}
+              {/* Dropdown Filter Status Sekolah */}
               <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm w-full md:w-auto transition-colors focus-within:border-cyan-500 focus-within:ring-2 focus-within:ring-cyan-100">
                 <Building2 size={16} className="text-gray-400 mr-2 shrink-0" />
                 <select 
@@ -443,7 +455,7 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
                       <td className="px-3 py-3 font-bold text-teal-600 text-sm border-y border-gray-100 bg-teal-50/30">{row.wc_guru.toLocaleString()}</td>
 
                       <td className="px-4 py-3 rounded-r-2xl border-y border-r border-gray-100">
-                         <button onClick={() => alert("Fitur Rincian Sedang Dibangun")} className="flex items-center justify-center gap-2 bg-cyan-50 text-cyan-600 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase hover:bg-cyan-600 hover:text-white transition-colors mx-auto">
+                         <button onClick={() => handleBukaRincian(row.wilayah)} className="flex items-center justify-center gap-2 bg-cyan-50 text-cyan-600 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase hover:bg-cyan-600 hover:text-white transition-colors mx-auto">
                            <Eye size={12} /> Rincian
                          </button>
                       </td>
@@ -465,7 +477,7 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
                     <td className="px-3 py-4 text-emerald-800 border-y border-gray-300">{grandTotals.wc_siswa.toLocaleString()}</td>
                     <td className="px-3 py-4 text-teal-800 border-y border-gray-300">{grandTotals.wc_guru.toLocaleString()}</td>
                     <td className="px-4 py-4 rounded-r-2xl border-y border-r border-gray-300">
-                       <button onClick={() => alert("Fitur Rincian Semua Sedang Dibangun")} className="flex items-center justify-center gap-2 bg-gray-800 text-white px-3 py-1.5 rounded-xl text-[10px] font-black uppercase hover:bg-gray-900 transition-colors mx-auto shadow-md">
+                       <button onClick={() => handleBukaRincian('SEMUA')} className="flex items-center justify-center gap-2 bg-gray-800 text-white px-3 py-1.5 rounded-xl text-[10px] font-black uppercase hover:bg-gray-900 transition-colors mx-auto shadow-md">
                          <Search size={14} /> Semua
                        </button>
                     </td>
@@ -479,6 +491,17 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
           </div>
         )}
       </div>
+
+      {/* KONDISIONAL RENDER MODAL RINCIAN SARPRAS */}
+      <RincianSarpras 
+        isOpen={modalOpen} 
+        onClose={() => setModalOpen(false)}
+        data={dataSarpras}
+        initialWilayah={selectedWilayah}
+        activeJenjang={activeSubTab}
+        filterStatusParent={filterStatusSekolah}
+        displayLastUpdated={`Tahun Data ${selectedYear}`}
+      />
 
     </div>
   );

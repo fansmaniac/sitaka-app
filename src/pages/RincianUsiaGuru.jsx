@@ -5,6 +5,8 @@ import {
   Building2, School
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
+import { db } from '../firebase/config';
+import { collection, query, getDocs } from 'firebase/firestore';
 
 // =====================================================================
 // UTILITY FUNCTIONS
@@ -62,58 +64,102 @@ const getKabupatenRank = (kabName) => {
   return 99;
 };
 
-// SUDAH DIPISAHKAN SMA DAN SMK
-const JENJANG_GROUPS = {
+// =====================================================================
+// MAPPING STRUKTUR KATEGORI BARU (SINKRON DENGAN DAPODIK GURU)
+// =====================================================================
+const KATEGORI_MAPPING = {
   'PAUD': ['TK', 'KB', 'PAUD', 'SPS', 'TPA'],
+  'PENDIDIKAN DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
+  'PENDIDIKAN MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
+  'PENDIDIKAN INKLUSIF': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
+  'PENDIDIKAN NON FORMAL': ['PKBM', 'SKB']
+};
+
+const SEMUA_SUBTABS_MAPPING = {
+  'PAUD': ['TK', 'KB', 'PAUD'],
   'SD': ['SD', 'SPK SD'],
   'SMP': ['SMP', 'SPK SMP'],
   'SMA': ['SMA', 'SPK SMA'],
   'SMK': ['SMK'],
-  'SLB': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
-  'NON FORMAL': ['PKBM', 'SKB']
+  'SLB (Inklusif)': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
+  'NON FORMAL': ['PKBM', 'SKB', 'SPS', 'TPA']
 };
 
-const identifyJenjangGroup = (jenjangDb) => {
-  const j = String(jenjangDb).trim().toUpperCase();
-  for (const [key, arr] of Object.entries(JENJANG_GROUPS)) {
-    if (arr.includes(j)) return key;
+const isJenjangValid = (jenjangDb, targetJenjang) => {
+  if (targetJenjang === 'SEMUA' || targetJenjang === 'SEMUA JENJANG') return true;
+  
+  if (SEMUA_SUBTABS_MAPPING[targetJenjang]) {
+      return SEMUA_SUBTABS_MAPPING[targetJenjang].includes(jenjangDb);
   }
-  return null;
+  if (KATEGORI_MAPPING[targetJenjang]) {
+      return KATEGORI_MAPPING[targetJenjang].includes(jenjangDb);
+  }
+  return jenjangDb === targetJenjang;
 };
 
 // =====================================================================
-// MAIN COMPONENT
+// MAIN COMPONENT: RINCIAN USIA GURU
 // =====================================================================
 export default function RincianUsiaGuru({ 
   isOpen, 
   onClose, 
   data = [], 
   initialWilayah = 'SEMUA', 
-  activeJenjang = 'SEMUA', // Context Header/Awal
+  activeJenjang = 'SEMUA', // Context Header dari Dashboard
   displayLastUpdated 
 }) {
-  // Fungsi penerjemah jenjang
-  const normalizeJenjang = (j) => {
-    if (j === 'SLB (Inklusif)') return 'SLB';
-    return j;
-  };
-
-  const mappedJenjang = normalizeJenjang(activeJenjang);
+  let mappedJenjang = activeJenjang;
+  if (mappedJenjang === 'SLB (Inklusif)') mappedJenjang = 'PENDIDIKAN INKLUSIF';
+  if (mappedJenjang === 'SEMUA') mappedJenjang = 'SEMUA JENJANG';
 
   // STATE MODAL TABS
-  const [activeModalTab, setActiveModalTab] = useState('KECAMATAN'); // 'KECAMATAN' | 'SEKOLAH'
+  const [activeModalTab, setActiveModalTab] = useState('KECAMATAN'); 
   
   // STATE FILTERS
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterWilayah, setFilterWilayah] = useState('SEMUA'); // Tab Kecamatan
-  const [filterWilayahSekolah, setFilterWilayahSekolah] = useState('SEMUA'); // Tab Sekolah
-  const [filterStatus, setFilterStatus] = useState('SEMUA'); // Tab Kecamatan & Sekolah
-  const [activeJenjangTab, setActiveJenjangTab] = useState('SEMUA'); // Tab Menu Jenjang (Khusus Tab Sekolah)
+  const [filterWilayah, setFilterWilayah] = useState('SEMUA'); 
+  const [filterWilayahSekolah, setFilterWilayahSekolah] = useState('SEMUA'); 
+  const [filterStatus, setFilterStatus] = useState('SEMUA'); 
+  const [activeJenjangTab, setActiveJenjangTab] = useState('SEMUA'); 
+
+  // STATE MAPPING NAMA SEKOLAH (NPSN -> Nama Sekolah)
+  const [mapNamaSekolah, setMapNamaSekolah] = useState(new Map());
 
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 15;
 
   const isModeSemua = initialWilayah === 'SEMUA';
+
+  // --- FETCH MAPPING NAMA SEKOLAH SECARA MANDIRI ---
+  useEffect(() => {
+    const fetchNamaSekolah = async () => {
+      try {
+        const q = query(collection(db, 'dapodik_sekolah_chunks'));
+        const snap = await getDocs(q);
+        const newMap = new Map();
+        
+        snap.forEach(doc => {
+          const chunk = doc.data();
+          if (chunk && Array.isArray(chunk.data)) {
+            chunk.data.forEach(s => {
+              const npsn = String(s.npsn || '').trim();
+              const nama = s.nama_satuan_pendidikan || s.nama_sekolah || '';
+              if (npsn && nama) {
+                newMap.set(npsn, nama);
+              }
+            });
+          }
+        });
+        setMapNamaSekolah(newMap);
+      } catch (err) {
+        console.error("Gagal menarik mapping nama sekolah:", err);
+      }
+    };
+
+    if (isOpen) {
+      fetchNamaSekolah();
+    }
+  }, [isOpen]);
 
   // Sinkronisasi saat modal dibuka
   useEffect(() => {
@@ -123,12 +169,12 @@ export default function RincianUsiaGuru({
       setFilterWilayah('SEMUA');
       setFilterWilayahSekolah('SEMUA');
       setFilterStatus('SEMUA');
-      setActiveJenjangTab(mappedJenjang); // Inisialisasi jenjang dari parent
+      setActiveJenjangTab(mappedJenjang); 
       setCurrentPage(1);
     }
   }, [isOpen, mappedJenjang]);
 
-  // Reset pagination saat pencarian atau filter berubah
+  // Reset pagination
   useEffect(() => { 
     setCurrentPage(1); 
   }, [searchTerm, filterWilayah, filterWilayahSekolah, filterStatus, activeJenjangTab, activeModalTab]);
@@ -140,7 +186,19 @@ export default function RincianUsiaGuru({
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen, onClose]);
 
-  // Ekstrak Daftar Wilayah (Kabupaten/Kecamatan) untuk Dropdown Filter
+  // Dinamika Tab Jenjang di dalam Modal
+  const availableTabs = useMemo(() => {
+    if (mappedJenjang === 'SEMUA JENJANG') return Object.keys(KATEGORI_MAPPING);
+    if (SEMUA_SUBTABS_MAPPING[mappedJenjang]) return SEMUA_SUBTABS_MAPPING[mappedJenjang];
+    if (KATEGORI_MAPPING[mappedJenjang]) return KATEGORI_MAPPING[mappedJenjang];
+    
+    for (const [kat, arr] of Object.entries(KATEGORI_MAPPING)) {
+        if (arr.includes(mappedJenjang)) return arr;
+    }
+    return [];
+  }, [mappedJenjang]);
+
+  // Ekstrak Daftar Wilayah
   const listWilayahFilter = useMemo(() => {
     const validData = data.filter(item => {
       if (isModeSemua) return true;
@@ -162,20 +220,13 @@ export default function RincianUsiaGuru({
   const dataKecamatan = useMemo(() => {
     if (!data) return [];
     
-    // Filter Base
     const baseData = data.filter(item => {
       const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
       if (!isModeSemua && kabDb !== initialWilayah) return false;
 
-      // Pada Tab Kecamatan, Jenjang mematuhi mappedJenjang dari Parent
-      if (mappedJenjang !== 'SEMUA') {
-         // SOLUSI BUG: Tambahkan '|| []' agar tidak undefined
-         const validJenjangList = JENJANG_GROUPS[mappedJenjang] || []; 
-         const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
-         if (!validJenjangList.includes(jenjangDb)) return false;
-      }
+      const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+      if (!isJenjangValid(jenjangDb, mappedJenjang)) return false;
 
-      // Filter Status
       if (filterStatus !== 'SEMUA') {
         const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
         if (statusDb !== filterStatus) return false;
@@ -199,7 +250,7 @@ export default function RincianUsiaGuru({
       const row = mapAgg.get(keyId);
       const tglLahir = getVal(item, 'tanggal_lahir');
       const age = calculateAge(tglLahir);
-      
+
       if (age !== null) {
           if (age <= 30) row.usia_30++;
           else if (age <= 40) row.usia_40++;
@@ -233,60 +284,52 @@ export default function RincianUsiaGuru({
   }, [dataKecamatan]);
 
   // =====================================================================
-  // AGREGASI DATA TAB "PER SEKOLAH"
-  // Karena data berasal dari PTK, kita GROUP BY NPSN/Sekolah
+  // AGREGASI DATA TAB "PER SEKOLAH" DENGAN MAPPING NAMA SINKRON
   // =====================================================================
   const dataSekolah = useMemo(() => {
     if (!data) return [];
     
-    let validData = data.filter(item => {
+    const mapSekolah = new Map();
+
+    data.forEach(item => {
       const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
-      if (!isModeSemua && kabDb !== initialWilayah) return false;
+      if (!isModeSemua && kabDb !== initialWilayah) return;
 
       if (filterStatus !== 'SEMUA') {
         const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
-        if (statusDb !== filterStatus) return false;
+        if (statusDb !== filterStatus) return;
       }
 
-      // Mematuhi Tab Jenjang di UI
-      if (activeJenjangTab !== 'SEMUA') {
-        const validJenjangList = JENJANG_GROUPS[activeJenjangTab] || []; 
-        const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
-        if (!validJenjangList.includes(jenjangDb)) return false;
-      }
+      const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+      if (!isJenjangValid(jenjangDb, activeJenjangTab)) return;
 
-      // Filter Wilayah Khusus Tab Sekolah (Kecamatan/Kabupaten)
+      const kecDb = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
       if (filterWilayahSekolah !== 'SEMUA') {
-        let keyId = isModeSemua 
-          ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) 
-          : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
-        if (keyId !== filterWilayahSekolah) return false;
+        let keyId = isModeSemua ? kabDb : kecDb;
+        if (keyId !== filterWilayahSekolah) return;
+      }
+
+      const npsn = getVal(item, 'npsn') || '-';
+      let namaSekolah = getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '';
+      
+      // SUNTIKAN KECERDASAN: Ambil dari mapping jika kosong
+      if (!namaSekolah || namaSekolah === '-') {
+         namaSekolah = mapNamaSekolah.get(String(npsn).trim()) || '-';
       }
 
       if (searchTerm) {
-        const nama = String(getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '').toLowerCase();
-        const npsn = String(getVal(item, 'npsn') || '').toLowerCase();
         const q = searchTerm.toLowerCase();
-        if (!nama.includes(q) && !npsn.includes(q)) return false;
+        if (!namaSekolah.toLowerCase().includes(q) && !String(npsn).toLowerCase().includes(q)) return;
       }
 
-      return true;
-    });
-
-    const mapSekolah = new Map();
-
-    validData.forEach(item => {
-      const npsn = getVal(item, 'npsn');
-      const nama = getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '-';
-      const keyId = npsn || nama; // Fallback jika NPSN kosong
-
-      if (!mapSekolah.has(keyId)) {
-        mapSekolah.set(keyId, {
+      const uniqueKey = `${npsn}_${namaSekolah}`;
+      if (!mapSekolah.has(uniqueKey)) {
+        mapSekolah.set(uniqueKey, {
           npsn: npsn,
-          nama_sekolah: nama,
-          jenjang: getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'),
+          nama_sekolah: namaSekolah,
+          kecamatan: kecDb,
+          jenjang: jenjangDb,
           status: String(getVal(item, 'status_sekolah')).toUpperCase(),
-          kecamatan: String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase(),
           usia_30: 0,
           usia_40: 0,
           usia_50: 0,
@@ -295,7 +338,7 @@ export default function RincianUsiaGuru({
         });
       }
       
-      const row = mapSekolah.get(keyId);
+      const row = mapSekolah.get(uniqueKey);
       const tglLahir = getVal(item, 'tanggal_lahir');
       const age = calculateAge(tglLahir);
 
@@ -309,9 +352,8 @@ export default function RincianUsiaGuru({
       row.total++;
     });
 
-    return Array.from(mapSekolah.values()).sort((a, b) => String(a.nama_sekolah).localeCompare(String(b.nama_sekolah)));
-
-  }, [data, isModeSemua, initialWilayah, filterStatus, activeJenjangTab, filterWilayahSekolah, searchTerm]);
+    return Array.from(mapSekolah.values()).sort((a, b) => a.nama_sekolah.localeCompare(b.nama_sekolah));
+  }, [data, isModeSemua, initialWilayah, filterStatus, activeJenjangTab, filterWilayahSekolah, searchTerm, mapNamaSekolah]);
 
   const totalGuruSekolah = useMemo(() => {
     return dataSekolah.reduce((acc, curr) => {
@@ -329,11 +371,10 @@ export default function RincianUsiaGuru({
   // =====================================================================
   const downloadExcelRincian = async () => {
     const workbook = new ExcelJS.Workbook();
+    const safeName = activeJenjangTab.replace(/\//g, '-');
     
     if (activeModalTab === 'KECAMATAN') {
-      const sheetName = isModeSemua ? 'Rekap Provinsi' : `Rekap ${initialWilayah}`;
-      const worksheet = workbook.addWorksheet(sheetName);
-
+      const worksheet = workbook.addWorksheet('Rekap Usia Wilayah');
       worksheet.columns = [
         { header: isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan', key: 'namaWilayah', width: 30 },
         { header: '<= 30 Thn', key: 'usia_30', width: 15 },
@@ -342,33 +383,18 @@ export default function RincianUsiaGuru({
         { header: '>= 51 Thn', key: 'usia_51', width: 15 },
         { header: 'Total Guru', key: 'total', width: 18 },
       ];
-
       dataKecamatan.forEach(item => worksheet.addRow(item));
-
-      const totalRow = worksheet.addRow({
-        namaWilayah: 'TOTAL KESELURUHAN',
-        usia_30: totalsKecamatan.usia_30,
-        usia_40: totalsKecamatan.usia_40,
-        usia_50: totalsKecamatan.usia_50,
-        usia_51: totalsKecamatan.usia_51,
-        total: totalsKecamatan.total
-      });
-
+      const totalRow = worksheet.addRow({ namaWilayah: 'TOTAL', usia_30: totalsKecamatan.usia_30, usia_40: totalsKecamatan.usia_40, usia_50: totalsKecamatan.usia_50, usia_51: totalsKecamatan.usia_51, total: totalsKecamatan.total });
       worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE11D48' } }; // Rose 600
-      totalRow.font = { bold: true, color: { argb: 'FF881337' } }; // Rose 900
-      totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE4E6' } }; // Rose 100
-
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE11D48' } };
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `Rincian_UsiaGuru_Kecamatan_${initialWilayah}.xlsx`;
+      link.download = `Rincian_Guru_Usia_${initialWilayah}_${safeName}.xlsx`;
       link.click();
     } else {
-      // Tab SEKOLAH
-      const worksheet = workbook.addWorksheet('Daftar Sekolah');
-
+      const worksheet = workbook.addWorksheet('Daftar Sekolah & Usia');
       worksheet.columns = [
         { header: 'NPSN', key: 'npsn', width: 15 },
         { header: 'Nama Sekolah', key: 'nama_sekolah', width: 45 },
@@ -381,17 +407,14 @@ export default function RincianUsiaGuru({
         { header: '>= 51 Thn', key: 'usia_51', width: 12 },
         { header: 'Total Guru', key: 'total', width: 18 },
       ];
-
       dataSekolah.forEach(item => worksheet.addRow(item));
-
       worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE11D48' } }; // Rose 600
-
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE11D48' } };
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `Daftar_Sekolah_UsiaGuru_${initialWilayah}_${activeJenjangTab.replace(' ','_')}.xlsx`;
+      link.download = `Daftar_Guru_Sekolah_Usia_${initialWilayah}_${safeName}.xlsx`;
       link.click();
     }
   };
@@ -402,9 +425,7 @@ export default function RincianUsiaGuru({
   const startIndex = (currentPage - 1) * rowsPerPage;
   const currentRows = activeData.slice(startIndex, startIndex + rowsPerPage);
   
-  const goToPage = (page) => {
-    if (page >= 1 && page <= totalPages) setCurrentPage(page);
-  };
+  const goToPage = (page) => { if (page >= 1 && page <= totalPages) setCurrentPage(page); };
 
   if (!isOpen) return null;
 
@@ -451,16 +472,16 @@ export default function RincianUsiaGuru({
           </button>
         </div>
 
-        {/* TAB JENJANG KHUSUS PER SEKOLAH */}
+        {/* TAB JENJANG KHUSUS PER SEKOLAH (DINAMIS) */}
         {activeModalTab === 'SEKOLAH' && (
           <div className="bg-white px-6 pt-4 pb-0 flex gap-2 overflow-x-auto scrollbar-hide shrink-0 z-10 relative">
             <button 
-              onClick={() => setActiveJenjangTab('SEMUA')}
-              className={`px-5 py-2 rounded-xl font-black uppercase text-[10px] md:text-xs transition-all whitespace-nowrap border ${activeJenjangTab === 'SEMUA' ? 'bg-rose-600 text-white border-rose-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
+              onClick={() => setActiveJenjangTab(mappedJenjang)}
+              className={`px-5 py-2 rounded-xl font-black uppercase text-[10px] md:text-xs transition-all whitespace-nowrap border ${activeJenjangTab === mappedJenjang ? 'bg-rose-600 text-white border-rose-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
             >
-              Semua Jenjang
+              {mappedJenjang === 'SEMUA JENJANG' ? 'Semua Jenjang' : `SEMUA ${mappedJenjang}`}
             </button>
-            {Object.keys(JENJANG_GROUPS).map(j => (
+            {availableTabs.map(j => (
               <button 
                 key={j}
                 onClick={() => setActiveJenjangTab(j)}
@@ -485,37 +506,18 @@ export default function RincianUsiaGuru({
             />
           </div>
 
-          {/* FILTER TAB KECAMATAN */}
-          {activeModalTab === 'KECAMATAN' && (
-            <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
-              <MapPin size={16} className="text-gray-400 mr-2" />
-              <select 
-                value={filterWilayah} 
-                onChange={(e) => setFilterWilayah(e.target.value)} 
-                className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[200px]"
-              >
-                <option value="SEMUA">{isModeSemua ? 'SEMUA KABUPATEN' : 'SEMUA KECAMATAN'}</option>
-                {listWilayahFilter.map(w => <option key={w} value={w}>{w}</option>)}
-              </select>
-            </div>
-          )}
+          <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
+            <MapPin size={16} className="text-gray-400 mr-2" />
+            <select 
+              value={activeModalTab === 'KECAMATAN' ? filterWilayah : filterWilayahSekolah} 
+              onChange={(e) => activeModalTab === 'KECAMATAN' ? setFilterWilayah(e.target.value) : setFilterWilayahSekolah(e.target.value)} 
+              className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[200px]"
+            >
+              <option value="SEMUA">{isModeSemua ? 'SEMUA KABUPATEN' : 'SEMUA KECAMATAN'}</option>
+              {listWilayahFilter.map(w => <option key={w} value={w}>{w}</option>)}
+            </select>
+          </div>
 
-          {/* FILTER TAB SEKOLAH */}
-          {activeModalTab === 'SEKOLAH' && (
-            <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
-              <MapPin size={16} className="text-gray-400 mr-2" />
-              <select 
-                value={filterWilayahSekolah} 
-                onChange={(e) => setFilterWilayahSekolah(e.target.value)} 
-                className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[200px]"
-              >
-                <option value="SEMUA">{isModeSemua ? 'SEMUA KABUPATEN' : 'SEMUA KECAMATAN'}</option>
-                {listWilayahFilter.map(w => <option key={w} value={w}>{w}</option>)}
-              </select>
-            </div>
-          )}
-
-          {/* FILTER STATUS (BERLAKU UNTUK KEDUANYA) */}
           <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
             <Building2 size={16} className="text-gray-400 mr-2" />
             <select 
@@ -557,7 +559,6 @@ export default function RincianUsiaGuru({
                     <td className="px-3 py-4 font-black text-blue-600 text-base border-y border-gray-100 bg-blue-50/30">{row.usia_40.toLocaleString()}</td>
                     <td className="px-3 py-4 font-black text-amber-600 text-base border-y border-gray-100 bg-amber-50/30">{row.usia_50.toLocaleString()}</td>
                     <td className="px-3 py-4 font-black text-red-600 text-base border-y border-gray-100 bg-red-50/20">{row.usia_51.toLocaleString()}</td>
-
                     <td className="px-4 py-4 font-black text-rose-800 text-lg border-y border-r border-gray-100 bg-rose-50/50 rounded-r-2xl">{row.total.toLocaleString()}</td>
                   </tr>
                 ))}

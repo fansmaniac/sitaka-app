@@ -84,6 +84,17 @@ const KATEGORI_MAPPING = {
   'PENDIDIKAN NON FORMAL': ['PKBM', 'TPA', 'SPS', 'SKB']
 };
 
+// PENGELOMPOKAN KHUSUS SUB-TAB KETIKA DROPDOWN MEMILIH "SEMUA JENJANG"
+const SEMUA_SUBTABS_MAPPING = {
+  'PAUD': ['TK', 'KB', 'PAUD'],
+  'SD': ['SD', 'SPK SD'],
+  'SMP': ['SMP', 'SPK SMP'],
+  'SMA': ['SMA', 'SPK SMA'],
+  'SMK': ['SMK'],
+  'SLB (Inklusif)': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
+  'NON FORMAL': ['PKBM', 'SKB', 'SPS', 'TPA']
+};
+
 // =====================================================================
 // PREMIUM PIE CHART COMPONENT
 // =====================================================================
@@ -234,21 +245,26 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
   }, [data]);
 
   // PENENTU LABEL AKTIF UNTUK EXPORT & PIE CHART
-  const activeLabel = activeKategori === 'SEMUA' ? 'SEMUA JENJANG' : (activeBentuk === 'SEMUA' ? activeKategori : activeBentuk);
+  const activeLabel = activeKategori === 'SEMUA' ? (activeBentuk === 'SEMUA' ? 'SEMUA JENJANG' : activeBentuk) : (activeBentuk === 'SEMUA' ? activeKategori : activeBentuk);
 
   // ENGINE AGREGASI RAKSASA UNTUK 7 TABS
   const aggregatedData = useMemo(() => {
     const filteredData = data.filter(item => {
       const bentukDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
       
-      // LOGIKA FILTER BARU BERDASARKAN KATEGORI DROPDOWN DAN BENTUK PENDIDIKAN
-      if (activeKategori !== 'SEMUA') {
-        if (activeBentuk !== 'SEMUA') {
-           if (bentukDb !== activeBentuk) return false;
-        } else {
-           const allowedBentuk = KATEGORI_MAPPING[activeKategori] || [];
-           if (!allowedBentuk.includes(bentukDb)) return false;
-        }
+      // LOGIKA FILTER UNIVERSAL ADAPTIF (Mendukung Sub-Tab Mode Semua Jenjang)
+      if (activeKategori === 'SEMUA') {
+         if (activeBentuk !== 'SEMUA') {
+            const allowed = SEMUA_SUBTABS_MAPPING[activeBentuk] || [];
+            if (!allowed.includes(bentukDb)) return false;
+         }
+      } else {
+         if (activeBentuk !== 'SEMUA') {
+            if (bentukDb !== activeBentuk) return false;
+         } else {
+            const allowedBentuk = KATEGORI_MAPPING[activeKategori] || [];
+            if (!allowedBentuk.includes(bentukDb)) return false;
+         }
       }
       return true;
     });
@@ -535,16 +551,16 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
            </div>
         </div>
 
-        {/* TABS SUB-JENJANG (BENTUK PENDIDIKAN) */}
-        {activeKategori !== 'SEMUA' && (
-          <div className="flex items-center gap-1.5 md:gap-2 overflow-x-auto pb-1 mt-1">
-            <button 
-              onClick={() => setActiveBentuk('SEMUA')} 
-              className={`px-4 py-1.5 rounded-lg font-black text-[10px] md:text-xs transition-all duration-300 whitespace-nowrap border ${activeBentuk === 'SEMUA' ? 'bg-gray-800 text-white border-gray-800 shadow-md' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
-            >
-              SEMUA {activeKategori}
-            </button>
-            {KATEGORI_MAPPING[activeKategori].map(tab => (
+        {/* TABS SUB-JENJANG (BENTUK PENDIDIKAN DINAMIS UTAMA & SEMUA) */}
+        <div className="flex items-center gap-1.5 md:gap-2 overflow-x-auto pb-1 mt-1">
+          <button 
+            onClick={() => setActiveBentuk('SEMUA')} 
+            className={`px-4 py-1.5 rounded-lg font-black text-[10px] md:text-xs transition-all duration-300 whitespace-nowrap border ${activeBentuk === 'SEMUA' ? 'bg-gray-800 text-white border-gray-800 shadow-md' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
+          >
+            Semua {activeKategori === 'SEMUA' ? 'Jenjang' : activeKategori}
+          </button>
+          {activeKategori === 'SEMUA' ? (
+            Object.keys(SEMUA_SUBTABS_MAPPING).map(tab => (
               <button 
                 key={tab} 
                 onClick={() => setActiveBentuk(tab)} 
@@ -552,9 +568,19 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
               >
                 {tab}
               </button>
-            ))}
-          </div>
-        )}
+            ))
+          ) : (
+            KATEGORI_MAPPING[activeKategori].map(tab => (
+              <button 
+                key={tab} 
+                onClick={() => setActiveBentuk(tab)} 
+                className={`px-4 py-1.5 rounded-lg font-black text-[10px] md:text-xs transition-all duration-300 whitespace-nowrap border ${activeBentuk === tab ? 'bg-gray-800 text-white border-gray-800 shadow-md' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
+              >
+                {tab}
+              </button>
+            ))
+          )}
+        </div>
       </div>
 
       <div className="flex-1 flex flex-col lg:flex-row min-h-0 bg-gray-50/50">
@@ -633,42 +659,44 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
                     </tr>
                   ))}
                 </tbody>
-                <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
-                  <tr className="bg-gray-100 text-center font-black uppercase text-xs border-t-2 border-gray-300 whitespace-nowrap">
-                    <td className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-gray-300 text-gray-900">TOTAL KALIMANTAN BARAT</td>
-                    
-                    {activeView === 'STATUS' && (
-                      <><td className="px-4 py-4 text-blue-700 border-y border-gray-300">{grandTotals.status_n.toLocaleString()}</td><td className="px-4 py-4 text-orange-700 border-y border-gray-300">{grandTotals.status_s.toLocaleString()}</td></>
-                    )}
-                    {activeView === 'GENDER' && (
-                      <><td className="px-4 py-4 text-blue-700 border-y border-gray-300">{grandTotals.gen_l.toLocaleString()}</td><td className="px-4 py-4 text-pink-700 border-y border-gray-300">{grandTotals.gen_p.toLocaleString()}</td></>
-                    )}
-                    {activeView === 'KUALIFIKASI' && (
-                      <><td className="px-3 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.kual_s1.toLocaleString()}</td><td className="px-3 py-4 text-blue-700 border-y border-gray-300">{grandTotals.kual_s2.toLocaleString()}</td><td className="px-3 py-4 text-amber-700 border-y border-gray-300">{grandTotals.kual_kurang.toLocaleString()}</td><td className="px-3 py-4 text-gray-600 border-y border-gray-300">{grandTotals.kual_lain.toLocaleString()}</td></>
-                    )}
-                    {activeView === 'KEPEGAWAIAN' && (
-                      <><td className="px-3 py-4 text-blue-700 border-y border-gray-300">{grandTotals.peg_pns.toLocaleString()}</td><td className="px-3 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.peg_pppk.toLocaleString()}</td><td className="px-3 py-4 text-orange-700 border-y border-gray-300">{grandTotals.peg_gty.toLocaleString()}</td><td className="px-3 py-4 text-red-700 border-y border-gray-300">{grandTotals.peg_honor.toLocaleString()}</td><td className="px-3 py-4 text-gray-600 border-y border-gray-300">{grandTotals.peg_lain.toLocaleString()}</td></>
-                    )}
-                    {activeView === 'SERTIFIKASI' && (
-                      <><td className="px-4 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.sert_sudah.toLocaleString()}</td><td className="px-4 py-4 text-red-700 border-y border-gray-300">{grandTotals.sert_belum.toLocaleString()}</td></>
-                    )}
-                    {activeView === 'USIA' && (
-                      <><td className="px-3 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.usia_30.toLocaleString()}</td><td className="px-3 py-4 text-blue-700 border-y border-gray-300">{grandTotals.usia_40.toLocaleString()}</td><td className="px-3 py-4 text-amber-700 border-y border-gray-300">{grandTotals.usia_50.toLocaleString()}</td><td className="px-3 py-4 text-red-700 border-y border-gray-300">{grandTotals.usia_51.toLocaleString()}</td></>
-                    )}
-                    {activeView === 'PENSIUN' && (
-                      <><td className="px-2 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.pens_5.toLocaleString()}</td><td className="px-2 py-4 text-blue-700 border-y border-gray-300">{grandTotals.pens_4.toLocaleString()}</td><td className="px-2 py-4 text-amber-700 border-y border-gray-300">{grandTotals.pens_3.toLocaleString()}</td><td className="px-2 py-4 text-orange-700 border-y border-gray-300">{grandTotals.pens_2.toLocaleString()}</td><td className="px-2 py-4 text-red-700 border-y border-gray-300">{grandTotals.pens_1.toLocaleString()}</td></>
-                    )}
+                {aggregatedData.length > 0 && (
+                  <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
+                    <tr className="bg-gray-100 text-center font-black uppercase text-xs border-t-2 border-gray-300 whitespace-nowrap">
+                      <td className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-gray-300 text-gray-900">TOTAL KALIMANTAN BARAT</td>
+                      
+                      {activeView === 'STATUS' && (
+                        <><td className="px-4 py-4 text-blue-700 border-y border-gray-300">{grandTotals.status_n.toLocaleString()}</td><td className="px-4 py-4 text-orange-700 border-y border-gray-300">{grandTotals.status_s.toLocaleString()}</td></>
+                      )}
+                      {activeView === 'GENDER' && (
+                        <><td className="px-4 py-4 text-blue-700 border-y border-gray-300">{grandTotals.gen_l.toLocaleString()}</td><td className="px-4 py-4 text-pink-700 border-y border-gray-300">{grandTotals.gen_p.toLocaleString()}</td></>
+                      )}
+                      {activeView === 'KUALIFIKASI' && (
+                        <><td className="px-3 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.kual_s1.toLocaleString()}</td><td className="px-3 py-4 text-blue-700 border-y border-gray-300">{grandTotals.kual_s2.toLocaleString()}</td><td className="px-3 py-4 text-amber-700 border-y border-gray-300">{grandTotals.kual_kurang.toLocaleString()}</td><td className="px-3 py-4 text-gray-600 border-y border-gray-300">{grandTotals.kual_lain.toLocaleString()}</td></>
+                      )}
+                      {activeView === 'KEPEGAWAIAN' && (
+                        <><td className="px-3 py-4 text-blue-700 border-y border-gray-300">{grandTotals.peg_pns.toLocaleString()}</td><td className="px-3 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.peg_pppk.toLocaleString()}</td><td className="px-3 py-4 text-orange-700 border-y border-gray-300">{grandTotals.peg_gty.toLocaleString()}</td><td className="px-3 py-4 text-red-700 border-y border-gray-300">{grandTotals.peg_honor.toLocaleString()}</td><td className="px-3 py-4 text-gray-600 border-y border-gray-300">{grandTotals.peg_lain.toLocaleString()}</td></>
+                      )}
+                      {activeView === 'SERTIFIKASI' && (
+                        <><td className="px-4 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.sert_sudah.toLocaleString()}</td><td className="px-4 py-4 text-red-700 border-y border-gray-300">{grandTotals.sert_belum.toLocaleString()}</td></>
+                      )}
+                      {activeView === 'USIA' && (
+                        <><td className="px-3 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.usia_30.toLocaleString()}</td><td className="px-3 py-4 text-blue-700 border-y border-gray-300">{grandTotals.usia_40.toLocaleString()}</td><td className="px-3 py-4 text-amber-700 border-y border-gray-300">{grandTotals.usia_50.toLocaleString()}</td><td className="px-3 py-4 text-red-700 border-y border-gray-300">{grandTotals.usia_51.toLocaleString()}</td></>
+                      )}
+                      {activeView === 'PENSIUN' && (
+                        <><td className="px-2 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.pens_5.toLocaleString()}</td><td className="px-2 py-4 text-blue-700 border-y border-gray-300">{grandTotals.pens_4.toLocaleString()}</td><td className="px-2 py-4 text-amber-700 border-y border-gray-300">{grandTotals.pens_3.toLocaleString()}</td><td className="px-2 py-4 text-orange-700 border-y border-gray-300">{grandTotals.pens_2.toLocaleString()}</td><td className="px-2 py-4 text-red-700 border-y border-gray-300">{grandTotals.pens_1.toLocaleString()}</td></>
+                      )}
 
-                    <td className="px-4 py-4 text-gray-900 border-y border-gray-300 text-base">
-                      {activeView === 'PENSIUN' ? (grandTotals.pens_1 + grandTotals.pens_2 + grandTotals.pens_3 + grandTotals.pens_4 + grandTotals.pens_5).toLocaleString() : grandTotals.total.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-4 rounded-r-2xl border-y border-r border-gray-300">
-                       <button onClick={() => handleBukaRincian('SEMUA')} className="flex items-center justify-center gap-2 bg-gray-800 text-white px-3 py-1.5 rounded-xl text-[10px] font-black uppercase hover:bg-gray-900 transition-colors mx-auto shadow-md">
-                         <Search size={14} /> Semua
-                       </button>
-                    </td>
-                  </tr>
-                </tfoot>
+                      <td className="px-4 py-4 text-gray-900 border-y border-gray-300 text-base">
+                        {activeView === 'PENSIUN' ? (grandTotals.pens_1 + grandTotals.pens_2 + grandTotals.pens_3 + grandTotals.pens_4 + grandTotals.pens_5).toLocaleString() : grandTotals.total.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-4 rounded-r-2xl border-y border-r border-gray-300">
+                         <button onClick={() => handleBukaRincian('SEMUA')} className="flex items-center justify-center gap-2 bg-gray-800 text-white px-3 py-1.5 rounded-xl text-[10px] font-black uppercase hover:bg-gray-900 transition-colors mx-auto shadow-md">
+                           <Search size={14} /> Semua
+                         </button>
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
               <div className="mt-4 px-2 text-right text-xs font-bold italic text-gray-400 pb-2">
                  Sumber : Data Dapodik PTK Update Pada Tanggal : {displayLastUpdated}

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useTransition } from 'react';
 import { 
   Building2, HardHat, FileSpreadsheet, Search, Eye, Loader2, AlertCircle
 } from 'lucide-react';
@@ -95,15 +95,15 @@ const getKabupatenRank = (kabName) => {
   return 99;
 };
 
-// PEMISAHAN JENJANG SMA DAN SMK
+// PEMISAHAN JENJANG STRUKTUR COMPACT
 const JENJANG_GROUPS = {
-  'PAUD': ['KB', 'TK'],
+  'PAUD': ['KB', 'TK', 'SPS', 'TPA', 'PAUD'],
   'SD': ['SD', 'SPK SD'],
   'SMP': ['SMP', 'SPK SMP'],
   'SMA': ['SMA', 'SPK SMA'],
   'SMK': ['SMK'],
   'SLB': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
-  'NON FORMAL': ['PKBM', 'SPS', 'SKB', 'TPA']
+  'NON FORMAL': ['PKBM', 'SKB']
 };
 
 const identifyJenjangGroup = (jenjangDb) => {
@@ -114,21 +114,25 @@ const identifyJenjangGroup = (jenjangDb) => {
   return null;
 };
 
-// Fungsi Hitung Ruangan Layak Pakai (Semua kondisi KECUALI "Tidak Bisa Dipakai")
+// Fungsi Hitung Ruangan Layak Pakai
 const sumUsableRooms = (item, prefix) => {
   const baik = parseInt(getVal(item, `${prefix}_baik`)) || 0;
   const rr = parseInt(getVal(item, `${prefix}_rusak_ringan`)) || 0;
   const rs = parseInt(getVal(item, `${prefix}_rusak_sedang`)) || 0;
   const rb = parseInt(getVal(item, `${prefix}_rusak_berat`)) || 0;
-  return baik + rr + rs + rb; // Tidak bisa dipakai diabaikan
+  return baik + rr + rs + rb; 
 };
 
 // =====================================================================
 // MAIN COMPONENT
 // =====================================================================
 export default function DapodikSarpras({ selectedYear = '2026' }) {
-  const [activeMainTab, setActiveMainTab] = useState('JUMLAH'); // JUMLAH, KESENJANGAN
+  const [activeMainTab, setActiveMainTab] = useState('JUMLAH'); 
   const [activeSubTab, setActiveSubTab] = useState('SEMUA'); 
+  
+  // STATE FILTER & TRANSITION UNTUK PERFORMA HALUS
+  const [filterStatusSekolah, setFilterStatusSekolah] = useState('SEMUA'); 
+  const [isPending, startTransition] = useTransition();
   
   const [dataSarpras, setDataSarpras] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -137,7 +141,7 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
-      const cacheKey = `sarpras_modul_${selectedYear}`;
+      const cacheKey = `sarpras_modul_v3_${selectedYear}`;
       
       try {
         const cachedData = await getFromCache(cacheKey);
@@ -147,7 +151,7 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
           return;
         }
 
-        const q = query(collection(db, 'data_sarpras'), where("tahun_data", "==", selectedYear));
+        const q = query(collection(db, 'data_sarpras_chunks'), where("tahun_data", "==", selectedYear));
         const snap = await getDocs(q);
         const freshData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
@@ -163,57 +167,69 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
     fetchData();
   }, [selectedYear]);
 
+  // Handler Perubahan Filter dengan Concurrent Mode (Mencegah UI Freeze)
+  const handleStatusChange = (e) => {
+    const nextVal = e.target.value;
+    startTransition(() => {
+      setFilterStatusSekolah(nextVal);
+    });
+  };
+
+  const handleSubTabChange = (targetTab) => {
+    startTransition(() => {
+      setActiveSubTab(targetTab);
+    });
+  };
+
   // Engine Agregasi Data
   const aggregatedData = useMemo(() => {
-    if (activeMainTab !== 'JUMLAH') return [];
-
-    const validData = dataSarpras.filter(item => {
-      const group = identifyJenjangGroup(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'));
-      if (activeSubTab === 'SEMUA') return group !== null; // Jika SEMUA, ambil semua jenjang yang terdefinisi
-      return group === activeSubTab;
-    });
+    if (activeMainTab !== 'JUMLAH' || !dataSarpras) return [];
 
     const mapAgg = new Map();
     KABUPATEN_LIST.forEach(kab => {
       mapAgg.set(kab, {
         wilayah: kab,
-        kelas: 0,
-        perpus: 0,
-        lab_komputer: 0,
-        lab_bahasa: 0,
-        lab_ipa: 0,
-        lab_fisika: 0,
-        lab_biologi: 0,
-        kepsek: 0,
-        guru: 0,
-        wc_siswa: 0,
-        wc_guru: 0
+        kelas: 0, perpus: 0, lab_komputer: 0, lab_bahasa: 0,
+        lab_ipa: 0, lab_fisika: 0, lab_biologi: 0, kepsek: 0,
+        guru: 0, wc_siswa: 0, wc_guru: 0
       });
     });
 
-    validData.forEach(item => {
-      const kab = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
-      if (!mapAgg.has(kab)) return;
+    dataSarpras.forEach(chunk => {
+      if (chunk && Array.isArray(chunk.data)) {
+        chunk.data.forEach(item => {
+          if (filterStatusSekolah !== 'SEMUA') {
+            const statusDb = String(getVal(item, 'status_sekolah') || '').toUpperCase();
+            if (statusDb !== filterStatusSekolah) return;
+          }
 
-      const row = mapAgg.get(kab);
-      
-      row.kelas += sumUsableRooms(item, 'ruang_kelas');
-      row.perpus += sumUsableRooms(item, 'ruang_perpustakaan');
-      row.lab_komputer += sumUsableRooms(item, 'ruang_lab_komputer');
-      row.lab_bahasa += sumUsableRooms(item, 'ruang_lab_bahasa');
-      row.lab_ipa += sumUsableRooms(item, 'ruang_lab_ipa');
-      row.lab_fisika += sumUsableRooms(item, 'ruang_lab_fisika');
-      row.lab_biologi += sumUsableRooms(item, 'ruang_lab_biologi');
-      row.kepsek += sumUsableRooms(item, 'ruang_ruang_kepsek');
-      row.guru += sumUsableRooms(item, 'ruang_ruang_guru');
-      
-      // WC Gabungan L/P
-      row.wc_siswa += sumUsableRooms(item, 'ruang_wc_siswa_laki_laki') + sumUsableRooms(item, 'ruang_wc_siswa_perempuan');
-      row.wc_guru += sumUsableRooms(item, 'ruang_wc_guru_laki_laki') + sumUsableRooms(item, 'ruang_wc_guru_perempuan');
+          const group = identifyJenjangGroup(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'));
+          if (activeSubTab !== 'SEMUA' && group !== activeSubTab) return;
+          if (activeSubTab === 'SEMUA' && group === null) return;
+
+          const kab = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+          if (!mapAgg.has(kab)) return;
+
+          const row = mapAgg.get(kab);
+          
+          row.kelas += sumUsableRooms(item, 'ruang_kelas');
+          row.perpus += sumUsableRooms(item, 'ruang_perpustakaan');
+          row.lab_komputer += sumUsableRooms(item, 'ruang_lab_komputer');
+          row.lab_bahasa += sumUsableRooms(item, 'ruang_lab_bahasa');
+          row.lab_ipa += sumUsableRooms(item, 'ruang_lab_ipa');
+          row.lab_fisika += sumUsableRooms(item, 'ruang_lab_fisika');
+          row.lab_biologi += sumUsableRooms(item, 'ruang_lab_biologi');
+          row.kepsek += sumUsableRooms(item, 'ruang_ruang_kepsek');
+          row.guru += sumUsableRooms(item, 'ruang_ruang_guru');
+          
+          row.wc_siswa += sumUsableRooms(item, 'ruang_wc_siswa_laki_laki') + sumUsableRooms(item, 'ruang_wc_siswa_perempuan');
+          row.wc_guru += sumUsableRooms(item, 'ruang_wc_guru_laki_laki') + sumUsableRooms(item, 'ruang_wc_guru_perempuan');
+        });
+      }
     });
 
     return Array.from(mapAgg.values()).sort((a, b) => getKabupatenRank(a.wilayah) - getKabupatenRank(b.wilayah));
-  }, [dataSarpras, activeMainTab, activeSubTab]);
+  }, [dataSarpras, activeMainTab, activeSubTab, filterStatusSekolah]);
 
   const grandTotals = useMemo(() => {
     return aggregatedData.reduce((acc, curr) => {
@@ -255,7 +271,7 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
     const totalRow = worksheet.addRow({ wilayah: 'TOTAL KESELURUHAN', ...grandTotals });
 
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0891B2' } }; // Teal 600
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0891B2' } }; 
     totalRow.font = { bold: true, color: { argb: 'FF134E4A' } }; 
     totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCFBF1' } };
 
@@ -263,8 +279,8 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    const fileNameSuffix = activeSubTab === 'SEMUA' ? 'Semua_Jenjang' : activeSubTab.replace(' ', '_');
-    link.download = `Rekap_Sarpras_LayakPakai_${fileNameSuffix}_${selectedYear}.xlsx`;
+    const fileNameSuffix = activeSubTab === 'SEMUA' ? 'Semua_Jenjang' : activeSubTab.replace(/\//g, '_');
+    link.download = `Rekap_Sarpras_LayakPakai_${filterStatusSekolah}_${fileNameSuffix}_${selectedYear}.xlsx`;
     link.click();
   };
 
@@ -277,8 +293,8 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
     );
   }
 
-  // Definisikan urutan tab termasuk "SEMUA" di awal
-  const SUB_TABS = ['SEMUA', ...Object.keys(JENJANG_GROUPS)];
+  // Definisi deret Tab Navigasi Compact
+  const SUB_TABS = ['SEMUA', 'PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'NON FORMAL'];
 
   return (
     <div className="h-full flex flex-col animate-in fade-in duration-500">
@@ -314,33 +330,69 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
           </div>
         </div>
 
-        {/* Sub Tabs (Hanya Muncul di Tab Jumlah Sarpras) */}
+        {/* Sub Tabs & Kontrol Unduh/Filter */}
         {activeMainTab === 'JUMLAH' && (
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            
+            {/* Navigasi Jenjang Compact */}
             <div className="flex items-center gap-1.5 md:gap-2 overflow-x-auto pb-1 custom-scrollbar w-full md:w-auto">
               {SUB_TABS.map(jenjang => (
                 <button 
                   key={jenjang} 
-                  onClick={() => setActiveSubTab(jenjang)} 
+                  onClick={() => handleSubTabChange(jenjang)} 
                   className={`px-4 py-2 rounded-lg font-black text-[10px] md:text-xs transition-all duration-300 whitespace-nowrap border uppercase tracking-wider ${activeSubTab === jenjang ? 'bg-cyan-800 text-white border-cyan-800 shadow-md' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
                 >
-                  {jenjang === 'SEMUA' ? 'Semua Jenjang' : `Jenjang ${jenjang}`}
+                  {jenjang === 'SEMUA' ? 'Semua Jenjang' : jenjang}
                 </button>
               ))}
             </div>
 
-            <button onClick={downloadExcel} className="flex items-center justify-center gap-2 bg-cyan-50 text-cyan-700 hover:bg-cyan-600 hover:text-white px-5 py-2.5 rounded-xl font-black uppercase text-[10px] md:text-xs shadow-sm border border-cyan-200 transition-all active:scale-95 shrink-0 w-full md:w-auto">
-              <FileSpreadsheet size={16} /> Unduh Format Excel
-            </button>
+            {/* Kontrol Kanan: Dropdown Status & Tombol Unduh */}
+            <div className="flex items-center gap-3 w-full md:w-auto relative">
+              
+              {/* Indikator Loading Transisi Halus */}
+              {isPending && (
+                <span className="absolute -left-6 top-1/2 -translate-y-1/2 flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+                </span>
+              )}
+
+              {/* Dropdown Filter Status Sekolah (Ditambahkan pr-6 sebagai pengaman ekstra Autofill) */}
+              <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm w-full md:w-auto transition-colors focus-within:border-cyan-500 focus-within:ring-2 focus-within:ring-cyan-100">
+                <Building2 size={16} className="text-gray-400 mr-2 shrink-0" />
+                <select 
+                  name="statusFilterSecured"
+                  id="statusFilterSecured"
+                  autoComplete="off"
+                  defaultValue={filterStatusSekolah} 
+                  onChange={handleStatusChange} 
+                  className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer w-full pr-6 leading-tight tracking-wide"
+                >
+                  <option value="SEMUA">Semua Status</option>
+                  <option value="NEGERI">Negeri</option>
+                  <option value="SWASTA">Swasta</option>
+                </select>
+              </div>
+
+              {/* Tombol Unduh Format Excel */}
+              <button 
+                onClick={downloadExcel} 
+                className="flex items-center justify-center gap-2 bg-cyan-50 text-cyan-700 hover:bg-cyan-600 hover:text-white px-5 py-2.5 rounded-xl font-black uppercase text-[10px] md:text-xs shadow-sm border border-cyan-200 transition-all active:scale-95 shrink-0 w-full md:w-auto"
+              >
+                <FileSpreadsheet size={16} /> Unduh Format Excel
+              </button>
+            </div>
+
           </div>
         )}
       </div>
 
       {/* KONTEN UTAMA */}
-      <div className="flex-1 flex flex-col bg-gray-50/50 p-4 md:p-6 min-h-0 overflow-hidden">
+      <div className={`flex-1 flex flex-col bg-gray-50/50 p-4 md:p-6 min-h-0 overflow-hidden transition-opacity duration-200 ${isPending ? 'opacity-60' : 'opacity-100'}`}>
         
         {activeMainTab === 'KESENJANGAN' ? (
-          // TAMPILAN KESENJANGAN (DALAM PENGEMBANGAN)
+          // TAMPILAN KESENJANGAN
           <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-3xl border border-gray-100 shadow-sm text-center p-8 animate-in zoom-in-95 duration-300">
              <div className="bg-amber-100 p-6 rounded-full text-amber-500 mb-6 relative">
                 <HardHat size={64} />

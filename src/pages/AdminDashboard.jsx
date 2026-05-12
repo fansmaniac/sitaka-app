@@ -5,7 +5,7 @@ import {
   FileText, Layers, CheckCircle, Download, Trash2, Building2, Calculator, Activity
 } from 'lucide-react';
 import { db } from '../firebase/config';
-import { collection, doc, query, where, getDocs, limit, setDoc, deleteDoc } from 'firebase/firestore';
+import { collection, doc, query, where, getDocs, limit, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 import { readExcel } from '../utils/excelHelper';
 import ExcelJS from 'exceljs';
 
@@ -33,7 +33,7 @@ const cleanKabupatenName = (rawName) => {
 };
 
 // =====================================================================
-// PERBAIKAN: PEMISAHAN JENJANG SMA DAN SMK PADA MESIN UTAMA ADMIN
+// PEMISAHAN JENJANG SMA DAN SMK PADA MESIN UTAMA ADMIN
 // =====================================================================
 const JENJANG_GROUPS = {
   'PAUD': ['TK', 'KB', 'SPS', 'TPA', 'PAUD'],
@@ -118,6 +118,7 @@ export default function AdminDashboard({ Header }) {
      if (adminView === 'kalkulasi') checkCalcStatus(); 
   }, [adminView]);
 
+  // --- PENGHAPUSAN MENGGUNAKAN BATCH COMMIT ---
   const handleDeleteData = async (target) => {
     const confirmDelete = window.confirm(`PERINGATAN KERAS!\n\nYakin Menghapus Database ${target.label} Tahun ${target.year}?\nData yang dihapus tidak bisa dikembalikan.`);
     if (!confirmDelete) return;
@@ -139,9 +140,19 @@ export default function AdminDashboard({ Header }) {
 
       const allDocs = snapshot.docs;
       const totalDocs = allDocs.length;
+      let delBatch = writeBatch(db);
+      let delCount = 0;
       
       for (let i = 0; i < totalDocs; i++) {
-        await deleteDoc(allDocs[i].ref);
+        delBatch.delete(allDocs[i].ref);
+        delCount++;
+        // Commit penghapusan per 100 dokumen agar payload tidak bengkak
+        if (delCount === 100 || i === totalDocs - 1) {
+          await delBatch.commit();
+          delBatch = writeBatch(db);
+          delCount = 0;
+          await new Promise(r => setTimeout(r, 100)); 
+        }
         setUploadProgress(Math.round(((i + 1) / totalDocs) * 100));
       }
 
@@ -155,6 +166,7 @@ export default function AdminDashboard({ Header }) {
     }
   };
 
+  // --- MESIN UPLOAD MICRO-BATCHING DENGAN REGEX HEADER STANDARDIZER ---
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -170,9 +182,9 @@ export default function AdminDashboard({ Header }) {
          const mapUnique = new Map();
          jsonData.forEach(item => {
             const keys = Object.keys(item);
-            const statusTugasKey = keys.find(k => k.toLowerCase() === 'status_tugas' || k.toLowerCase() === 'ptk_induk');
-            const jenisPtkKey = keys.find(k => k.toLowerCase() === 'jenis_ptk'); 
-            const nikKey = keys.find(k => k.toLowerCase() === 'nik');
+            const statusTugasKey = keys.find(k => k.trim().toLowerCase() === 'status_tugas' || k.trim().toLowerCase() === 'ptk_induk');
+            const jenisPtkKey = keys.find(k => k.trim().toLowerCase() === 'jenis_ptk'); 
+            const nikKey = keys.find(k => k.trim().toLowerCase() === 'nik');
             
             const isGuru = jenisPtkKey ? /guru/i.test(String(item[jenisPtkKey])) : false;
             const isInduk = statusTugasKey ? (String(item[statusTugasKey]).trim().toUpperCase() === 'INDUK' || String(item[statusTugasKey]).trim() === '1') : false;
@@ -190,26 +202,41 @@ export default function AdminDashboard({ Header }) {
                   'status_kepegawaian', 'bentuk_pendidikan', 'status_sekolah'
                 ];
                 keys.forEach(k => {
-                   if (allowedKeys.includes(k.toLowerCase())) filteredItem[k] = item[k];
+                   // Mendukung variasi spasi pada nama header di file mentah
+                   const normalizedK = k.trim().toLowerCase().replace(/\s+/g, '_');
+                   if (allowedKeys.includes(normalizedK)) {
+                      filteredItem[normalizedK] = item[k];
+                   }
                 });
                 mapUnique.set(docId, filteredItem);
             }
          });
          jsonData = Array.from(mapUnique.values());
-
-         if(jsonData.length === 0) {
-            console.warn("Peringatan: File PTK terbaca, tapi tidak ada satupun data 'Guru' dengan status 'Induk' di dalamnya.");
-         }
       }
 
+      // STANDARDISASI ATRIBUT UNTUK SEKOLAH DAN SARPRAS (MENANGKAP VARIASI HEADER)
       if (activeTarget.collection === 'dapodik_sekolah' || activeTarget.collection === 'data_sarpras') {
          const mapUniqueSekolah = new Map();
          jsonData.forEach(item => {
             const keys = Object.keys(item);
-            const npsnKey = keys.find(k => k.toLowerCase() === 'npsn');
+            const npsnKey = keys.find(k => k.trim().toLowerCase() === 'npsn');
+            
+            // PENGAMAN ABSOLUT: Mendeteksi "Status Sekolah", "status sekolah", atau "status_sekolah"
+            const statusKey = keys.find(k => {
+               const cleanH = k.trim().toLowerCase().replace(/\s+/g, '_');
+               return cleanH === 'status_sekolah' || cleanH === 'status';
+            });
+            
             const npsn = npsnKey ? String(item[npsnKey]).trim() : '';
             const docId = npsn ? npsn : Math.random().toString();
-            if (!mapUniqueSekolah.has(docId)) mapUniqueSekolah.set(docId, item);
+            
+            if (!mapUniqueSekolah.has(docId)) {
+                const cleanItem = { ...item };
+                if (statusKey) {
+                   cleanItem['status_sekolah'] = String(item[statusKey]).trim();
+                }
+                mapUniqueSekolah.set(docId, cleanItem);
+            }
          });
          jsonData = Array.from(mapUniqueSekolah.values());
       }
@@ -218,11 +245,24 @@ export default function AdminDashboard({ Header }) {
       const collectionName = `${activeTarget.collection}_chunks`; 
       const cleanTahun = String(activeTarget.year);
       
+      // Pembersihan Otomatis Sisa Dokumen Lama
+      setProgressLabel(`Membersihkan Sisa Dokumen Lama...`);
       const q = query(collection(db, collectionName), where("tahun_data", "==", cleanTahun));
       const snapshot = await getDocs(q);
       if (!snapshot.empty) {
         const allDocs = snapshot.docs;
-        for (let i = 0; i < allDocs.length; i++) await deleteDoc(allDocs[i].ref);
+        let delBatch = writeBatch(db);
+        let delCount = 0;
+        for (let i = 0; i < allDocs.length; i++) {
+          delBatch.delete(allDocs[i].ref);
+          delCount++;
+          if (delCount === 100 || i === allDocs.length - 1) {
+            await delBatch.commit();
+            delBatch = writeBatch(db);
+            delCount = 0;
+            await new Promise(r => setTimeout(r, 100));
+          }
+        }
       }
 
       const currentTime = new Date().toISOString();
@@ -230,53 +270,66 @@ export default function AdminDashboard({ Header }) {
       if (totalRowsInExcel === 0) {
         const docRef = doc(collection(db, collectionName));
         await setDoc(docRef, { 
-          tahun_data: cleanTahun, 
-          data: [], 
-          last_updated: currentTime,
-          is_empty: true
+          tahun_data: cleanTahun, data: [], last_updated: currentTime, is_empty: true
         });
         setUploadProgress(100);
-        alert(`UPLOAD SELESAI, TAPI DATA KOSONG.\n\nSistem mencatat waktu upload, tapi tidak ada data valid yang bisa disimpan.`);
+        alert(`UPLOAD SELESAI, TAPI DATA KOSONG.`);
       } else {
-        const CHUNK_SIZE = 150; 
+        setProgressLabel(`Menyimpan ${totalRowsInExcel.toLocaleString('id-ID')} Baris Data...`);
+        
+        // PENGAMAN PAYLOAD: CHUNK_SIZE dipertahankan di 100 baris per dokumen
+        const CHUNK_SIZE = 100; 
         const totalChunks = Math.ceil(totalRowsInExcel / CHUNK_SIZE);
+        let batch = writeBatch(db);
+        let batchCount = 0;
 
         for (let i = 0; i < totalChunks; i++) {
           const chunkData = jsonData.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE).map(item => {
             const sanitizedItem = {};
             for (const key in item) {
                let val = item[key];
-               if (val === undefined) sanitizedItem[key] = '';
-               else if (val instanceof Date) sanitizedItem[key] = val.toISOString().split('T')[0];
-               else sanitizedItem[key] = val;
+               // NORMALISASI KUNCI: Konversi semua header berspasi menjadi format standar berbasis underscore
+               const cleanKey = key.trim().toLowerCase().replace(/\s+/g, '_');
+               
+               if (val !== undefined && val !== null) {
+                  if (val instanceof Date) {
+                     sanitizedItem[cleanKey] = val.toISOString().split('T')[0];
+                  } else {
+                     sanitizedItem[cleanKey] = String(val);
+                  }
+               } else {
+                  sanitizedItem[cleanKey] = '';
+               }
             }
-            const keys = Object.keys(sanitizedItem);
-            const nikKey = keys.find(k => k.toLowerCase() === 'nik');
-            const npsnKey = keys.find(k => k.toLowerCase() === 'npsn');
-            let returnData = { ...sanitizedItem };
-            
-            if (nikKey) returnData[nikKey] = String(sanitizedItem[nikKey]).replace(/\D/g, '');
-            if (npsnKey) returnData[npsnKey] = String(sanitizedItem[npsnKey]).trim();
-            return returnData;
+            if (sanitizedItem.nik) sanitizedItem.nik = String(sanitizedItem.nik).replace(/\D/g, '');
+            if (sanitizedItem.npsn) sanitizedItem.npsn = String(sanitizedItem.npsn).trim();
+            return sanitizedItem;
           });
 
           const docRef = doc(collection(db, collectionName));
-          
-          await setDoc(docRef, { 
-            tahun_data: cleanTahun, 
-            data: chunkData,
-            last_updated: currentTime 
+          batch.set(docRef, { 
+            tahun_data: cleanTahun, data: chunkData, last_updated: currentTime 
           });
+          batchCount++;
+
+          // PENGAMAN PAYLOAD: Commit Batch dilakukan per 5 Dokumen saja (Mencegah Limit 10MB)
+          if (batchCount === 5 || i === totalChunks - 1) {
+            await batch.commit();
+            batch = writeBatch(db);
+            batchCount = 0;
+            await new Promise(r => setTimeout(r, 150)); 
+          }
           
           setUploadProgress(Math.round(((i + 1) / totalChunks) * 100));
         }
 
-        alert(`SINKRONISASI BERHASIL!\n\nTotal ${totalRowsInExcel.toLocaleString('id-ID')} baris data unik telah di-compress menjadi ${totalChunks} dokumen.`);
+        alert(`SINKRONISASI BERHASIL!\n\nTotal ${totalRowsInExcel.toLocaleString('id-ID')} baris data Sarpras telah diunggah dengan aman.`);
       }
       
       checkDatabaseStatus();
     } catch (error) {
-      alert("Error saat memproses. Pastikan format file sesuai.");
+      console.error("Upload error:", error);
+      alert("Error saat memproses. Muatan terlalu besar atau koneksi terputus.");
     } finally {
       setUploading(false);
       e.target.value = null; 
@@ -351,7 +404,7 @@ export default function AdminDashboard({ Header }) {
     const worksheet = workbook.addWorksheet('Data Sarpras');
     
     const columns = [
-      'npsn', 'nama_sekolah', 'jenjang', 'kecamatan', 'kabupaten',
+      'npsn', 'nama_sekolah', 'status_sekolah', 'jenjang', 'kecamatan', 'kabupaten',
       'ruang_kelas_baik', 'ruang_kelas_rusak_ringan', 'ruang_kelas_rusak_sedang', 'ruang_kelas_rusak_berat', 'ruang_kelas_tidak_bisa_dipakai',
       'ruang_perpustakaan_baik', 'ruang_perpustakaan_rusak_ringan', 'ruang_perpustakaan_rusak_sedang', 'ruang_perpustakaan_rusak_berat', 'ruang_perpustakaan_tidak_bisa_dipakai',
       'ruang_lab_komputer_baik', 'ruang_lab_komputer_rusak_ringan', 'ruang_lab_komputer_rusak_sedang', 'ruang_lab_komputer_rusak_berat', 'ruang_lab_komputer_tidak_bisa_dipakai',
@@ -410,7 +463,6 @@ export default function AdminDashboard({ Header }) {
 
       setUploadProgress(50);
 
-      // PERBAIKAN: Struktur tab1Data awal dipisah SMA dan SMK
       const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, sek_n: 0, pd_n: 0, sek_s: 0, pd_s: 0 }));
       const mapWilayah = new Map();
 

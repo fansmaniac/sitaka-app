@@ -47,12 +47,15 @@ const getKabupatenRank = (kabName) => {
   return 99;
 };
 
+// PENGELOMPOKAN SINKRON DENGAN ATURAN BARU (SMA DAN SMK TERPISAH)
 const JENJANG_GROUPS = {
   'SEMUA': [],
+  'SEMUA JENJANG': [],
   'PAUD': ['TK', 'KB', 'PAUD'],
   'SD': ['SD', 'SPK SD'],
   'SMP': ['SMP', 'SPK SMP'],
-  'SMA/SMK': ['SMA', 'SPK SMA', 'SMK'],
+  'SMA': ['SMA', 'SPK SMA'],
+  'SMK': ['SMK'],
   'SLB (Inklusif)': ['SLB'],
   'NON FORMAL': ['PKBM', 'SKB', 'SPS', 'TPA']
 };
@@ -97,16 +100,18 @@ export default function RincianPDStatusSekolah({
 
   const isModeSemua = filterWilayah === 'SEMUA';
 
-  // Proses Agregasi Data
+  // Proses Agregasi Data dengan Filter Pengaman
   const processedData = useMemo(() => {
     if (!data) return [];
-    const validJenjangList = JENJANG_GROUPS[activeJenjang];
+    // Fallback aman ke array kosong jika string tidak dikenali
+    const validJenjangList = JENJANG_GROUPS[activeJenjang] || [];
 
     const validData = data.filter(item => {
       const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
       if (!isModeSemua && kabDb !== filterWilayah) return false;
 
-      if (activeJenjang !== 'SEMUA') {
+      // Lewati pengecekan includes jika mode Semua
+      if (activeJenjang !== 'SEMUA' && activeJenjang !== 'SEMUA JENJANG') {
         const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
         if (!validJenjangList.includes(jenjangDb)) return false;
       }
@@ -190,7 +195,7 @@ export default function RincianPDStatusSekolah({
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Rincian_PD_Status_${isModeSemua ? 'Provinsi' : filterWilayah}_${activeJenjang.replace('/','-')}.xlsx`;
+    link.download = `Rincian_PD_Status_${isModeSemua ? 'Provinsi' : filterWilayah}_${activeJenjang.replace(/\//g,'-')}.xlsx`;
     link.click();
   };
 

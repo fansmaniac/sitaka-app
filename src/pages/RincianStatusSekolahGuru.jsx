@@ -51,14 +51,14 @@ const getKabupatenRank = (kabName) => {
 };
 
 // =====================================================================
-// MAPPING STRUKTUR KATEGORI BARU (SINKRON DENGAN DASHBOARD GURU)
+// MAPPING STRUKTUR KATEGORI BARU (SINKRON MUTLAK DENGAN DASHBOARD GURU)
 // =====================================================================
 const KATEGORI_MAPPING = {
-  'PAUD': ['TK', 'KB', 'PAUD', 'SPS', 'TPA'],
+  'PAUD': ['TK', 'KB'],
   'PENDIDIKAN DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
   'PENDIDIKAN MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
-  'PENDIDIKAN INKLUSIF': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
-  'PENDIDIKAN NON FORMAL': ['PKBM', 'SKB']
+  'PENDIDIKAN INKLUSIF': ['SLB'],
+  'PENDIDIKAN NON FORMAL': ['PKBM', 'TPA', 'SPS', 'SKB']
 };
 
 const isJenjangValid = (jenjangDb, targetJenjang) => {

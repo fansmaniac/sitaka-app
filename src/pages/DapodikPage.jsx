@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+// TAMBAHAN: Import useNavigate untuk membersihkan URL
+import { useNavigate } from 'react-router-dom';
 import { 
   School, Users, GraduationCap, LineChart, 
   Layers, Building2, Menu, X, Loader2, RefreshCw 
@@ -79,6 +81,7 @@ const MENU_ITEMS = [
 ];
 
 export default function DapodikPage({ Header }) {
+  const navigate = useNavigate(); // <-- Inisialisasi navigate
   const [activeMenu, setActiveMenu] = useState('sekolah');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   
@@ -318,6 +321,7 @@ export default function DapodikPage({ Header }) {
                   onClick={() => {
                     setActiveMenu(menu.id);
                     setIsMobileMenuOpen(false); // Otomatis tutup sidebar di HP setelah klik
+                    navigate('/dapodik'); // <-- KUNCI RAHASIA: Membersihkan parameter URL yang nyangkut
                   }}
                   className={`
                     w-full flex items-center gap-4 px-4 py-4 rounded-2xl text-left transition-all duration-300 group

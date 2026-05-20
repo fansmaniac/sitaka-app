@@ -1,4 +1,6 @@
 import React, { useState, useMemo, useEffect, useTransition } from 'react';
+// TAMBAHAN: Import useSearchParams dari react-router-dom
+import { useSearchParams } from 'react-router-dom';
 import { 
   Building2, HardHat, FileSpreadsheet, Search, Eye, Loader2, AlertCircle
 } from 'lucide-react';
@@ -130,12 +132,51 @@ const sumUsableRooms = (item, prefix) => {
 // MAIN COMPONENT
 // =====================================================================
 export default function DapodikSarpras({ selectedYear = '2026' }) {
-  const [activeMainTab, setActiveMainTab] = useState('JUMLAH'); 
-  const [activeSubTab, setActiveSubTab] = useState('SEMUA'); 
+  // --- PERUBAHAN UTAMA: Validasi Parameter URL yang kebal Error ---
+  const [searchParams, setSearchParams] = useSearchParams();
   
-  // STATE FILTER & TRANSITION UNTUK PERFORMA HALUS
-  const [filterStatusSekolah, setFilterStatusSekolah] = useState('SEMUA'); 
+  // Array Tab Valid
+  const SUB_TABS = ['SEMUA', 'PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'NON FORMAL'];
+  
+  // Baca parameter, jika kotor/salah otomatis reset ke default yang aman
+  const rawTab = (searchParams.get('tab') || 'JUMLAH').toUpperCase();
+  const activeMainTab = ['JUMLAH', 'KESENJANGAN'].includes(rawTab) ? rawTab : 'JUMLAH';
+  
+  const rawJenjang = (searchParams.get('jenjang') || 'SEMUA').toUpperCase();
+  const activeSubTab = SUB_TABS.includes(rawJenjang) ? rawJenjang : 'SEMUA';
+  
+  const rawStatus = (searchParams.get('status') || 'SEMUA').toUpperCase();
+  const filterStatusSekolah = ['SEMUA', 'NEGERI', 'SWASTA'].includes(rawStatus) ? rawStatus : 'SEMUA';
+  
   const [isPending, startTransition] = useTransition();
+
+  // Fungsi pengubah URL state yang sinkron
+  const setActiveMainTab = (val) => {
+    setSearchParams(prev => {
+      prev.set('tab', val);
+      return prev;
+    });
+  };
+
+  const handleStatusChange = (e) => {
+    const nextVal = e.target.value;
+    startTransition(() => {
+      setSearchParams(prev => {
+        prev.set('status', nextVal);
+        return prev;
+      });
+    });
+  };
+
+  const handleSubTabChange = (targetTab) => {
+    startTransition(() => {
+      setSearchParams(prev => {
+        prev.set('jenjang', targetTab);
+        return prev;
+      });
+    });
+  };
+  // -------------------------------------------------------------------------
 
   // STATE KONTROL MODAL RINCIAN
   const [modalOpen, setModalOpen] = useState(false);
@@ -173,20 +214,6 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
 
     fetchData();
   }, [selectedYear]);
-
-  // Handler Perubahan Filter dengan Concurrent Mode (Mencegah UI Freeze)
-  const handleStatusChange = (e) => {
-    const nextVal = e.target.value;
-    startTransition(() => {
-      setFilterStatusSekolah(nextVal);
-    });
-  };
-
-  const handleSubTabChange = (targetTab) => {
-    startTransition(() => {
-      setActiveSubTab(targetTab);
-    });
-  };
 
   // Handler Pembuka Modal
   const handleBukaRincian = (wilayah) => {
@@ -306,8 +333,6 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
     );
   }
 
-  const SUB_TABS = ['SEMUA', 'PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'NON FORMAL'];
-
   return (
     <div className="h-full flex flex-col animate-in fade-in duration-500">
       
@@ -377,7 +402,7 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
                   name="statusFilterSecured"
                   id="statusFilterSecured"
                   autoComplete="off"
-                  defaultValue={filterStatusSekolah} 
+                  value={filterStatusSekolah} 
                   onChange={handleStatusChange} 
                   className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer w-full pr-6 leading-tight tracking-wide"
                 >

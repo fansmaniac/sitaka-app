@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+// TAMBAHAN: Import useSearchParams dari react-router-dom
+import { useSearchParams } from 'react-router-dom';
 import { LineChart, ArrowRightLeft, Layers, Users, School, GraduationCap, AlertCircle, Building } from 'lucide-react';
 
 // IMPORT KOMPONEN ANAK ASLI
@@ -14,11 +16,15 @@ import RasioGuruVsPD from './RasioGuruVsPD'; // <-- IMPORT MODUL GURU VS PD
 // MAIN COMPONENT: DAPODIK RASIO
 // =====================================================================
 export default function DapodikRasio({ selectedYear = '2026' }) {
-  // State untuk Dropdown
-  const [data1, setData1] = useState('SEKOLAH');
-  const [data2, setData2] = useState('PESERTA DIDIK');
+  // --- PERUBAHAN UTAMA: State Dropdown diganti menggunakan URL Parameters ---
+  const [searchParams, setSearchParams] = useSearchParams();
   
-  // State untuk menandai apakah user sudah mengklik "Bandingkan"
+  // Mengambil nilai dari URL, default ke 'SEKOLAH' & 'PESERTA DIDIK' jika kosong
+  const data1 = searchParams.get('data1')?.toUpperCase() || 'SEKOLAH';
+  const data2 = searchParams.get('data2')?.toUpperCase() || 'PESERTA DIDIK';
+  
+  // State untuk menandai apakah user sudah mengklik "Bandingkan" 
+  // (Otomatis true saat pertama load agar link yang dishare langsung muncul chart)
   const [isComparing, setIsComparing] = useState(true); 
   
   // Opsi Data 1
@@ -39,8 +45,7 @@ export default function DapodikRasio({ selectedYear = '2026' }) {
   // Handler saat Data 1 berubah
   const handleData1Change = (e) => {
     const newVal = e.target.value;
-    setData1(newVal);
-    setIsComparing(false); 
+    setIsComparing(false); // Sembunyikan hasil sampai tombol "Bandingkan" diklik
     
     let currentData2 = data2;
 
@@ -60,12 +65,24 @@ export default function DapodikRasio({ selectedYear = '2026' }) {
        currentData2 = 'PESERTA DIDIK'; 
     }
 
-    setData2(currentData2);
+    // Simpan pilihan ke URL Parameter
+    setSearchParams(prev => {
+      prev.set('data1', newVal);
+      prev.set('data2', currentData2);
+      return prev;
+    });
   };
 
   const handleData2Change = (e) => {
-    setData2(e.target.value);
-    setIsComparing(false); 
+    const newVal = e.target.value;
+    setIsComparing(false); // Sembunyikan hasil
+    
+    // Simpan pilihan ke URL Parameter
+    setSearchParams(prev => {
+      prev.set('data1', data1);
+      prev.set('data2', newVal);
+      return prev;
+    });
   };
 
   const handleBandingkan = () => {

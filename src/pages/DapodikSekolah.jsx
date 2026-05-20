@@ -1,4 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
+// TAMBAHAN: Import useSearchParams dari react-router-dom
+import { useSearchParams } from 'react-router-dom';
 import { 
   Download, School, MapPin, Eye, FileSpreadsheet, 
   Search, X, ChevronLeft, ChevronRight, Building2, Layers, Award, GraduationCap
@@ -223,19 +225,50 @@ const PremiumPieChart = ({ segments, total }) => {
 // MAIN COMPONENT: DAPODIK SEKOLAH
 // =====================================================================
 export default function DapodikSekolah({ data = [], selectedYear = '2026', lastUpdatedDate }) {
-  const [activeView, setActiveView] = useState('STATUS'); // STATUS, AKREDITASI, ROMBEL
+  // --- PERUBAHAN UTAMA: Validasi Parameter URL yang kebal Error ---
+  const [searchParams, setSearchParams] = useSearchParams();
   
-  // STATE BARU: Kategori Dropdown & Tab Menu
-  const [activeKategori, setActiveKategori] = useState('SEMUA'); 
-  const [activeTab, setActiveTab] = useState('SEMUA'); 
+  // Baca parameter, jika kotor/salah otomatis reset ke default yang aman
+  const rawView = searchParams.get('view') ? searchParams.get('view').toUpperCase() : 'STATUS';
+  const activeView = ['STATUS', 'AKREDITASI', 'ROMBEL'].includes(rawView) ? rawView : 'STATUS';
+
+  const rawKategori = searchParams.get('kategori') ? searchParams.get('kategori').toUpperCase() : 'SEMUA';
+  const activeKategori = Object.keys(TABS_MAPPING).includes(rawKategori) ? rawKategori : 'SEMUA'; 
+
+  // Mengubah dari 'tab' menjadi 'jenjang' agar tidak disabotase modul Guru
+  const rawTab = searchParams.get('jenjang') ? searchParams.get('jenjang').toUpperCase() : 'SEMUA';
+  const validTabs = TABS_MAPPING[activeKategori] || [];
+  const activeTab = (rawTab === 'SEMUA' || validTabs.includes(rawTab)) ? rawTab : 'SEMUA';
+
+  // Fungsi pengubah URL state yang sinkron
+  const setActiveView = (val) => {
+    setSearchParams(prev => {
+      prev.set('view', val);
+      return prev;
+    });
+  };
+
+  const setActiveKategori = (val) => {
+    setSearchParams(prev => {
+      prev.set('kategori', val);
+      prev.set('jenjang', 'SEMUA'); // Reset jenjang otomatis ke SEMUA
+      return prev;
+    });
+  };
+
+  const setActiveTab = (val) => {
+    setSearchParams(prev => {
+      prev.set('jenjang', val);
+      return prev;
+    });
+  };
+  // -------------------------------------------------------------------------
 
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedWilayah, setSelectedWilayah] = useState('SEMUA');
-
-  // STATE UNTUK FETCH TANGGAL DARI FIREBASE
   const [fetchedDate, setFetchedDate] = useState('');
 
-  // FETCH TANGGAL UPDATE LANGSUNG DARI FIREBASE (MANDIRI)
+  // FETCH TANGGAL UPDATE LANGSUNG DARI FIREBASE
   useEffect(() => {
     const getUpdateDate = async () => {
       try {
@@ -271,16 +304,13 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
       // LOGIKA FILTER BERDASARKAN KATEGORI & TAB
       if (activeKategori === 'SEMUA') {
          if (activeTab === 'SEMUA') return true;
-         // activeTab berisi nama grup (misal: 'SD', 'SMA', 'NON FORMAL')
          const allowed = JENJANG_GROUPS[activeTab] || [];
          return allowed.includes(bentukDb);
       } else {
          if (activeTab === 'SEMUA') {
-            // Filter semua sekolah yang masuk dalam Kategori yang dipilih
             const allowed = KATEGORI_BENTUK[activeKategori] || [];
             return allowed.includes(bentukDb);
          } else {
-            // Filter sangat spesifik, langsung cocokkan dengan nama tab (misal: 'TK', 'SPK SD')
             return bentukDb === activeTab;
          }
       }
@@ -502,10 +532,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
                 <GraduationCap size={16} className="text-gray-400 mr-2" />
                 <select 
                   value={activeKategori} 
-                  onChange={(e) => { 
-                    setActiveKategori(e.target.value); 
-                    setActiveTab('SEMUA'); 
-                  }} 
+                  onChange={(e) => setActiveKategori(e.target.value)} 
                   className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer w-full"
                 >
                   <option value="SEMUA">Semua Jenjang</option>
@@ -530,7 +557,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
           >
             {activeKategori === 'SEMUA' ? 'SEMUA JENJANG' : `SEMUA ${activeKategori}`}
           </button>
-          {TABS_MAPPING[activeKategori].map(tab => (
+          {TABS_MAPPING[activeKategori]?.map(tab => (
             <button 
               key={tab} 
               onClick={() => setActiveTab(tab)} 

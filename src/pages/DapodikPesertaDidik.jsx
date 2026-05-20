@@ -1,4 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
+// TAMBAHAN: Import useSearchParams dari react-router-dom
+import { useSearchParams } from 'react-router-dom';
 import { 
   Download, Users, MapPin, Eye, FileSpreadsheet, 
   Search, X, ChevronLeft, ChevronRight, Building2, 
@@ -86,11 +88,32 @@ const identifyJenjangGroup = (jenjangDb) => {
 // MAIN COMPONENT: DAPODIK PESERTA DIDIK
 // =====================================================================
 export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', lastUpdatedDate }) {
-  const [activeView, setActiveView] = useState('STATUS'); 
-  // STATUS, PAUD, SD, SMP, SMA, SMK, NON_FORMAL
+  const [searchParams, setSearchParams] = useSearchParams();
+  
+  // Memastikan bahwa parameter URL selalu sinkron dengan state komponen
+  // Gunakan optional chaining dan default value yang solid
+  const activeView = (searchParams.get('tab') || 'STATUS').toUpperCase(); 
+  const activeJenjang = (searchParams.get('jenjang') || 'SEMUA').toUpperCase(); 
+  
+  // Fungsi handler untuk memperbarui URL Params yang aman
+  const handleTabClick = (viewId) => {
+    setSearchParams(prev => {
+      prev.set('tab', viewId);
+      // Jika yang diklik bukan tab STATUS, paksa reset jenjang ke SEMUA
+      if (viewId !== 'STATUS') {
+        prev.set('jenjang', 'SEMUA');
+      }
+      return prev;
+    });
+  };
 
-  // activeJenjang hanya relevan jika activeView === 'STATUS'
-  const [activeJenjang, setActiveJenjang] = useState('SEMUA'); 
+  const handleJenjangClick = (jenjangId) => {
+    setSearchParams(prev => {
+      prev.set('jenjang', jenjangId);
+      return prev;
+    });
+  };
+
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedWilayah, setSelectedWilayah] = useState('SEMUA');
   const [fetchedDate, setFetchedDate] = useState('');
@@ -135,7 +158,7 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
         sd_1: 0, sd_2: 0, sd_3: 0, sd_4: 0, sd_5: 0, sd_6: 0,
         smp_7: 0, smp_8: 0, smp_9: 0,
         sma_10: 0, sma_11: 0, sma_12: 0,
-        smk_10: 0, smk_11: 0, smk_12: 0, // Variabel penampung terpisah untuk SMK
+        smk_10: 0, smk_11: 0, smk_12: 0, 
         nf_l: 0, nf_p: 0,
         total: 0 
       });
@@ -186,7 +209,6 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
           row.smp_7 += t7; row.smp_8 += t8; row.smp_9 += t9;
           row.total += (t7+t8+t9);
        } 
-       // LOGIKA PEMISAHAN TAB UTAMA SMA DAN SMK
        else if (activeView === 'SMA' && group === 'SMA') {
           const t10 = (parseInt(getVal(item, 't10_l')) || 0) + (parseInt(getVal(item, 't10_p')) || 0);
           const t11 = (parseInt(getVal(item, 't11_l')) || 0) + (parseInt(getVal(item, 't11_p')) || 0);
@@ -275,7 +297,6 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
     setModalOpen(true);
   };
 
-  // UPDATE BARU: DAFTAR TAB UTAMA TELAH DIPISAH SMA DAN SMK
   const TABS = [
     { id: 'STATUS', label: 'Status Sekolah', icon: Building2, color: 'text-blue-700' },
     { id: 'PAUD', label: 'Jenjang PAUD', icon: Shapes, color: 'text-pink-600' },
@@ -297,10 +318,7 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
              {TABS.map(t => (
                 <button 
                   key={t.id} 
-                  onClick={() => {
-                     setActiveView(t.id);
-                     if (t.id !== 'STATUS') setActiveJenjang('SEMUA');
-                  }} 
+                  onClick={() => handleTabClick(t.id)} 
                   className={`flex items-center gap-1.5 px-3 py-2 md:py-2.5 rounded-xl font-black text-[10px] md:text-xs transition-all whitespace-nowrap ${activeView === t.id ? `bg-white ${t.color} shadow-sm scale-[1.02]` : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'}`}
                 >
                   <t.icon size={14} /> {t.label}
@@ -317,7 +335,11 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
         {activeView === 'STATUS' && (
           <div className="flex items-center gap-1.5 md:gap-2 overflow-x-auto pb-1 custom-scrollbar animate-in slide-in-from-top-2 duration-300">
             {Object.keys(JENJANG_GROUPS).map(tab => (
-              <button key={tab} onClick={() => setActiveJenjang(tab)} className={`px-4 py-1.5 rounded-lg font-black text-[10px] md:text-xs transition-all duration-300 whitespace-nowrap border ${activeJenjang === tab ? 'bg-gray-800 text-white border-gray-800 shadow-md' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
+              <button 
+                key={tab} 
+                onClick={() => handleJenjangClick(tab)} 
+                className={`px-4 py-1.5 rounded-lg font-black text-[10px] md:text-xs transition-all duration-300 whitespace-nowrap border ${activeJenjang === tab ? 'bg-gray-800 text-white border-gray-800 shadow-md' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
+              >
                 {tab}
               </button>
             ))}

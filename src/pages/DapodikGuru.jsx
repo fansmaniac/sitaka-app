@@ -1,4 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
+// TAMBAHAN: Import useSearchParams dari react-router-dom
+import { useSearchParams } from 'react-router-dom';
 import { 
   Download, Users, MapPin, Eye, FileSpreadsheet, 
   Search, X, ChevronLeft, ChevronRight, Building2, 
@@ -84,7 +86,6 @@ const KATEGORI_MAPPING = {
   'PENDIDIKAN NON FORMAL': ['PKBM', 'TPA', 'SPS', 'SKB']
 };
 
-// PENGELOMPOKAN KHUSUS SUB-TAB KETIKA DROPDOWN MEMILIH "SEMUA JENJANG"
 const SEMUA_SUBTABS_MAPPING = {
   'PAUD': ['TK', 'KB', 'PAUD'],
   'SD': ['SD', 'SPK SD'],
@@ -188,15 +189,25 @@ const PremiumPieChart = ({ segments, total }) => {
   );
 };
 
-
 // =====================================================================
 // MAIN COMPONENT: DAPODIK GURU
 // =====================================================================
 export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpdatedDate }) {
-  // 7 TAB MENU UTAMA
-  const [activeView, setActiveView] = useState('STATUS'); 
+  // --- PERUBAHAN UTAMA: Mengganti useState menjadi URL Parameters ---
+  const [searchParams, setSearchParams] = useSearchParams();
   
-  // STATE BARU: Kategori Dropdown & Tab Menu Dinamis
+  // Membaca parameter 'tab' dari URL, jika kosong default ke 'STATUS'
+  const activeView = searchParams.get('tab')?.toUpperCase() || 'STATUS';
+  
+  // Fungsi untuk mengubah URL saat tab diklik (misal menjadi ?tab=gender)
+  const setActiveView = (viewId) => {
+    setSearchParams(prev => {
+      prev.set('tab', viewId.toLowerCase());
+      return prev;
+    });
+  };
+  // ------------------------------------------------------------------
+  
   const [activeKategori, setActiveKategori] = useState('SEMUA'); 
   const [activeBentuk, setActiveBentuk] = useState('SEMUA'); 
 
@@ -244,15 +255,12 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
     return unik.filter(k => k !== 'TIDAK DIKETAHUI').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
   }, [data]);
 
-  // PENENTU LABEL AKTIF UNTUK EXPORT & PIE CHART
   const activeLabel = activeKategori === 'SEMUA' ? (activeBentuk === 'SEMUA' ? 'SEMUA JENJANG' : activeBentuk) : (activeBentuk === 'SEMUA' ? activeKategori : activeBentuk);
 
-  // ENGINE AGREGASI RAKSASA UNTUK 7 TABS
   const aggregatedData = useMemo(() => {
     const filteredData = data.filter(item => {
       const bentukDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
       
-      // LOGIKA FILTER UNIVERSAL ADAPTIF (Mendukung Sub-Tab Mode Semua Jenjang)
       if (activeKategori === 'SEMUA') {
          if (activeBentuk !== 'SEMUA') {
             const allowed = SEMUA_SUBTABS_MAPPING[activeBentuk] || [];
@@ -273,19 +281,12 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
     listKabupaten.forEach(kab => {
       mapAgg.set(kab, { 
         wilayah: kab, 
-        // Status Sekolah
         status_n: 0, status_s: 0, 
-        // Gender
         gen_l: 0, gen_p: 0,
-        // Kualifikasi Pendidikan
         kual_s1: 0, kual_s2: 0, kual_kurang: 0, kual_lain: 0,
-        // Kepegawaian
         peg_pns: 0, peg_pppk: 0, peg_gty: 0, peg_honor: 0, peg_lain: 0,
-        // Sertifikasi
         sert_sudah: 0, sert_belum: 0,
-        // Usia
         usia_30: 0, usia_40: 0, usia_50: 0, usia_51: 0,
-        // Pensiun
         pens_5: 0, pens_4: 0, pens_3: 0, pens_2: 0, pens_1: 0,
         total: 0 
       });
@@ -296,23 +297,19 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
        if (!mapAgg.has(kab)) return; 
        const row = mapAgg.get(kab);
 
-       // 1. Status Sekolah
        const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
        if (isNegeri) row.status_n++; else row.status_s++;
 
-       // 2. Gender
        const gender = String(getVal(item, 'gender') || getVal(item, 'jenis_kelamin')).trim().toUpperCase();
        if (gender === 'L' || gender === 'LAKI-LAKI') row.gen_l++;
        else if (gender === 'P' || gender === 'PEREMPUAN') row.gen_p++;
 
-       // 3. Kualifikasi
        const pend = String(getVal(item, 'pendidikan') || '').toUpperCase();
        if (pend.includes('S1') || pend.includes('D4')) row.kual_s1++;
        else if (pend.includes('S2') || pend.includes('S3')) row.kual_s2++;
        else if (pend.includes('D1') || pend.includes('D2') || pend.includes('D3') || pend.includes('SMA') || pend.includes('SMK')) row.kual_kurang++;
        else row.kual_lain++;
 
-       // 4. Kepegawaian
        const peg = String(getVal(item, 'status_kepegawaian') || '').toUpperCase();
        if (peg === 'PNS') row.peg_pns++;
        else if (peg === 'PPPK') row.peg_pppk++;
@@ -320,12 +317,10 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
        else if (peg.includes('HONOR')) row.peg_honor++;
        else row.peg_lain++;
 
-       // 5. Sertifikasi
        const sert = String(getVal(item, 'bidang_studi_sertifikasi') || '').trim();
        if (sert && sert !== '-' && sert !== '0') row.sert_sudah++;
        else row.sert_belum++;
 
-       // 6 & 7. Usia & Pensiun
        const tglLahir = getVal(item, 'tanggal_lahir');
        const age = calculateAge(tglLahir);
        if (age !== null) {
@@ -368,7 +363,6 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
     });
   }, [aggregatedData]);
 
-  // DINAMIKA PIE CHART
   let pieSegments = [];
   let pieTotal = grandTotals.total;
   
@@ -420,7 +414,6 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
      ];
   }
 
-  // EXPORT EXCEL
   const downloadExcel = async () => {
     const workbook = new ExcelJS.Workbook();
     const safeJenjangName = activeLabel.replace(/\//g, '-');
@@ -470,7 +463,6 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
     setModalOpen(true);
   };
 
-  // Helper Card
   const StatCard = ({ label, value, percentage, colorClasses }) => (
     <div className={`flex flex-col justify-between ${colorClasses.bg} p-3 md:p-4 rounded-2xl border ${colorClasses.border} transition-colors ${colorClasses.hover}`}>
        <div className="flex items-center gap-2 mb-2">
@@ -507,11 +499,9 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
   return (
     <div className="h-full flex flex-col animate-in fade-in duration-500">
       
-      {/* HEADER: TAB UTAMA */}
       <div className="bg-white px-4 md:px-6 py-4 border-b border-gray-100 flex flex-col gap-4 shrink-0 shadow-sm z-20">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
            
-           {/* TABS MENU */}
            <div className="flex items-center gap-2 bg-gray-100 p-1.5 rounded-2xl w-full md:w-auto overflow-x-auto custom-scrollbar pb-1">
              {TABS.map(t => (
                 <button 
@@ -524,7 +514,6 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
              ))}
            </div>
 
-           {/* DROPDOWN KATEGORI & UNDUH */}
            <div className="flex items-center gap-3 w-full md:w-auto">
               <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm w-full md:w-auto transition-colors focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100">
                 <GraduationCap size={16} className="text-gray-400 mr-2" />
@@ -551,7 +540,6 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
            </div>
         </div>
 
-        {/* TABS SUB-JENJANG (BENTUK PENDIDIKAN DINAMIS UTAMA & SEMUA) */}
         <div className="flex items-center gap-1.5 md:gap-2 overflow-x-auto pb-1 mt-1">
           <button 
             onClick={() => setActiveBentuk('SEMUA')} 
@@ -585,7 +573,6 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
 
       <div className="flex-1 flex flex-col lg:flex-row min-h-0 bg-gray-50/50">
         
-        {/* KOLOM KIRI: TABEL */}
         <div className="flex-1 lg:w-2/3 p-4 md:p-6 flex flex-col min-h-0 overflow-hidden border-r border-gray-200">
           <div className="bg-white rounded-3xl shadow-sm border border-gray-100 flex-1 flex flex-col overflow-hidden relative">
             <div className="flex-1 overflow-auto p-4 custom-scrollbar">
@@ -705,7 +692,6 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
           </div>
         </div>
 
-        {/* KOLOM KANAN: PIE CHART & KARTU REKAP */}
         <div className="lg:w-1/3 flex flex-col bg-white border-l border-gray-100 relative overflow-y-auto custom-scrollbar">
           
           <div className="text-center w-full px-4 pt-6 pb-2 shrink-0">
@@ -793,7 +779,6 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
 
       </div>
 
-      {/* KONDISIONAL RENDER MODAL BERDASARKAN ACTIVE VIEW */}
       {activeView === 'STATUS' && (
         <RincianStatusSekolahGuru 
           isOpen={modalOpen} 

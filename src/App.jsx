@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, useNavigate } from 'react-router-dom';
 import { 
   Database, 
   FileText, 
@@ -18,40 +19,32 @@ import LoginPage from './pages/LoginPage';
 import AdminDashboard from './pages/AdminDashboard';
 import DataSarprasPage from './pages/DataSarprasPage';
 
-export default function App() {
-  // --- STATE DENGAN LOCAL STORAGE ---
-  // Mengambil state awal dari localStorage agar bertahan meski di-refresh
-  const [currentPage, setCurrentPage] = useState(() => {
-    return localStorage.getItem('sitaka_currentPage') || 'home';
-  });
-  
+// Komponen utama yang berisi logika navigasi
+function AppContent() {
+  const navigate = useNavigate();
+
+  // --- STATE DENGAN LOCAL STORAGE UNTUK LOGIN ---
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
     return localStorage.getItem('sitaka_isLoggedIn') === 'true';
   });
 
-  // Fungsi navigasi yang otomatis menyimpan posisi terakhir ke localStorage
-  const navigateTo = (page) => {
-    setCurrentPage(page);
-    localStorage.setItem('sitaka_currentPage', page);
-  };
-
-  // Fungsi login & logout yang otomatis menyimpan status
+  // Fungsi login & logout yang otomatis menyimpan status & mengubah URL
   const handleLoginSuccess = () => {
     setIsLoggedIn(true);
     localStorage.setItem('sitaka_isLoggedIn', 'true');
-    navigateTo('admin-dashboard');
+    navigate('/admin-dashboard');
   };
 
   const handleLogout = () => {
     setIsLoggedIn(false);
     localStorage.setItem('sitaka_isLoggedIn', 'false');
-    navigateTo('home');
+    navigate('/');
   };
 
   // --- KOMPONEN HEADER ---
   const Header = () => (
     <header className="h-16 bg-blue-700 text-white px-4 md:px-6 flex justify-between items-center shadow-lg shrink-0 relative overflow-hidden">
-      <div className="flex items-center gap-2 md:gap-3 cursor-pointer active:scale-95 transition-transform z-10 bg-blue-700 pr-2 md:pr-4" onClick={() => navigateTo('home')}>
+      <div className="flex items-center gap-2 md:gap-3 cursor-pointer active:scale-95 transition-transform z-10 bg-blue-700 pr-2 md:pr-4" onClick={() => navigate('/')}>
         <div className="bg-white/20 p-1.5 rounded-lg">
           <Home className="w-5 h-5 md:w-6 md:h-6" />
         </div>
@@ -80,7 +73,7 @@ export default function App() {
             </button>
           </div>
         ) : (
-          <button onClick={() => navigateTo('login')} className="flex items-center gap-1.5 md:gap-2 bg-white/10 hover:bg-white/20 px-3 md:px-5 py-2 md:py-2.5 rounded-xl transition-all text-xs md:text-sm font-black border border-white/30 active:scale-95 shadow-sm">
+          <button onClick={() => navigate('/login')} className="flex items-center gap-1.5 md:gap-2 bg-white/10 hover:bg-white/20 px-3 md:px-5 py-2 md:py-2.5 rounded-xl transition-all text-xs md:text-sm font-black border border-white/30 active:scale-95 shadow-sm">
             <LogIn className="w-4 h-4 md:w-5 md:h-5" />
             <span className="hidden sm:inline">LOGIN ADMIN</span>
             <span className="sm:hidden">LOGIN</span>
@@ -96,10 +89,8 @@ export default function App() {
 
   // --- HALAMAN UTAMA ---
   const HomePage = () => (
-    // PERBAIKAN: Menggunakan h-screen dan overflow-y-auto agar selalu bisa di-scroll di HP
     <div className="h-screen w-full flex flex-col bg-gray-100 overflow-y-auto overflow-x-hidden">
       <Header />
-      {/* PERBAIKAN: Tambah pb-24 untuk ruang scroll ekstra di HP */}
       <main className="flex-1 w-full flex flex-col items-center justify-start md:justify-center p-4 md:p-6 text-center pt-8 md:pt-4 pb-24 md:pb-8">
         
         {/* HERO SECTION */}
@@ -123,7 +114,7 @@ export default function App() {
         {/* CARDS GRID */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 w-full max-w-7xl px-2 md:px-4 text-center">
           
-          <button onClick={() => navigateTo('dapodik')} className="group bg-white p-5 md:p-6 lg:p-8 rounded-[2rem] md:rounded-[2rem] shadow-xl border-2 md:border-4 border-transparent hover:border-blue-500 transition-all active:scale-95 h-40 md:h-56 lg:h-64 flex flex-col justify-between text-left">
+          <button onClick={() => navigate('/dapodik')} className="group bg-white p-5 md:p-6 lg:p-8 rounded-[2rem] md:rounded-[2rem] shadow-xl border-2 md:border-4 border-transparent hover:border-blue-500 transition-all active:scale-95 h-40 md:h-56 lg:h-64 flex flex-col justify-between text-left">
             <div className="bg-blue-600 text-white p-3 md:p-4 rounded-2xl w-fit shadow-md md:shadow-lg group-hover:scale-110 transition-transform">
               <Database className="w-6 h-6 md:w-8 md:h-8" />
             </div>
@@ -133,7 +124,7 @@ export default function App() {
             </div>
           </button>
           
-          <button onClick={() => navigateTo('rapor-pendidikan')} className="group bg-white p-5 md:p-6 lg:p-8 rounded-[2rem] md:rounded-[2rem] shadow-xl border-2 md:border-4 border-transparent hover:border-emerald-500 transition-all active:scale-95 h-40 md:h-56 lg:h-64 flex flex-col justify-between text-left">
+          <button onClick={() => navigate('/rapor-pendidikan')} className="group bg-white p-5 md:p-6 lg:p-8 rounded-[2rem] md:rounded-[2rem] shadow-xl border-2 md:border-4 border-transparent hover:border-emerald-500 transition-all active:scale-95 h-40 md:h-56 lg:h-64 flex flex-col justify-between text-left">
             <div className="bg-emerald-600 text-white p-3 md:p-4 rounded-2xl w-fit shadow-md md:shadow-lg group-hover:scale-110 transition-transform">
               <FileText className="w-6 h-6 md:w-8 md:h-8" />
             </div>
@@ -143,7 +134,7 @@ export default function App() {
             </div>
           </button>
 
-          <button onClick={() => navigateTo('data-ats')} className="group bg-white p-5 md:p-6 lg:p-8 rounded-[2rem] md:rounded-[2rem] shadow-xl border-2 md:border-4 border-transparent hover:border-orange-500 transition-all active:scale-95 h-40 md:h-56 lg:h-64 flex flex-col justify-between text-left">
+          <button onClick={() => navigate('/data-ats')} className="group bg-white p-5 md:p-6 lg:p-8 rounded-[2rem] md:rounded-[2rem] shadow-xl border-2 md:border-4 border-transparent hover:border-orange-500 transition-all active:scale-95 h-40 md:h-56 lg:h-64 flex flex-col justify-between text-left">
             <div className="bg-orange-600 text-white p-3 md:p-4 rounded-2xl w-fit shadow-md md:shadow-lg group-hover:scale-110 transition-transform">
               <Layers className="w-6 h-6 md:w-8 md:h-8" />
             </div>
@@ -153,7 +144,7 @@ export default function App() {
             </div>
           </button>
 
-          <button onClick={() => navigateTo('data-sarpras')} className="group bg-white p-5 md:p-6 lg:p-8 rounded-[2rem] md:rounded-[2rem] shadow-xl border-2 md:border-4 border-transparent hover:border-purple-500 transition-all active:scale-95 h-40 md:h-56 lg:h-64 flex flex-col justify-between text-left">
+          <button onClick={() => navigate('/data-sarpras')} className="group bg-white p-5 md:p-6 lg:p-8 rounded-[2rem] md:rounded-[2rem] shadow-xl border-2 md:border-4 border-transparent hover:border-purple-500 transition-all active:scale-95 h-40 md:h-56 lg:h-64 flex flex-col justify-between text-left">
             <div className="bg-purple-600 text-white p-3 md:p-4 rounded-2xl w-fit shadow-md md:shadow-lg group-hover:scale-110 transition-transform">
               <Building2 className="w-6 h-6 md:w-8 md:h-8" />
             </div>
@@ -182,26 +173,25 @@ export default function App() {
     </div>
   );
 
-  // --- LOGIKA NAVIGASI (ROUTING) ---
-  switch (currentPage) {
-    case 'dapodik': 
-      return <DapodikPage onBack={() => navigateTo('home')} Header={Header} />;
-    case 'rapor-pendidikan': 
-      return <RaporPendidikanPage onBack={() => navigateTo('home')} Header={Header} />;
-    case 'data-ats': 
-      return <DataATSPage onBack={() => navigateTo('home')} Header={Header} />;
-    case 'data-sarpras': 
-      return <DataSarprasPage onBack={() => navigateTo('home')} Header={Header} />;
-    case 'login': 
-      return (
-        <LoginPage 
-          onLoginSuccess={handleLoginSuccess} 
-          onBack={() => navigateTo('home')} 
-        />
-      );
-    case 'admin-dashboard': 
-      return <AdminDashboard Header={Header} />;
-    default: 
-      return <HomePage />;
-  }
+  // --- LOGIKA ROUTING ---
+  return (
+    <Routes>
+      <Route path="/" element={<HomePage />} />
+      <Route path="/dapodik" element={<DapodikPage onBack={() => navigate('/')} Header={Header} />} />
+      <Route path="/rapor-pendidikan" element={<RaporPendidikanPage onBack={() => navigate('/')} Header={Header} />} />
+      <Route path="/data-ats" element={<DataATSPage onBack={() => navigate('/')} Header={Header} />} />
+      <Route path="/data-sarpras" element={<DataSarprasPage onBack={() => navigate('/')} Header={Header} />} />
+      <Route path="/login" element={<LoginPage onLoginSuccess={handleLoginSuccess} onBack={() => navigate('/')} />} />
+      <Route path="/admin-dashboard" element={<AdminDashboard Header={Header} />} />
+    </Routes>
+  );
+}
+
+// Komponen Wrapper Router
+export default function App() {
+  return (
+    <Router>
+      <AppContent />
+    </Router>
+  );
 }

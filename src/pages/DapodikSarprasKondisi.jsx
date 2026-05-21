@@ -107,7 +107,7 @@ export default function DapodikSarprasKondisi({ selectedYear = '2026' }) {
   const dataAggregated = useMemo(() => {
     // Siapkan wadah agregasi utama
     const agg = {
-      'PAUD': { jenjang: 'PAUD (TK, KB, SPS, TPA)', sekolah_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },
+      'PAUD': { jenjang: 'PAUD (TK)', sekolah_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },
       'SD': { jenjang: 'SD', sekolah_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },
       'SMP': { jenjang: 'SMP', sekolah_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },
       'SMA': { jenjang: 'SMA', sekolah_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },

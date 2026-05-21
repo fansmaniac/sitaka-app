@@ -10,8 +10,8 @@ import { collection, query, where, getDocs } from 'firebase/firestore';
 
 // IMPORT KOMPONEN MODAL RINCIAN SARPRAS
 import RincianSarpras from './RincianSarpras';
-// Nantinya import komponen Kondisi di sini:
-// import DapodikSarprasKondisi from './DapodikSarprasKondisi';
+// IMPORT KOMPONEN KONDISI (SUDAH DIBUKA KOMENTARNYA)
+import DapodikSarprasKondisi from './DapodikSarprasKondisi';
 
 // =====================================================================
 // UTILITY: CACHING LOKAL
@@ -141,7 +141,6 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
   const SUB_TABS = ['SEMUA', 'PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'NON FORMAL'];
   
   // Baca parameter, jika kotor/salah otomatis reset ke default yang aman
-  // UPDATE: Mengubah referensi 'KESENJANGAN' menjadi 'KONDISI'
   const rawTab = (searchParams.get('tab') || 'JUMLAH').toUpperCase();
   const activeMainTab = ['JUMLAH', 'KONDISI'].includes(rawTab) ? rawTab : 'JUMLAH';
   
@@ -432,19 +431,8 @@ export default function DapodikSarpras({ selectedYear = '2026' }) {
       <div className={`flex-1 flex flex-col bg-gray-50/50 p-4 md:p-6 min-h-0 overflow-hidden transition-opacity duration-200 ${isPending ? 'opacity-60' : 'opacity-100'}`}>
         
         {activeMainTab === 'KONDISI' ? (
-          // TAMPILAN KONDISI SARPRAS
-          <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-3xl border border-gray-100 shadow-sm text-center p-8 animate-in zoom-in-95 duration-300">
-             <div className="bg-amber-100 p-6 rounded-full text-amber-500 mb-6 relative">
-                <HardHat size={64} />
-                <AlertCircle className="absolute top-4 right-4 text-amber-600" size={24} />
-             </div>
-             <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tight">Kondisi Sarpras</h2>
-             <p className="text-sm font-bold text-gray-400 mt-2 uppercase tracking-widest max-w-md mb-6">
-                Modul ini akan menampilkan detail kondisi sarpras. Sedang dalam tahap persiapan komponen!
-             </p>
-             {/* CONTOH CARA MEMANGGIL KOMPONEN NANTINYA: */}
-             {/* <DapodikSarprasKondisi selectedYear={selectedYear} data={dataSarpras} /> */}
-          </div>
+          // MEMANGGIL KOMPONEN DAPODIKSARPRASKONDISI
+          <DapodikSarprasKondisi selectedYear={selectedYear} />
         ) : (
           // TAMPILAN TABEL JUMLAH SARPRAS
           <div className="bg-white rounded-3xl shadow-sm border border-gray-100 flex-1 flex flex-col overflow-hidden relative animate-in fade-in duration-300">

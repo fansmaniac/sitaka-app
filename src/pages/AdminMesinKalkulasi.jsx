@@ -88,7 +88,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
   }, []);
 
   // =====================================================================
-  // MESIN PRE-CALCULATION RASIO DENGAN PENANGANAN SPESIFIK SMA DAN SMK
+  // MESIN PRE-CALCULATION RASIO
   // =====================================================================
   
   // 1. SEKOLAH VS PD (PD / SEKOLAH)
@@ -339,7 +339,11 @@ export default function AdminMesinKalkulasi({ onBack }) {
          if(npsn) {
              let rombelTotal = 0;
              Object.keys(s).forEach(k => {
-                 if(k.toLowerCase().includes('rombel_')) rombelTotal += parseInt(s[k]) || 0;
+                 const keyStr = k.trim().toLowerCase();
+                 // PENYELESAIAN BUG: Menggunakan Regex ketat untuk menghindari rombel anomali
+                 if (/^rombel_(tka|tkb|t?\d{1,2}|paket_[abc])$/.test(keyStr)) {
+                     rombelTotal += parseInt(s[k]) || 0;
+                 }
              });
              mapSekolah.set(npsn, { ...s, rombel_total: rombelTotal, guru_aktual: 0 });
          }
@@ -455,7 +459,9 @@ export default function AdminMesinKalkulasi({ onBack }) {
         
         let rombelTotal = 0;
         Object.keys(item).forEach(k => {
-            if(k.toLowerCase().includes('rombel_')) {
+            const keyStr = k.trim().toLowerCase();
+            // PENYELESAIAN BUG: Filter Ketat Regex
+            if (/^rombel_(tka|tkb|t?\d{1,2}|paket_[abc])$/.test(keyStr)) {
                 rombelTotal += parseInt(item[k]) || 0;
             }
         });
@@ -572,7 +578,9 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
         let rombelTotal = 0;
         Object.keys(item).forEach(k => {
-            if(k.toLowerCase().includes('rombel_')) {
+            const keyStr = k.trim().toLowerCase();
+            // PENYELESAIAN BUG: Filter Ketat Regex
+            if (/^rombel_(tka|tkb|t?\d{1,2}|paket_[abc])$/.test(keyStr)) {
                 rombelTotal += parseInt(item[k]) || 0;
             }
         });
@@ -674,7 +682,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
          }
       });
 
-      // UPDATE: Tambahan inisiasi sek_n dan sek_s
       const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, sek_n: 0, rombel_n: 0, kelas_n: 0, sek_s: 0, rombel_s: 0, kelas_s: 0 }));
       const mapWilayah = new Map();
 
@@ -688,7 +695,9 @@ export default function AdminMesinKalkulasi({ onBack }) {
         
         let rombelTotal = 0;
         Object.keys(item).forEach(k => {
-            if(k.toLowerCase().includes('rombel_')) {
+            const keyStr = k.trim().toLowerCase();
+            // PENYELESAIAN BUG: Filter Ketat Regex
+            if (/^rombel_(tka|tkb|t?\d{1,2}|paket_[abc])$/.test(keyStr)) {
                 rombelTotal += parseInt(item[k]) || 0;
             }
         });
@@ -708,28 +717,28 @@ export default function AdminMesinKalkulasi({ onBack }) {
         if (!mapWilayah.has(uniqueId)) {
           const init = { wilayah: kabDb, kecamatan: keyKec };
           JENJANG_KEYS.forEach(k => { 
-             init[`${k}_sek`] = 0; // Tambahan inisiasi sekolah
+             init[`${k}_sek`] = 0;
              init[`${k}_rombel`] = 0; 
              init[`${k}_kelas`] = 0;
-             init[`${k}_sek_n`] = 0; // Tambahan inisiasi
+             init[`${k}_sek_n`] = 0; 
              init[`${k}_rombel_n`] = 0; init[`${k}_kelas_n`] = 0;
-             init[`${k}_sek_s`] = 0; // Tambahan inisiasi
+             init[`${k}_sek_s`] = 0; 
              init[`${k}_rombel_s`] = 0; init[`${k}_kelas_s`] = 0;
           });
           mapWilayah.set(uniqueId, init);
         }
 
         const rowTab2 = mapWilayah.get(uniqueId);
-        rowTab2[`${group}_sek`]++; // Counter Sekolah naik
+        rowTab2[`${group}_sek`]++; 
         rowTab2[`${group}_rombel`] += rombelTotal;
         rowTab2[`${group}_kelas`] += kelasTotal;
         
         if (isNegeri) {
-           rowTab2[`${group}_sek_n`]++; // Counter Sekolah Negeri naik
+           rowTab2[`${group}_sek_n`]++; 
            rowTab2[`${group}_rombel_n`] += rombelTotal;
            rowTab2[`${group}_kelas_n`] += kelasTotal;
         } else {
-           rowTab2[`${group}_sek_s`]++; // Counter Sekolah Swasta naik
+           rowTab2[`${group}_sek_s`]++; 
            rowTab2[`${group}_rombel_s`] += rombelTotal;
            rowTab2[`${group}_kelas_s`] += kelasTotal;
         }

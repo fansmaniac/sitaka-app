@@ -15,8 +15,6 @@ export default function AdminDatabaseMaster({ onBack }) {
   const [activeTarget, setActiveTarget] = useState(null);
   const [dbStatus, setDbStatus] = useState({}); 
 
-  const fileInputRef = useRef(null);
-
   // --- CEK STATUS MASTER DATA ---
   const checkDatabaseStatus = async () => {
     const categories = [
@@ -39,6 +37,8 @@ export default function AdminDatabaseMaster({ onBack }) {
   useEffect(() => { 
      checkDatabaseStatus(); 
   }, []);
+
+  const fileInputRef = useRef(null);
 
   // --- PENGHAPUSAN MENGGUNAKAN BATCH COMMIT ---
   const handleDeleteData = async (target) => {
@@ -88,7 +88,7 @@ export default function AdminDatabaseMaster({ onBack }) {
     }
   };
 
-  // --- MESIN UPLOAD MICRO-BATCHING DENGAN REGEX HEADER STANDARDIZER ---
+  // --- MESIN UPLOAD MICRO-BATCHING DENGAN REGEX HEADER STANDARDIZER SANGAT KETAT ---
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file || !activeTarget) return;
@@ -136,7 +136,8 @@ export default function AdminDatabaseMaster({ onBack }) {
                   'status_kepegawaian', 'bentuk_pendidikan', 'status_sekolah'
                 ];
                 keys.forEach(k => {
-                   const normalizedK = k.trim().toLowerCase().replace(/\s+/g, '_');
+                   // PERBAIKAN REGEX: Cegah multiple underscore
+                   const normalizedK = k.trim().toLowerCase().replace(/[\s/]+/g, '_').replace(/_+/g, '_');
                    if (allowedKeys.includes(normalizedK)) {
                       filteredItem[normalizedK] = item[k];
                    }
@@ -155,7 +156,7 @@ export default function AdminDatabaseMaster({ onBack }) {
             const npsnKey = keys.find(k => k.trim().toLowerCase() === 'npsn');
             
             const statusKey = keys.find(k => {
-               const cleanH = k.trim().toLowerCase().replace(/\s+/g, '_');
+               const cleanH = k.trim().toLowerCase().replace(/[\s/]+/g, '_').replace(/_+/g, '_');
                return cleanH === 'status_sekolah' || cleanH === 'status';
             });
             
@@ -177,7 +178,7 @@ export default function AdminDatabaseMaster({ onBack }) {
       const collectionName = `${activeTarget.collection}_chunks`; 
       const cleanTahun = String(activeTarget.year);
       
-      // PEMBERSIHAN OTOMATIS SISA DOKUMEN LAMA (Mengeksekusi penimpaan data)
+      // PEMBERSIHAN OTOMATIS SISA DOKUMEN LAMA
       setProgressLabel(`Membersihkan Sisa Dokumen Lama...`);
       const q = query(collection(db, collectionName), where("tahun_data", "==", cleanTahun));
       const snapshot = await getDocs(q);
@@ -209,7 +210,6 @@ export default function AdminDatabaseMaster({ onBack }) {
       } else {
         setProgressLabel(`Menyimpan ${totalRowsInExcel.toLocaleString('id-ID')} Baris Data...`);
         
-        // CHUNKING DATA: Berlaku untuk semua koleksi termasuk ATS
         const CHUNK_SIZE = 100; 
         const totalChunks = Math.ceil(totalRowsInExcel / CHUNK_SIZE);
         let batch = writeBatch(db);
@@ -220,8 +220,14 @@ export default function AdminDatabaseMaster({ onBack }) {
             const sanitizedItem = {};
             for (const key in item) {
                let val = item[key];
-               // Konversi semua header berspasi/simbol menjadi format standar
-               const cleanKey = key.trim().toLowerCase().replace(/[\s/]+/g, '_').replace(/[()]/g, '');
+               // PERBAIKAN REGEX SUPER KETAT:
+               // 1. Ubah spasi/slash jadi underscore
+               // 2. Hilangkan tanda kurung
+               // 3. JIKA ADA UNDERSCORE GANDA/LEBIH, JADIKAN SATU UNDERSCORE SAJA (.replace(/_+/g, '_'))
+               const cleanKey = key.trim().toLowerCase()
+                                 .replace(/[\s/]+/g, '_')
+                                 .replace(/[()]/g, '')
+                                 .replace(/_+/g, '_'); 
                
                if (val !== undefined && val !== null) {
                   if (val instanceof Date) {
@@ -270,26 +276,26 @@ export default function AdminDatabaseMaster({ onBack }) {
 
   const triggerUpload = (target) => {
     setActiveTarget(target);
-    // Timeout digunakan agar state activeTarget selesai di-set sebelum file input diklik
     setTimeout(() => {
       fileInputRef.current.click();
     }, 0);
   };
 
   // =====================================================================
-  // FUNGSI UNDUH FORMAT EXCEL 
+  // FUNGSI UNDUH FORMAT EXCEL (TYPO SPASI SUDAH DIBERSIHKAN TOTAL!)
   // =====================================================================
   const handleDownloadFormatSekolah = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Satuan Pendidikan');
     
+    // SPASI MISTERIUS TELAH DIBASMI!
     const columns = [
       'npsn', 'nama_satuan_pendidikan', 'status_sekolah', 'bentuk_pendidikan', 'alamat', 
       'desa', 'kecamatan', 'kabupaten', 'lintang', 'bujur', 'npwp', 'nama_kepala_sekolah', 
       'nomor_hp_kepsek', 'tmt_akreditasi', 'akreditasi', 'nama_operator', 'nomor_hp_operator', 
-      'rombel_t1', 'rombel_ t2', 'rombel_ t3', 'rombel_ t4', 'rombel_ t5', 'rombel_ t6', 
-      'rombel_ t7', 'rombel_ t8', 'rombel_ t9', 'rombel_ t10', 'rombel_ t11', 'rombel_ t12', 
-      'rombel_ t13', 'rombel_ tka', 'rombel_ tkb', 'rombel_ pkta', 'rombel_ pktb', 'rombel_ pktc', 
+      'rombel_t1', 'rombel_t2', 'rombel_t3', 'rombel_t4', 'rombel_t5', 'rombel_t6', 
+      'rombel_t7', 'rombel_t8', 'rombel_t9', 'rombel_t10', 'rombel_t11', 'rombel_t12', 
+      'rombel_t13', 'rombel_tka', 'rombel_tkb', 'rombel_pkta', 'rombel_pktb', 'rombel_pktc', 
       'tka_l', 'tka_p', 'tkb_l', 'tkb_p', 't1_l', 't1_p', 't2_l', 't2_p', 't3_l', 't3_p', 
       't4_l', 't4_p', 't5_l', 't5_p', 't6_l', 't6_p', 't7_l', 't7_p', 't8_l', 't8_p', 
       't9_l', 't9_p', 't10_l', 't10_p', 't11_l', 't11_p', 't12_l', 't12_p', 't13_l', 't13_p', 
@@ -386,7 +392,7 @@ export default function AdminDatabaseMaster({ onBack }) {
 
     worksheet.columns = columns.map(col => ({ header: col, key: col, width: 20 }));
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEA580C' } }; // Warna Orange agar selaras
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEA580C' } }; 
     
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });

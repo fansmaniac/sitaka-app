@@ -674,7 +674,8 @@ export default function AdminMesinKalkulasi({ onBack }) {
          }
       });
 
-      const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, rombel_n: 0, kelas_n: 0, rombel_s: 0, kelas_s: 0 }));
+      // UPDATE: Tambahan inisiasi sek_n dan sek_s
+      const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, sek_n: 0, rombel_n: 0, kelas_n: 0, sek_s: 0, rombel_s: 0, kelas_s: 0 }));
       const mapWilayah = new Map();
 
       allSekolahData.forEach(item => {
@@ -696,8 +697,8 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
         if (rowTab1) {
-           if (isNegeri) { rowTab1.rombel_n += rombelTotal; rowTab1.kelas_n += kelasTotal; } 
-           else { rowTab1.rombel_s += rombelTotal; rowTab1.kelas_s += kelasTotal; }
+           if (isNegeri) { rowTab1.sek_n++; rowTab1.rombel_n += rombelTotal; rowTab1.kelas_n += kelasTotal; } 
+           else { rowTab1.sek_s++; rowTab1.rombel_s += rombelTotal; rowTab1.kelas_s += kelasTotal; }
         }
 
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
@@ -707,22 +708,28 @@ export default function AdminMesinKalkulasi({ onBack }) {
         if (!mapWilayah.has(uniqueId)) {
           const init = { wilayah: kabDb, kecamatan: keyKec };
           JENJANG_KEYS.forEach(k => { 
+             init[`${k}_sek`] = 0; // Tambahan inisiasi sekolah
              init[`${k}_rombel`] = 0; 
              init[`${k}_kelas`] = 0;
+             init[`${k}_sek_n`] = 0; // Tambahan inisiasi
              init[`${k}_rombel_n`] = 0; init[`${k}_kelas_n`] = 0;
+             init[`${k}_sek_s`] = 0; // Tambahan inisiasi
              init[`${k}_rombel_s`] = 0; init[`${k}_kelas_s`] = 0;
           });
           mapWilayah.set(uniqueId, init);
         }
 
         const rowTab2 = mapWilayah.get(uniqueId);
+        rowTab2[`${group}_sek`]++; // Counter Sekolah naik
         rowTab2[`${group}_rombel`] += rombelTotal;
         rowTab2[`${group}_kelas`] += kelasTotal;
         
         if (isNegeri) {
+           rowTab2[`${group}_sek_n`]++; // Counter Sekolah Negeri naik
            rowTab2[`${group}_rombel_n`] += rombelTotal;
            rowTab2[`${group}_kelas_n`] += kelasTotal;
         } else {
+           rowTab2[`${group}_sek_s`]++; // Counter Sekolah Swasta naik
            rowTab2[`${group}_rombel_s`] += rombelTotal;
            rowTab2[`${group}_kelas_s`] += kelasTotal;
         }

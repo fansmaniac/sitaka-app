@@ -96,7 +96,8 @@ export default function RasioRombelVsKelas({ selectedYear }) {
     if (!tab2DataRaw || tab2DataRaw.length === 0) return [];
 
     const resMap = new Map();
-    JENJANG_KEYS.forEach(k => resMap.set(k, { jenjang: k, rombel_n: 0, kelas_n: 0, rombel_s: 0, kelas_s: 0, total_rombel: 0, total_kelas: 0 }));
+    // Tambahkan variabel total_sek
+    JENJANG_KEYS.forEach(k => resMap.set(k, { jenjang: k, rombel_n: 0, kelas_n: 0, rombel_s: 0, kelas_s: 0, total_rombel: 0, total_kelas: 0, total_sek: 0 }));
 
     tab2DataRaw.forEach(row => {
       if (!isModeSemua && row.wilayah !== filterWilayah) return;
@@ -111,6 +112,7 @@ export default function RasioRombelVsKelas({ selectedYear }) {
         
         agg.total_rombel += (row[`${baseK}_rombel`] || 0);
         agg.total_kelas += (row[`${baseK}_kelas`] || 0);
+        agg.total_sek += (row[`${baseK}_sek`] || 0); // Akumulasi Total Sekolah
       });
     });
 
@@ -126,8 +128,9 @@ export default function RasioRombelVsKelas({ selectedYear }) {
       acc.kelas_s += curr.kelas_s;
       acc.total_rombel += curr.total_rombel;
       acc.total_kelas += curr.total_kelas;
+      acc.total_sek += curr.total_sek; // Akumulasi Grand Total Sekolah
       return acc;
-    }, { rombel_n: 0, kelas_n: 0, rombel_s: 0, kelas_s: 0, total_rombel: 0, total_kelas: 0 });
+    }, { rombel_n: 0, kelas_n: 0, rombel_s: 0, kelas_s: 0, total_rombel: 0, total_kelas: 0, total_sek: 0 });
   }, [tab1Data]);
 
 
@@ -198,6 +201,7 @@ export default function RasioRombelVsKelas({ selectedYear }) {
       { header: 'Kelas (Swasta)', key: 'kelas_s', width: 15 },
       { header: 'Total Rombel', key: 'total_rombel', width: 18 },
       { header: 'Total Kelas', key: 'total_kelas', width: 18 },
+      { header: 'Total Sekolah', key: 'total_sek', width: 18 }, // Tambahan kolom Export
     ];
 
     tab1Data.forEach(row => worksheet.addRow(row));
@@ -292,7 +296,11 @@ export default function RasioRombelVsKelas({ selectedYear }) {
             className="bg-transparent text-sm font-black uppercase text-gray-700 outline-none cursor-pointer min-w-[200px]"
           >
             <option value="SEMUA">SELURUH PROVINSI</option>
-            {KABUPATEN_LIST.map(k => <option key={k} value={k}>KAB. {k}</option>)}
+            {KABUPATEN_LIST.map(k => (
+              <option key={k} value={k}>
+                {k === 'SINGKAWANG' || k === 'PONTIANAK' ? 'KOTA' : 'KAB.'} {k}
+              </option>
+            ))}
           </select>
         </div>
       </div>
@@ -319,7 +327,8 @@ export default function RasioRombelVsKelas({ selectedYear }) {
                 <th className="px-4 py-4 text-orange-600 border-l border-gray-200">Rombel (Swasta)</th>
                 <th className="px-4 py-4 text-orange-600">Kelas (Swasta)</th>
                 <th className="px-4 py-4 text-gray-800 border-l border-gray-200 bg-gray-100">Total Rombel</th>
-                <th className="px-4 py-4 text-gray-800 rounded-r-xl bg-gray-100">Total Kelas</th>
+                <th className="px-4 py-4 text-gray-800 border-l border-gray-200 bg-gray-100">Total Kelas</th>
+                <th className="px-4 py-4 text-blue-800 rounded-r-xl bg-blue-50/50 border-l border-blue-100">Total Sekolah</th>
               </tr>
             </thead>
             <tbody>
@@ -332,7 +341,8 @@ export default function RasioRombelVsKelas({ selectedYear }) {
                   <td className="px-4 py-3 font-bold text-orange-700 bg-orange-50/20 border-y border-l border-gray-100">{row.rombel_s.toLocaleString()}</td>
                   <td className="px-4 py-3 font-black text-orange-700 bg-orange-50/20 border-y border-gray-100">{row.kelas_s.toLocaleString()}</td>
                   <td className="px-4 py-3 font-bold text-gray-700 bg-gray-50 border-y border-l border-gray-100">{row.total_rombel.toLocaleString()}</td>
-                  <td className="px-4 py-3 font-black text-gray-800 text-base bg-gray-100 border-y border-r border-gray-100 rounded-r-xl">{row.total_kelas.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-black text-gray-800 text-base bg-gray-100 border-y border-l border-gray-100">{row.total_kelas.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-black text-blue-700 text-base bg-blue-50/30 border-y border-x border-gray-100 rounded-r-xl">{row.total_sek.toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>
@@ -347,8 +357,9 @@ export default function RasioRombelVsKelas({ selectedYear }) {
                   <td className="px-4 py-4 text-amber-900 border-y border-amber-200">{grandTotalTab1.kelas_n.toLocaleString()}</td>
                   <td className="px-4 py-4 text-orange-800 border-y border-amber-200">{grandTotalTab1.rombel_s.toLocaleString()}</td>
                   <td className="px-4 py-4 text-orange-900 border-y border-amber-200">{grandTotalTab1.kelas_s.toLocaleString()}</td>
-                  <td className="px-4 py-4 text-amber-950 border-y border-amber-200">{grandTotalTab1.total_rombel.toLocaleString()}</td>
-                  <td className="px-4 py-4 text-amber-950 text-base border-y border-r border-amber-200 rounded-r-2xl bg-amber-200/50">{grandTotalTab1.total_kelas.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-amber-950 border-y border-l border-amber-200">{grandTotalTab1.total_rombel.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-amber-950 text-base border-y border-l border-amber-200 bg-amber-200/50">{grandTotalTab1.total_kelas.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-blue-900 text-base border-y border-x border-blue-200 rounded-r-2xl bg-blue-200/60">{grandTotalTab1.total_sek.toLocaleString()}</td>
                 </tr>
               </tfoot>
             )}

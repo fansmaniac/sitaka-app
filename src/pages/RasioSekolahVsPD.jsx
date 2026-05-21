@@ -265,7 +265,11 @@ export default function RasioSekolahVsPD({ selectedYear }) {
           <MapPin size={18} className="text-blue-600 mr-3" />
           <select value={filterWilayah} onChange={(e) => setFilterWilayah(e.target.value)} className="bg-transparent text-sm font-black uppercase text-gray-700 outline-none cursor-pointer min-w-[200px]">
             <option value="SEMUA">SELURUH PROVINSI</option>
-            {KABUPATEN_LIST.map(k => <option key={k} value={k}>KAB. {k}</option>)}
+            {KABUPATEN_LIST.map(k => (
+              <option key={k} value={k}>
+                {k === 'SINGKAWANG' || k === 'PONTIANAK' ? 'KOTA' : 'KAB.'} {k}
+              </option>
+            ))}
           </select>
         </div>
       </div>

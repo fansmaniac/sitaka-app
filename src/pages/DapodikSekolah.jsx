@@ -61,32 +61,32 @@ const cleanKabupatenName = (rawName) => {
 
 // Digunakan ketika user memilih tab spesifik di mode Kategori "SEMUA"
 const JENJANG_GROUPS = {
-  'PAUD': ['TK', 'KB', 'PAUD'],
+  'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
   'SD': ['SD', 'SPK SD'],
   'SMP': ['SMP', 'SPK SMP'],
   'SMA': ['SMA', 'SPK SMA'],
   'SMK': ['SMK'],
   'SLB (Inklusif)': ['SLB'],
-  'NON FORMAL': ['PKBM', 'SKB', 'SPS', 'TPA']
+  'NON FORMAL': ['PKBM', 'SKB']
 };
 
 // Digunakan untuk filter massal jika user memilih kategori tertentu tapi memilih tab "SEMUA (Kategori)"
 const KATEGORI_BENTUK = {
-  'PAUD': ['TK', 'KB'],
+  'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
   'DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
   'MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
   'INKLUSIF': ['SLB'],
-  'NON FORMAL': ['PKBM', 'TPA', 'SPS', 'SKB']
+  'NON FORMAL': ['PKBM', 'SKB']
 };
 
 // Daftar Tab Menu berdasarkan Kategori yang aktif di Dropdown
 const TABS_MAPPING = {
   'SEMUA': ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'],
-  'PAUD': ['TK', 'KB'],
+  'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
   'DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
   'MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
   'INKLUSIF': ['SLB'],
-  'NON FORMAL': ['PKBM', 'TPA', 'SPS', 'SKB']
+  'NON FORMAL': ['PKBM', 'SKB']
 };
 
 // =====================================================================

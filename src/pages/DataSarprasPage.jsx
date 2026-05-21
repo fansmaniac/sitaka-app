@@ -155,9 +155,19 @@ export default function DataSarprasPage({ onBack, Header }) {
         }
       }
 
-      const q = query(collection(db, 'data_sarpras'), where("tahun_data", "==", selectedYear));
+      // PERBAIKAN: Menggunakan _ (underscore) karena sesuai dengan di AdminDatabaseMaster
+      const q = query(collection(db, 'data_sarpras_chunks'), where("tahun_data", "==", selectedYear));
       const snap = await getDocs(q);
-      const freshData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      let freshData = [];
+      
+      // Membongkar array 'data' (objek JSON langsung)
+      snap.docs.forEach(doc => {
+        const chunkDoc = doc.data();
+        if (chunkDoc.data && Array.isArray(chunkDoc.data)) {
+          freshData.push(...chunkDoc.data);
+        }
+      });
 
       setData(freshData);
       await saveToCache(cacheKey, freshData);

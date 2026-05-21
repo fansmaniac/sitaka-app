@@ -7,6 +7,7 @@ import {
   Home, 
   School, 
   LogIn, 
+  LogOut,
   UserCheck,
   Building2,
   Map
@@ -67,16 +68,20 @@ function AppContent() {
             <span className="font-bold sm:hidden">ADMIN</span>
             <button 
               onClick={handleLogout} 
-              className="text-blue-200 font-black hover:text-white border-l border-blue-500 pl-2 md:pl-3 transition-colors"
+              title="Logout"
+              className="text-blue-200 hover:text-white border-l border-blue-500 pl-2 md:pl-3 flex items-center justify-center transition-colors hover:scale-110 active:scale-95"
             >
-              LOGOUT
+              <LogOut className="w-4 h-4 md:w-5 md:h-5" />
             </button>
           </div>
         ) : (
-          <button onClick={() => navigate('/login')} className="flex items-center gap-1.5 md:gap-2 bg-white/10 hover:bg-white/20 px-3 md:px-5 py-2 md:py-2.5 rounded-xl transition-all text-xs md:text-sm font-black border border-white/30 active:scale-95 shadow-sm">
-            <LogIn className="w-4 h-4 md:w-5 md:h-5" />
-            <span className="hidden sm:inline">LOGIN ADMIN</span>
-            <span className="sm:hidden">LOGIN</span>
+          /* --- BAGIAN TOMBOL LOGIN DIUBAH DI SINI --- */
+          <button 
+            onClick={() => navigate('/login')} 
+            title="Login Admin"
+            className="flex items-center justify-center bg-white/10 hover:bg-white/20 p-2 md:p-2.5 rounded-xl transition-all border border-white/30 active:scale-95 shadow-sm hover:scale-110"
+          >
+            <LogIn className="w-5 h-5 md:w-6 md:h-6" />
           </button>
         )}
       </div>

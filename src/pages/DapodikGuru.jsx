@@ -79,21 +79,21 @@ const calculateAge = (birthDateString) => {
 // PENGELOMPOKAN KATEGORI DROPDOWN SINKRON DENGAN DAPODIK SEKOLAH
 // =====================================================================
 const KATEGORI_MAPPING = {
-  'PAUD': ['TK', 'KB'],
+  'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
   'PENDIDIKAN DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
   'PENDIDIKAN MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
   'PENDIDIKAN INKLUSIF': ['SLB'],
-  'PENDIDIKAN NON FORMAL': ['PKBM', 'TPA', 'SPS', 'SKB']
+  'PENDIDIKAN NON FORMAL': ['PKBM', 'SKB']
 };
 
 const SEMUA_SUBTABS_MAPPING = {
-  'PAUD': ['TK', 'KB', 'PAUD'],
+  'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
   'SD': ['SD', 'SPK SD'],
   'SMP': ['SMP', 'SPK SMP'],
   'SMA': ['SMA', 'SPK SMA'],
   'SMK': ['SMK'],
   'SLB (Inklusif)': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
-  'NON FORMAL': ['PKBM', 'SKB', 'SPS', 'TPA']
+  'NON FORMAL': ['PKBM', 'SKB']
 };
 
 // =====================================================================

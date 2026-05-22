@@ -140,10 +140,14 @@ const calculateTotalRombel = (item) => {
   return total;
 };
 
-// Kelas Layak Pakai = Kondisi Baik + Rusak Ringan
-const calculateKelasLayak = (itemSarpras) => {
+// UPDATE: Total Ruang Kelas = Semua Kondisi
+const calculateTotalKelas = (itemSarpras) => {
   if (!itemSarpras) return 0;
-  return getNum(itemSarpras, 'ruang_kelas_baik') + getNum(itemSarpras, 'ruang_kelas_rusak_ringan'); 
+  return getNum(itemSarpras, 'ruang_kelas_baik') + 
+         getNum(itemSarpras, 'ruang_kelas_rusak_ringan') +
+         getNum(itemSarpras, 'ruang_kelas_rusak_sedang') +
+         getNum(itemSarpras, 'ruang_kelas_rusak_berat') +
+         (getNum(itemSarpras, 'ruang_kelas_tidak_bisa_dipakai') || getNum(itemSarpras, 'ruang_kelas_tidak_bis_dipakai') || 0); 
 };
 
 // Menyatukan Jenjang
@@ -258,10 +262,10 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
         chunk.data.forEach(item => {
           const npsn = cleanNpsn(getString(item, 'npsn'));
           const matchKey = getSchoolMatchKey(item);
-          const kelasLayak = calculateKelasLayak(item);
+          const totalKelas = calculateTotalKelas(item);
           
-          if (npsn) byNpsn.set(npsn, (byNpsn.get(npsn) || 0) + kelasLayak);
-          if (matchKey) byNameKec.set(matchKey, (byNameKec.get(matchKey) || 0) + kelasLayak);
+          if (npsn) byNpsn.set(npsn, (byNpsn.get(npsn) || 0) + totalKelas);
+          if (matchKey) byNameKec.set(matchKey, (byNameKec.get(matchKey) || 0) + totalKelas);
         });
       }
     });
@@ -286,7 +290,66 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
   const handleStatusChange = (e) => { startTransition(() => setFilterStatus(e.target.value)); };
 
   // =====================================================================
-  // ENGINE AGREGASI DOUBLE SHIFT (MEROMBOK ARSITEKTUR LOOP)
+  // TAHAP 1: PRE-COMPUTATION (Hanya jalan sekali saat data load)
+  // Menyiapkan 1 Array flat yang sudah ada perhitungan kelas & rombelnya
+  // =====================================================================
+  const masterDataBersih = useMemo(() => {
+    if (!allSekolahItems.length) return [];
+
+    return allSekolahItems.map(item => {
+      const jenjang = getJenjang(item);
+      const rombel = calculateTotalRombel(item);
+      const npsn = cleanNpsn(getString(item, 'npsn'));
+      const matchKey = getSchoolMatchKey(item);
+      
+      let kelasForSchool = 0;
+      if (npsn && mapSarprasData.byNpsn.has(npsn)) {
+          kelasForSchool = mapSarprasData.byNpsn.get(npsn);
+      } else if (matchKey && mapSarprasData.byNameKec.has(matchKey)) {
+          kelasForSchool = mapSarprasData.byNameKec.get(matchKey);
+      }
+
+      return {
+        jenjang,
+        kabupaten: cleanKabupatenName(getString(item, 'kabupaten') || getString(item, 'Kabupaten/Kota')),
+        kecamatan: getString(item, 'kecamatan').toUpperCase(),
+        status: getString(item, 'status_sekolah').toUpperCase(),
+        rombel: rombel,
+        kelas: kelasForSchool, // Kelas untuk kalkulasi shift per sekolah
+        isDoubleShift: rombel > kelasForSchool
+      };
+    }).filter(item => item.jenjang !== null); // Buang yang jenjangnya tidak valid
+  }, [allSekolahItems, mapSarprasData]);
+
+  // Hitung Total Kelas Murni (Independen)
+  const masterTotalKelas = useMemo(() => {
+    const totalKelasPerJenjang = {};
+    dataSarpras.forEach(chunk => {
+      if (chunk && Array.isArray(chunk.data)) {
+        chunk.data.forEach(item => {
+          const jenjang = getJenjang(item);
+          if (jenjang) {
+            const totalKelas = calculateTotalKelas(item);
+            if (!totalKelasPerJenjang[jenjang]) totalKelasPerJenjang[jenjang] = [];
+            
+            // Simpan detail untuk di-filter nanti
+            totalKelasPerJenjang[jenjang].push({
+              kabupaten: cleanKabupatenName(getString(item, 'kabupaten') || getString(item, 'Kabupaten/Kota')),
+              kecamatan: getString(item, 'kecamatan').toUpperCase(),
+              status: getString(item, 'status_sekolah').toUpperCase(),
+              totalKelas
+            });
+          }
+        });
+      }
+    });
+    return totalKelasPerJenjang;
+  }, [dataSarpras]);
+
+
+  // =====================================================================
+  // TAHAP 2: FILTERING & AGREGASI CEPAT (Jalan saat dropdown berubah)
+  // Sangat ringan, tidak ada regex atau parsing string
   // =====================================================================
   const aggregatedData = useMemo(() => {
     const mapAgg = new Map();
@@ -296,77 +359,43 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
       mapAgg.set(j, { jenjang: j, jumlah_sekolah: 0, jumlah_kelas: 0, jumlah_rombel: 0, sekolah_double_shift: 0 });
     });
 
-    if (!allSekolahItems.length) return Array.from(mapAgg.values());
-
-    // 1. LOOP SEKOLAH: Hitung Sekolah, Rombel & Kalkulasi Relasi Double Shift
-    allSekolahItems.forEach(item => {
-      const jenjang = getJenjang(item);
-      if (!jenjang || !mapAgg.has(jenjang)) return;
-
-      if (filterWilayah !== 'SEMUA') {
-        const kabDb = cleanKabupatenName(getString(item, 'kabupaten') || getString(item, 'Kabupaten/Kota'));
-        if (kabDb !== filterWilayah) return;
-      }
-      if (filterKecamatan !== 'SEMUA') {
-        const kecDb = getString(item, 'kecamatan').toUpperCase();
-        if (kecDb !== filterKecamatan) return;
-      }
-      if (filterStatus !== 'SEMUA') {
-        const statusDb = getString(item, 'status_sekolah').toUpperCase();
-        if (statusDb !== filterStatus) return;
-      }
-
-      const row = mapAgg.get(jenjang);
-      const rombel = calculateTotalRombel(item);
+    // 1. Agregasi Data Sekolah
+    for (let i = 0; i < masterDataBersih.length; i++) {
+      const item = masterDataBersih[i];
       
-      // Ambil Kelas dari Peta Sarpras untuk mencari sekolah yang kekurangan kelas
-      const npsn = cleanNpsn(getString(item, 'npsn'));
-      const matchKey = getSchoolMatchKey(item);
-      let kelasForSchool = 0;
+      if (filterWilayah !== 'SEMUA' && item.kabupaten !== filterWilayah) continue;
+      if (filterKecamatan !== 'SEMUA' && item.kecamatan !== filterKecamatan) continue;
+      if (filterStatus !== 'SEMUA' && item.status !== filterStatus) continue;
 
-      if (npsn && mapSarprasData.byNpsn.has(npsn)) {
-          kelasForSchool = mapSarprasData.byNpsn.get(npsn);
-      } else if (matchKey && mapSarprasData.byNameKec.has(matchKey)) {
-          kelasForSchool = mapSarprasData.byNameKec.get(matchKey);
+      const row = mapAgg.get(item.jenjang);
+      if (row) {
+        row.jumlah_sekolah++;
+        row.jumlah_rombel += item.rombel;
+        if (item.isDoubleShift) row.sekolah_double_shift++;
       }
-      
-      const isDoubleShift = rombel > kelasForSchool;
+    }
 
-      row.jumlah_sekolah++;
-      row.jumlah_rombel += rombel;
-      if (isDoubleShift) row.sekolah_double_shift++;
-    });
-
-    // 2. LOOP SARPRAS: Hitung Total "Jumlah Kelas Layak" Secara Independen 
-    // Sama persis dengan suksesnya DapodikSarprasKondisi.jsx (Menghindari 0 akibat gagal JOIN)
-    dataSarpras.forEach(chunk => {
-      if (chunk && Array.isArray(chunk.data)) {
-        chunk.data.forEach(item => {
-          const jenjang = getJenjang(item);
-          if (!jenjang || !mapAgg.has(jenjang)) return;
-
-          // Samakan Filter dengan Sekolah
-          if (filterWilayah !== 'SEMUA') {
-            const kabDb = cleanKabupatenName(getString(item, 'kabupaten') || getString(item, 'Kabupaten/Kota'));
-            if (kabDb !== filterWilayah) return;
-          }
-          if (filterKecamatan !== 'SEMUA') {
-            const kecDb = getString(item, 'kecamatan').toUpperCase();
-            if (kecDb !== filterKecamatan) return;
-          }
-          if (filterStatus !== 'SEMUA') {
-            const statusDb = getString(item, 'status_sekolah').toUpperCase();
-            if (statusDb !== filterStatus) return;
-          }
-
-          const kelasLayak = calculateKelasLayak(item);
-          mapAgg.get(jenjang).jumlah_kelas += kelasLayak;
-        });
-      }
+    // 2. Agregasi Data Kelas (Independen dari loop atas)
+    Object.keys(masterTotalKelas).forEach(jenjang => {
+       const sarprasItems = masterTotalKelas[jenjang];
+       let sumKelas = 0;
+       
+       for(let i=0; i < sarprasItems.length; i++) {
+         const item = sarprasItems[i];
+         if (filterWilayah !== 'SEMUA' && item.kabupaten !== filterWilayah) continue;
+         if (filterKecamatan !== 'SEMUA' && item.kecamatan !== filterKecamatan) continue;
+         if (filterStatus !== 'SEMUA' && item.status !== filterStatus) continue;
+         
+         sumKelas += item.totalKelas;
+       }
+       
+       if(mapAgg.has(jenjang)) {
+         mapAgg.get(jenjang).jumlah_kelas = sumKelas;
+       }
     });
 
     return Array.from(mapAgg.values());
-  }, [allSekolahItems, dataSarpras, mapSarprasData, filterWilayah, filterKecamatan, filterStatus]);
+  }, [masterDataBersih, masterTotalKelas, filterWilayah, filterKecamatan, filterStatus]);
 
   // Grand Total
   const grandTotals = useMemo(() => {
@@ -510,7 +539,7 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
                 <tr className="text-[10px] font-black uppercase text-gray-500 whitespace-nowrap">
                   <th className="px-4 py-3 text-left rounded-l-xl">Jenjang Pendidikan</th>
                   <th className="px-4 py-3 text-cyan-700">Jml Sekolah</th>
-                  <th className="px-4 py-3 text-emerald-600">Jml Kelas Layak</th>
+                  <th className="px-4 py-3 text-emerald-600">Jml Ruang Kelas</th>
                   <th className="px-4 py-3 text-indigo-600">Jml Rombel</th>
                   <th className="px-4 py-3 text-rose-600 border-l-2 border-rose-100">Sekolah Shift</th>
                   <th className="px-4 py-3 rounded-r-xl text-rose-800">% Shift</th>
@@ -555,7 +584,7 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
               <div>
                 <h4 className="font-black text-yellow-800 text-xs uppercase tracking-widest mb-1">Catatan Metodologi</h4>
                 <p className="text-xs font-medium text-yellow-700 leading-relaxed">
-                  Sekolah diindikasikan menyelenggarakan sistem <strong>Double Shift</strong> apabila total jumlah <strong>Rombongan Belajar (Rombel)</strong> melebihi total jumlah <strong>Ruang Kelas Layak Pakai</strong> (Kondisi Baik + Rusak Ringan). Ruangan kelas yang Rusak Sedang, Rusak Berat, dan Tidak Bisa Dipakai dikeluarkan dari rasio ketersediaan ini.
+                  Sekolah diindikasikan menyelenggarakan sistem <strong>Double Shift</strong> apabila total jumlah <strong>Rombongan Belajar (Rombel)</strong> melebihi total keseluruhan <strong>Ruang Kelas</strong> yang tersedia. Perhitungan ruang kelas ini murni mencakup semua kondisi ruangan (Baik, Rusak Ringan, Rusak Sedang, Rusak Berat, hingga Tidak Bisa Dipakai).
                 </p>
               </div>
             </div>

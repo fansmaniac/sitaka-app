@@ -1,0 +1,945 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { 
+  ArrowLeft, Building2, Download, MapPin, Loader2, 
+  ChevronRight, Eye, X, Search, Info,
+  Bot, Send, Sparkles, RefreshCw, FileSpreadsheet
+} from 'lucide-react';
+import { db } from '../../firebase/config';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import ExcelJS from 'exceljs';
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+// =====================================================================
+// UTILITY: INDEXED-DB CACHING (BRANKAS LOKAL BROWSER)
+// =====================================================================
+const DB_NAME = "SitakaCacheDB_Sarpras";
+const STORE_NAME = "sarprasData";
+const CACHE_EXPIRY_HOURS = 12;
+
+const initDB = () => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = (e) => e.target.result.createObjectStore(STORE_NAME);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+};
+
+const saveToCache = async (key, data) => {
+  try {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      tx.objectStore(STORE_NAME).put({ data, timestamp: Date.now() }, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) { console.warn("Gagal menyimpan ke cache lokal", err); }
+};
+
+const getFromCache = async (key) => {
+  try {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const req = tx.objectStore(STORE_NAME).get(key);
+      req.onsuccess = () => {
+        const result = req.result;
+        if (result) {
+          const hoursOld = (Date.now() - result.timestamp) / (1000 * 60 * 60);
+          if (hoursOld < CACHE_EXPIRY_HOURS) return resolve(result.data);
+        }
+        resolve(null);
+      };
+      req.onerror = () => resolve(null);
+    });
+  } catch (err) { return null; }
+};
+// =====================================================================
+
+// --- KONSTANTA DAFTAR KABUPATEN ---
+const KABUPATEN_LIST = [
+  "BENGKAYANG", "KAPUAS HULU", "KAYONG UTARA", "KETAPANG", 
+  "KUBU RAYA", "LANDAK", "MELAWI", "MEMPAWAH", "PONTIANAK", 
+  "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
+];
+
+// --- SETUP GEMINI AI API ---
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+
+let genAI = null;
+if (apiKey && apiKey.trim() !== "") {
+  genAI = new GoogleGenerativeAI(apiKey);
+} else {
+  console.error("Gawat Sob! API Key Gemini tidak terdeteksi oleh Vite.");
+}
+
+// --- DICTIONARY NAMA RUANG & KONDISI ---
+const ROOM_LABELS = {
+  'ruang_kelas': 'Ruang Kelas',
+  'ruang_perpustakaan': 'Perpustakaan',
+  'ruang_lab_komputer': 'Lab Komputer',
+  'ruang_lab_bahasa': 'Lab Bahasa',
+  'ruang_lab_ipa': 'Lab IPA',
+  'ruang_lab_fisika': 'Lab Fisika',
+  'ruang_lab_biologi': 'Lab Biologi',
+  'ruang_ruang_kepsek': 'Ruang Kepsek',
+  'ruang_ruang_guru': 'Ruang Guru',
+  'ruang_ruang_tu': 'Ruang TU',
+  'ruang_wc_siswa_laki_laki': 'WC Siswa (L)',
+  'ruang_wc_siswa_perempuan': 'WC Siswa (P)',
+  'ruang_wc_guru_laki_laki': 'WC Guru (L)',
+  'ruang_wc_guru_perempuan': 'WC Guru (P)'
+};
+
+const CONDITIONS = [
+  { key: 'baik', label: 'Baik', color: 'text-emerald-600' },
+  { key: 'rusak_ringan', label: 'R.Ringan', color: 'text-blue-500' },
+  { key: 'rusak_sedang', label: 'R.Sedang', color: 'text-yellow-500' },
+  { key: 'rusak_berat', label: 'R.Berat', color: 'text-orange-500' },
+  { key: 'tidak_bisa_dipakai', label: 'Tdk Dipakai', color: 'text-red-600' }
+];
+
+export default function DataSarprasPage({ onBack, Header }) {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false); 
+  const [selectedYear, setSelectedYear] = useState('2026');
+  const [activeTab, setActiveTab] = useState('SEMUA'); 
+  
+  const [activeRowModal, setActiveRowModal] = useState(null);
+  const [modalSearchQuery, setModalSearchQuery] = useState('');
+
+  // --- STATE UNTUK AI ASSISTANT ---
+  const [isAiOpen, setIsAiOpen] = useState(false);
+  const [aiInput, setAiInput] = useState('');
+  const [isAiTyping, setIsAiTyping] = useState(false);
+  const [chatHistory, setChatHistory] = useState([
+    { role: 'ai', text: 'Halo Sob! Saya Asisten AI SITAKA. Ada yang ingin saya analisis dari data Sarpras di layar saat ini?' }
+  ]);
+
+  const [showTour, setShowTour] = useState(false);
+  const [dontShowAgain, setDontShowAgain] = useState(false);
+
+  // --- PENGELOMPOKAN JENJANG ---
+  const JENJANG_GROUPS = [
+    { id: 'PAUD', label: 'Jenjang PAUD', types: ['TK', 'KB'] },
+    { id: 'DASAR', label: 'Jenjang Dasar', types: ['SD', 'SMP'] }, 
+    { id: 'MENENGAH', label: 'Jenjang Menengah', types: ['SMA', 'SMK'] }, 
+    { id: 'INKLUSIF', label: 'Jenjang Inklusif', types: ['SLB'] },
+    { id: 'NON_FORMAL', label: 'Jenjang Non Formal', types: ['PKBM', 'SPS', 'TPA', 'SKB'] }, 
+  ];
+
+  const TABS = [{ id: 'SEMUA', label: 'Semua Jenjang' }, ...JENJANG_GROUPS];
+
+  const getRequiredRooms = (jenjang) => {
+    const base = [
+      'ruang_kelas', 'ruang_perpustakaan', 'ruang_ruang_kepsek', 
+      'ruang_ruang_guru', 'ruang_ruang_tu', 'ruang_wc_siswa_laki_laki', 
+      'ruang_wc_siswa_perempuan', 'ruang_wc_guru_laki_laki', 'ruang_wc_guru_perempuan'
+    ];
+    if (jenjang === 'SD') return [...base, 'ruang_lab_komputer'];
+    if (jenjang === 'SMP') return [...base, 'ruang_lab_komputer', 'ruang_lab_ipa'];
+    if (['SMA', 'SMK'].includes(jenjang)) return [...base, 'ruang_lab_komputer', 'ruang_lab_ipa', 'ruang_lab_fisika', 'ruang_lab_biologi', 'ruang_lab_bahasa'];
+    return base;
+  };
+
+  // --- FETCH DATA DENGAN LOGIKA CACHE ---
+  const loadData = async (forceSync = false) => {
+    setLoading(true);
+    if (forceSync) setIsSyncing(true);
+    
+    const cacheKey = `sarpras_all_${selectedYear}`;
+
+    try {
+      if (!forceSync) {
+        const cachedData = await getFromCache(cacheKey);
+        if (cachedData) {
+          setData(cachedData);
+          setLoading(false);
+          return;
+        }
+      }
+
+      // PERBAIKAN: Menggunakan _ (underscore) karena sesuai dengan di AdminDatabaseMaster
+      const q = query(collection(db, 'data_sarpras_chunks'), where("tahun_data", "==", selectedYear));
+      const snap = await getDocs(q);
+      
+      let freshData = [];
+      
+      // Membongkar array 'data' (objek JSON langsung)
+      snap.docs.forEach(doc => {
+        const chunkDoc = doc.data();
+        if (chunkDoc.data && Array.isArray(chunkDoc.data)) {
+          freshData.push(...chunkDoc.data);
+        }
+      });
+
+      setData(freshData);
+      await saveToCache(cacheKey, freshData);
+
+    } catch (err) { 
+      console.error("Error mengambil data Sarpras:", err); 
+    } finally { 
+      setLoading(false); 
+      setIsSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData(false);
+
+    const isTourHidden = localStorage.getItem('hideSitakaAiTour');
+    if (!isTourHidden) {
+      setTimeout(() => setShowTour(true), 1500); 
+    }
+  }, [selectedYear]);
+
+  const closeTourGuide = () => {
+    if (dontShowAgain) {
+      localStorage.setItem('hideSitakaAiTour', 'true');
+    }
+    setShowTour(false);
+  };
+
+  const auditSarpras = (school) => {
+    const jenjang = String(school.jenjang || '').toUpperCase();
+    const reqRooms = getRequiredRooms(jenjang);
+    
+    let sumBaik = 0;
+    let sumTotal = 0;
+    let missingCount = 0;
+
+    reqRooms.forEach(room => {
+      const baik = parseInt(school[`${room}_baik`]) || 0;
+      const rr = parseInt(school[`${room}_rusak_ringan`]) || 0;
+      const rs = parseInt(school[`${room}_rusak_sedang`]) || 0;
+      const rb = parseInt(school[`${room}_rusak_berat`]) || 0;
+      const tbd = parseInt(school[`${room}_tidak_bisa_dipakai`]) || 0;
+      const total = baik + rr + rs + rb + tbd;
+
+      if (total === 0) missingCount++;
+      sumBaik += baik;
+      sumTotal += total;
+    });
+
+    const percentBaik = sumTotal > 0 ? (sumBaik / sumTotal) * 100 : 0;
+
+    if (missingCount > 5 || percentBaik < 50) return 'Sangat Kurang';
+    if (percentBaik >= 90) return 'Lengkap';
+    if (percentBaik >= 80) return 'Cukup';
+    if (percentBaik >= 50) return 'Kurang';
+    return 'Sangat Kurang';
+  };
+
+  const summaryTable = useMemo(() => {
+    if (activeTab === 'SEMUA') {
+      return JENJANG_GROUPS.map(jg => {
+        const schoolsInGroup = data.filter(s => jg.types.includes(String(s.jenjang || '').toUpperCase()));
+        const stats = { lengkap: 0, cukup: 0, kurang: 0, sangatKurang: 0, schoolList: [] };
+        
+        schoolsInGroup.forEach(s => {
+          const cat = auditSarpras(s);
+          s.auditCategory = cat;
+          stats.schoolList.push(s);
+          if (cat === 'Lengkap') stats.lengkap++;
+          else if (cat === 'Cukup') stats.cukup++;
+          else if (cat === 'Kurang') stats.kurang++;
+          else stats.sangatKurang++;
+        });
+
+        return {
+          rowLabel: jg.label,
+          modalTitle: jg.label,
+          modalSubtitle: 'Semua Kabupaten/Kota',
+          totalRow: stats.lengkap + stats.cukup + stats.kurang + stats.sangatKurang,
+          ...stats
+        };
+      });
+    } else {
+      const activeGroupDef = JENJANG_GROUPS.find(g => g.id === activeTab);
+      return KABUPATEN_LIST.map(kab => {
+        const schoolsInGroup = data.filter(s => 
+          String(s.kabupaten || '').toUpperCase().includes(kab.toUpperCase()) && 
+          activeGroupDef.types.includes(String(s.jenjang || '').toUpperCase())
+        );
+
+        const stats = { lengkap: 0, cukup: 0, kurang: 0, sangatKurang: 0, schoolList: [] };
+        schoolsInGroup.forEach(s => {
+          const cat = auditSarpras(s);
+          s.auditCategory = cat;
+          stats.schoolList.push(s);
+          if (cat === 'Lengkap') stats.lengkap++;
+          else if (cat === 'Cukup') stats.cukup++;
+          else if (cat === 'Kurang') stats.kurang++;
+          else stats.sangatKurang++;
+        });
+
+        return {
+          rowLabel: kab,
+          modalTitle: kab,
+          modalSubtitle: activeGroupDef.label,
+          totalRow: stats.lengkap + stats.cukup + stats.kurang + stats.sangatKurang,
+          ...stats
+        };
+      });
+    }
+  }, [data, activeTab]);
+
+  const tableTotals = useMemo(() => {
+    return summaryTable.reduce((acc, row) => {
+      acc.lengkap += row.lengkap;
+      acc.cukup += row.cukup;
+      acc.kurang += row.kurang;
+      acc.sangatKurang += row.sangatKurang;
+      acc.total += row.totalRow;
+      return acc;
+    }, { lengkap: 0, cukup: 0, kurang: 0, sangatKurang: 0, total: 0 });
+  }, [summaryTable]);
+
+  // --- FUNGSI EXPORT EXCEL REKAPITULASI ---
+  const downloadRekapExcel = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheetName = activeTab === 'SEMUA' ? 'Rekap Semua Jenjang' : `Rekap ${activeTab}`;
+    const worksheet = workbook.addWorksheet(sheetName);
+
+    worksheet.columns = [
+      { header: activeTab === 'SEMUA' ? 'Jenjang Pendidikan' : 'Kabupaten/Kota', key: 'rowLabel', width: 30 },
+      { header: 'Sarpras Lengkap', key: 'lengkap', width: 20 },
+      { header: 'Sarpras Cukup', key: 'cukup', width: 20 },
+      { header: 'Sarpras Kurang', key: 'kurang', width: 20 },
+      { header: 'Sangat Kurang', key: 'sangatKurang', width: 20 },
+      { header: 'Total Sekolah', key: 'totalRow', width: 20 },
+    ];
+
+    summaryTable.forEach(row => {
+      worksheet.addRow({
+        rowLabel: row.rowLabel,
+        lengkap: row.lengkap,
+        cukup: row.cukup,
+        kurang: row.kurang,
+        sangatKurang: row.sangatKurang,
+        totalRow: row.totalRow
+      });
+    });
+
+    const totalRow = worksheet.addRow({
+      rowLabel: 'TOTAL KESELURUHAN',
+      lengkap: tableTotals.lengkap,
+      cukup: tableTotals.cukup,
+      kurang: tableTotals.kurang,
+      sangatKurang: tableTotals.sangatKurang,
+      totalRow: tableTotals.total
+    });
+
+    worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6B21A8' } }; 
+    totalRow.font = { bold: true, color: { argb: 'FF4C1D95' } }; 
+    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3E8FF' } }; 
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Rekap_Sarpras_${activeTab}_${selectedYear}.xlsx`;
+    link.click();
+  };
+
+  // --- FUNGSI AI ASSISTANT ---
+  const handleSendAiMessage = async () => {
+    if (!aiInput.trim()) return;
+
+    const userMessage = { role: 'user', text: aiInput };
+    setChatHistory(prev => [...prev, userMessage]);
+    setAiInput('');
+    setIsAiTyping(true);
+
+    try {
+      if (!genAI) throw new Error("API_KEY_MISSING");
+
+      const dataContext = `
+        Konteks Aplikasi: SITAKA (Sistem Informasi Terpadu Kalimantan Barat)
+        Tahun Data yang dianalisis: ${selectedYear}
+        Tab yang sedang dibuka user: ${activeTab}
+        
+        Rekapitulasi Angka Saat Ini:
+        - Total Sekolah Keseluruhan: ${tableTotals.total.toLocaleString()}
+        - Sarpras Lengkap: ${tableTotals.lengkap.toLocaleString()}
+        - Sarpras Cukup: ${tableTotals.cukup.toLocaleString()}
+        - Sarpras Kurang: ${tableTotals.kurang.toLocaleString()}
+        - Sangat Kurang: ${tableTotals.sangatKurang.toLocaleString()}
+
+        Aturan Penilaian Kelayakan:
+        1. Kategori "Lengkap": Jika 90% - 100% ruangan wajib berkondisi BAIK.
+        2. Kategori "Cukup": Jika 80% - 89% ruangan wajib berkondisi BAIK.
+        3. Kategori "Kurang": Jika 50% - 79% ruangan wajib berkondisi BAIK.
+        4. Kategori "Sangat Kurang": Jika < 50% ruangan wajib berkondisi BAIK, ATAU tidak memiliki lebih dari 5 ruangan wajib.
+
+        Pengelompokan Jenjang:
+        - Dasar: SD dan SMP
+        - Menengah: SMA dan SMK
+        - PAUD: TK dan KB
+        - Inklusif: SLB
+        - Non Formal: PKBM, SPS, TPA, SKB
+
+        Daftar Ruangan Wajib Berdasarkan Jenjang:
+        - PAUD / Inklusif / Non Formal: Kelas, Perpus, Kepsek, Guru, TU, WC Siswa, WC Guru.
+        - SD: Sama seperti di atas + Lab Komputer.
+        - SMP: Sama seperti SD + Lab IPA.
+        - SMA/SMK: Sama seperti SMP + Lab Fisika, Lab Biologi, Lab Bahasa.
+      `;
+
+      const prompt = `
+        Kamu adalah Asisten Data SITAKA. Jawab pertanyaan user berdasarkan data berikut:
+        ${dataContext}
+        
+        Pertanyaan User: "${userMessage.text}"
+        
+        Instruksi untuk AI:
+        - Jawab dengan bahasa Indonesia yang asik, ramah, dan ringkas. Gunakan sapaan "Sob".
+        - Gunakan format markdown (*bold*, list) agar rapi.
+        - Jika user bertanya darimana asal usul angka "Lengkap" atau cara hitungnya, jelaskan aturan penilaiannya.
+        - Jika pertanyaan tidak relevan dengan data di atas, jawab dengan sopan bahwa kamu hanya bisa menganalisis data sarpras yang sedang aktif.
+      `;
+
+      let responseText = "";
+      let success = false;
+      let lastError = null;
+
+      const modelsToTry = [
+        "gemini-2.5-flash", 
+        "gemini-2.0-flash", 
+        "gemini-1.5-flash-latest", 
+        "gemini-1.5-pro"
+      ];
+
+      for (const modelName of modelsToTry) {
+        try {
+          const model = genAI.getGenerativeModel({ model: modelName });
+          const result = await model.generateContent(prompt);
+          responseText = result.response.text();
+          success = true;
+          break; 
+        } catch (err) {
+          lastError = err;
+          if (err.message && (err.message.includes("API_KEY") || err.message.includes("403") || err.message.includes("400"))) {
+            break; 
+          }
+        }
+      }
+
+      if (!success) throw lastError || new Error("Semua model gagal diakses.");
+
+      setChatHistory(prev => [...prev, { role: 'ai', text: responseText }]);
+    } catch (error) {
+      console.error("Error AI:", error);
+      if (error.message === "API_KEY_MISSING" || (error.message && error.message.includes("API_KEY"))) {
+        setChatHistory(prev => [...prev, { role: 'ai', text: "Maaf Sob, sepertinya Kunci API belum valid atau terblokir. Jika kamu baru mengatur 'HTTP referrers' di Google Cloud Console, coba kembalikan ke 'None' dulu untuk memastikan kuncinya bekerja." }]);
+      } else {
+        setChatHistory(prev => [...prev, { role: 'ai', text: "Maaf Sob, saat ini koneksi ke server AI sedang terganggu. Coba tanyakan lagi nanti ya." }]);
+      }
+    } finally {
+      setIsAiTyping(false);
+    }
+  };
+
+  const downloadDetailExcel = async (title, schoolList) => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Detail Sarpras Lengkap');
+    
+    const columns = [
+      { header: 'NPSN', key: 'npsn', width: 15 },
+      { header: 'NAMA SEKOLAH', key: 'nama', width: 40 },
+      { header: 'JENJANG', key: 'jenjang', width: 10 },
+      { header: 'KABUPATEN', key: 'kab', width: 20 },
+      { header: 'STATUS KELAYAKAN', key: 'status', width: 20 }
+    ];
+
+    Object.entries(ROOM_LABELS).forEach(([roomKey, roomLabel]) => {
+      CONDITIONS.forEach(cond => {
+        columns.push({
+          header: `${roomLabel} - ${cond.label}`,
+          key: `${roomKey}_${cond.key}`,
+          width: 15
+        });
+      });
+    });
+
+    sheet.columns = columns;
+
+    schoolList.forEach(s => {
+      const rowData = { npsn: s.npsn, nama: s.nama_sekolah, jenjang: s.jenjang, kab: s.kabupaten, status: s.auditCategory };
+      Object.keys(ROOM_LABELS).forEach(roomKey => {
+        CONDITIONS.forEach(cond => { rowData[`${roomKey}_${cond.key}`] = parseInt(s[`${roomKey}_${cond.key}`]) || 0; });
+      });
+      sheet.addRow(rowData);
+    });
+
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6B21A8' } }; 
+    sheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([buffer]));
+    link.download = `SITAKA_Rincian_Sarpras_${title.replace(/ /g, '_')}_${selectedYear}.xlsx`;
+    link.click();
+  };
+
+  const renderCellWithPct = (value, total, colorClass) => {
+    const pct = total > 0 ? ((value / total) * 100).toFixed(1) : "0.0";
+    return (
+      <div className={`flex items-baseline justify-center gap-1.5 ${colorClass}`}>
+        <span className="font-black text-sm md:text-base">{value.toLocaleString()}</span>
+        <span className="text-[8px] md:text-[10px] font-bold opacity-70">({pct}%)</span>
+      </div>
+    );
+  };
+
+  const filteredAndSortedModalList = useMemo(() => {
+    if (!activeRowModal) return [];
+    let list = activeRowModal.schoolList;
+
+    if (modalSearchQuery) {
+      const query = modalSearchQuery.toLowerCase();
+      list = list.filter(s => 
+        String(s.nama_sekolah || '').toLowerCase().includes(query) ||
+        String(s.npsn || '').toLowerCase().includes(query)
+      );
+    }
+
+    const sortOrder = { 'Lengkap': 1, 'Cukup': 2, 'Kurang': 3, 'Sangat Kurang': 4 };
+    return [...list].sort((a, b) => sortOrder[a.auditCategory] - sortOrder[b.auditCategory]);
+  }, [activeRowModal, modalSearchQuery]);
+
+  const handleCloseModal = () => {
+    setActiveRowModal(null);
+    setModalSearchQuery('');
+  };
+
+  if (loading && !isSyncing) return (
+    <div className="h-screen flex flex-col items-center justify-center bg-gray-50 italic font-black uppercase tracking-widest text-gray-400">
+      <Loader2 className="animate-spin text-purple-600 mb-4" size={64} />
+      Memuat Data Sarpras...
+    </div>
+  );
+
+  return (
+    <div className="h-screen flex flex-col bg-gray-50 overflow-hidden relative">
+      <Header />
+      
+      <main className="flex-1 flex flex-col md:flex-row p-3 md:p-6 gap-3 md:gap-6 overflow-hidden relative">
+        
+        {/* ========================================================= */}
+        {/* SIDEBAR TAHUN (DESKTOP) */}
+        {/* ========================================================= */}
+        <div className="hidden md:flex w-64 shrink-0 flex-col gap-6">
+          <div className="bg-white p-4 rounded-[2.5rem] shadow-sm border border-gray-100 flex flex-col gap-2">
+            <div className="px-4 py-3">
+              <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">Tab Tahun</h3>
+            </div>
+            {["2026", "2025", "2024"].map(y => (
+              <button 
+                key={y} 
+                onClick={() => { setSelectedYear(y); setActiveTab('SEMUA'); }} 
+                className={`w-full text-left px-6 py-4 rounded-2xl font-black text-lg transition-all flex justify-between items-center
+                  ${selectedYear === y ? 'bg-purple-700 text-white shadow-lg' : 'bg-transparent text-gray-500 hover:bg-gray-100'}`}
+              >
+                {y}
+                {selectedYear === y && <ChevronRight size={20} />}
+              </button>
+            ))}
+            
+            <div className="mt-2 border-t border-gray-100 pt-4">
+              <button 
+                onClick={() => loadData(true)} 
+                disabled={isSyncing}
+                className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-xs font-black border-2 transition-all uppercase tracking-wider ${isSyncing ? 'bg-purple-100 text-purple-600 border-purple-200' : 'bg-white text-purple-600 border-purple-100 hover:bg-purple-50 active:scale-95'}`}
+              >
+                <RefreshCw size={16} className={isSyncing ? "animate-spin" : ""} />
+                {isSyncing ? 'Menyinkronkan...' : 'Sinkron Ulang'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ========================================================= */}
+        {/* KONTROL TAHUN (MOBILE HP) */}
+        {/* ========================================================= */}
+        <div className="md:hidden flex items-center justify-between gap-2 bg-white p-3 rounded-2xl shadow-sm border border-gray-100 shrink-0">
+           <button onClick={onBack} className="p-2.5 bg-gray-100 text-gray-600 rounded-xl active:scale-95">
+             <ArrowLeft size={20} />
+           </button>
+           <div className="flex flex-1 gap-2 overflow-x-auto scrollbar-hide px-1">
+              {["2026", "2025", "2024"].map(y => (
+                  <button 
+                    key={y} 
+                    onClick={() => { setSelectedYear(y); setActiveTab('SEMUA'); }} 
+                    className={`px-5 py-2.5 rounded-xl font-black text-xs shrink-0 transition-colors ${selectedYear === y ? 'bg-purple-700 text-white' : 'bg-gray-50 text-gray-500 border border-gray-100'}`}
+                  >
+                    Tahun {y}
+                  </button>
+              ))}
+           </div>
+           <button 
+              onClick={() => loadData(true)} 
+              disabled={isSyncing}
+              className={`p-2.5 rounded-xl transition-colors ${isSyncing ? 'bg-purple-100 text-purple-600' : 'bg-purple-50 text-purple-600 hover:bg-purple-100 active:scale-95'}`}
+            >
+              <RefreshCw size={20} className={isSyncing ? "animate-spin" : ""} />
+           </button>
+        </div>
+
+        {/* ========================================================= */}
+        {/* MAIN CONTENT AREA */}
+        {/* ========================================================= */}
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          
+          {/* HEADER KONTEN */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 md:mb-4 bg-white p-4 md:p-6 rounded-[1.5rem] md:rounded-[2.5rem] shadow-sm border border-gray-100 shrink-0 gap-3">
+            <div className="flex items-center gap-3 md:gap-4">
+              <div className="bg-purple-100 p-3 md:p-4 rounded-xl md:rounded-2xl text-purple-600">
+                <Building2 className="w-6 h-6 md:w-7 md:h-7" />
+              </div>
+              <div>
+                <h2 className="text-lg md:text-2xl font-black text-gray-800 uppercase tracking-tighter leading-none">Monitoring Sarana Prasarana</h2>
+                <p className="text-[8px] md:text-[10px] font-bold text-gray-400 uppercase tracking-[0.1em] md:tracking-[0.2em] mt-1">Audit Kelayakan Ruang Belajar & Penunjang Se-Kalbar</p>
+              </div>
+            </div>
+            <div className="hidden sm:flex bg-purple-50 px-4 md:px-5 py-2 rounded-xl md:rounded-2xl border border-purple-100 items-center gap-2">
+              <span className="text-purple-600 font-black uppercase text-xs md:text-sm">Tahun {selectedYear}</span>
+            </div>
+          </div>
+
+          {/* TABS JENJANG */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 mb-3 md:mb-4 scrollbar-hide w-full shrink-0">
+            {TABS.map(tab => (
+              <button 
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-4 md:px-6 py-2 md:py-3 rounded-xl md:rounded-2xl font-black uppercase text-[10px] md:text-xs transition-all whitespace-nowrap border-b-4 
+                  ${activeTab === tab.id ? 'bg-white text-purple-700 border-purple-700 shadow-md' : 'bg-gray-200/50 text-gray-500 border-transparent hover:bg-white hover:text-purple-500'}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* AREA TABEL */}
+          <div className="flex-1 bg-white rounded-[2rem] md:rounded-[3rem] shadow-xl border border-gray-100 overflow-hidden flex flex-col min-h-0">
+            
+            {/* HEADER TABEL DENGAN TOMBOL UNDUH */}
+            <div className="bg-purple-700 text-white p-4 md:px-6 md:py-4 shrink-0 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="text-center sm:text-left">
+                <h3 className="font-black uppercase tracking-widest text-xs md:text-sm">Rekapitulasi {TABS.find(g=>g.id === activeTab).label}</h3>
+                <p className="text-[9px] md:text-[10px] opacity-80 mt-1">
+                  {activeTab === 'SEMUA' 
+                    ? 'Pilih tab jenjang di atas untuk melihat rincian kondisi sekolah masing-masing wilayah.' 
+                    : 'Klik pada baris wilayah untuk melihat daftar sekolah secara detail.'}
+                </p>
+              </div>
+              <button 
+                onClick={downloadRekapExcel} 
+                className="flex items-center justify-center gap-2 bg-white text-purple-700 hover:bg-gray-100 px-4 py-2.5 rounded-xl font-black uppercase text-[10px] md:text-xs shadow-sm transition-all active:scale-95 shrink-0 w-full sm:w-auto"
+              >
+                <FileSpreadsheet size={16} /> Unduh Rekap
+              </button>
+            </div>
+            
+            {/* WADAH TABEL RESPONSIVE */}
+            <div className="flex-1 overflow-auto p-2 md:px-6 md:py-4 custom-scrollbar">
+              <table className="w-full text-center border-separate border-spacing-y-2">
+                <thead className="sticky top-0 bg-white z-10 shadow-sm">
+                  <tr className="text-[9px] md:text-[11px] font-black uppercase text-gray-400 tracking-widest whitespace-nowrap">
+                    <th className="px-2 md:px-4 py-3 md:py-4 w-12">No</th>
+                    <th className="px-2 md:px-4 py-3 md:py-4 text-left">{activeTab === 'SEMUA' ? 'Jenjang Pendidikan' : 'Kabupaten/Kota'}</th>
+                    <th className="px-2 md:px-4 py-3 md:py-4 text-emerald-600">Sarpras Lengkap</th>
+                    <th className="px-2 md:px-4 py-3 md:py-4 text-blue-600">Sarpras Cukup</th>
+                    <th className="px-2 md:px-4 py-3 md:py-4 text-orange-600">Sarpras Kurang</th>
+                    <th className="px-2 md:px-4 py-3 md:py-4 text-red-600">Sgt. Kurang</th>
+                    <th className="px-2 md:px-4 py-3 md:py-4 text-purple-700">Total Sekolah</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summaryTable.map((row, idx) => (
+                    <tr 
+                      key={idx} 
+                      onClick={() => activeTab !== 'SEMUA' && setActiveRowModal(row)}
+                      className={`bg-gray-50 transition-colors group ${activeTab !== 'SEMUA' ? 'hover:bg-purple-50 cursor-pointer active:scale-[0.99]' : ''}`}
+                    >
+                      <td className={`px-2 md:px-4 py-3 md:py-4 rounded-l-xl md:rounded-l-2xl font-black text-gray-400 text-[10px] md:text-xs ${activeTab !== 'SEMUA' && 'group-hover:text-purple-600'}`}>{idx + 1}</td>
+                      <td className={`px-2 md:px-4 py-3 md:py-4 text-left font-black text-gray-700 text-xs md:text-sm uppercase ${activeTab !== 'SEMUA' && 'group-hover:text-purple-800'}`}>
+                        <div className="flex items-center gap-2 whitespace-nowrap md:whitespace-normal">
+                          {row.rowLabel}
+                          {activeTab !== 'SEMUA' && <Eye size={14} className="opacity-0 group-hover:opacity-100 text-purple-500 transition-opacity" />}
+                        </div>
+                      </td>
+                      <td className="px-2 md:px-4 py-3 md:py-4">{renderCellWithPct(row.lengkap, row.totalRow, 'text-emerald-600')}</td>
+                      <td className="px-2 md:px-4 py-3 md:py-4">{renderCellWithPct(row.cukup, row.totalRow, 'text-blue-600')}</td>
+                      <td className="px-2 md:px-4 py-3 md:py-4">{renderCellWithPct(row.kurang, row.totalRow, 'text-orange-600')}</td>
+                      <td className="px-2 md:px-4 py-3 md:py-4">{renderCellWithPct(row.sangatKurang, row.totalRow, 'text-red-600')}</td>
+                      <td className="px-2 md:px-4 py-3 md:py-4 rounded-r-xl md:rounded-r-2xl">
+                        <div className="flex items-center justify-center">
+                          <span className="bg-purple-100 text-purple-700 font-black text-xs md:text-sm px-2 md:px-3 py-1 md:py-1.5 rounded-lg md:rounded-xl border border-purple-200">
+                            {row.totalRow.toLocaleString()}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+
+                  {/* BARIS TOTAL KESELURUHAN */}
+                  <tr className="bg-purple-100/50 shadow-inner">
+                    <td className="px-2 md:px-4 py-4 md:py-5 rounded-l-xl md:rounded-l-2xl"></td>
+                    <td className="px-2 md:px-4 py-4 md:py-5 text-left font-black text-purple-900 text-xs md:text-base uppercase tracking-wider whitespace-nowrap">TOTAL KESELURUHAN</td>
+                    <td className="px-2 md:px-4 py-4 md:py-5">{renderCellWithPct(tableTotals.lengkap, tableTotals.total, 'text-emerald-700')}</td>
+                    <td className="px-2 md:px-4 py-4 md:py-5">{renderCellWithPct(tableTotals.cukup, tableTotals.total, 'text-blue-700')}</td>
+                    <td className="px-2 md:px-4 py-4 md:py-5">{renderCellWithPct(tableTotals.kurang, tableTotals.total, 'text-orange-700')}</td>
+                    <td className="px-2 md:px-4 py-4 md:py-5">{renderCellWithPct(tableTotals.sangatKurang, tableTotals.total, 'text-red-700')}</td>
+                    <td className="px-2 md:px-4 py-4 md:py-5 rounded-r-xl md:rounded-r-2xl">
+                      <div className="flex items-center justify-center">
+                        <span className="bg-purple-200 text-purple-800 font-black text-sm md:text-base px-3 md:px-4 py-1.5 md:py-2 rounded-lg md:rounded-xl border border-purple-300 shadow-sm">
+                          {tableTotals.total.toLocaleString()}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* ========================================================= */}
+        {/* TOUR GUIDE & AI ASSISTANT WIDGET (POSISI DI KIRI BAWAH) */}
+        {/* ========================================================= */}
+        
+        {/* TOUR GUIDE POPUP */}
+        {showTour && !isAiOpen && (
+          <div className="fixed bottom-24 left-4 md:bottom-28 md:left-8 w-[20rem] md:w-[22rem] bg-white rounded-[2rem] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.4)] border-2 border-purple-100 p-5 md:p-6 z-50 animate-in slide-in-from-bottom-8 fade-in duration-500">
+            <div className="absolute -bottom-3 left-10 w-5 h-5 bg-white border-b-2 border-r-2 border-purple-100 transform rotate-45"></div>
+            
+            <div className="relative z-10 flex flex-col gap-2 md:gap-3">
+              <div className="flex items-center gap-2 text-purple-600">
+                <Sparkles size={18} className="animate-pulse" />
+                <h4 className="font-black uppercase tracking-tight text-base md:text-lg">Fitur Baru!</h4>
+              </div>
+              <p className="text-xs md:text-sm text-gray-600 font-medium leading-relaxed">
+                Bingung menganalisis data sebanyak ini? Tanya saja pada <b>Asisten AI</b>! Dia bisa membantu merangkum dan memberi kesimpulan instan.
+              </p>
+              
+              <div className="mt-2 md:mt-3 flex flex-col gap-2 md:gap-3">
+                <label className="flex items-center gap-2 cursor-pointer group w-fit">
+                  <input 
+                    type="checkbox" 
+                    checked={dontShowAgain}
+                    onChange={(e) => setDontShowAgain(e.target.checked)}
+                    className="w-3 h-3 md:w-4 md:h-4 text-purple-600 rounded border-gray-300 focus:ring-purple-500 cursor-pointer"
+                  />
+                  <span className="text-[10px] md:text-[11px] font-black text-gray-400 group-hover:text-gray-600 transition-colors uppercase tracking-wider">Jangan tampilkan lagi</span>
+                </label>
+                
+                <button 
+                  onClick={closeTourGuide}
+                  className="w-full bg-purple-100 text-purple-700 hover:bg-purple-600 hover:text-white py-2 md:py-3 rounded-xl font-black uppercase text-[10px] md:text-xs transition-all active:scale-95"
+                >
+                  OK, Mengerti!
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TOMBOL AI */}
+        <button 
+          onClick={() => { setIsAiOpen(true); setShowTour(false); }}
+          className={`fixed bottom-6 left-4 md:bottom-8 md:left-8 px-4 py-3 md:px-6 md:py-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-full md:rounded-[2rem] shadow-2xl hover:scale-105 active:scale-95 transition-all z-40 flex items-center gap-2 md:gap-3 group ${isAiOpen ? 'hidden' : 'flex'}`}
+        >
+          <Sparkles className="w-5 h-5 md:w-6 md:h-6 group-hover:animate-spin" />
+          <span className="font-black uppercase tracking-wider text-[10px] md:text-sm">Tanya AI</span>
+        </button>
+
+        {/* PANEL CHAT AI */}
+        {isAiOpen && (
+          <div className="fixed bottom-4 left-2 right-2 md:bottom-6 md:left-6 md:right-auto md:w-[24rem] h-[65vh] md:h-[32rem] bg-white rounded-[2rem] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5)] border border-gray-200 flex flex-col overflow-hidden z-50 animate-in slide-in-from-bottom-10 fade-in duration-300">
+            <div className="bg-gradient-to-r from-purple-700 to-indigo-700 p-3 md:p-4 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2 md:gap-3">
+                <div className="p-1.5 md:p-2 bg-white/20 rounded-xl"><Bot size={18} /></div>
+                <div>
+                  <h4 className="font-black tracking-tight leading-tight text-sm md:text-base">SITAKA AI</h4>
+                  <p className="text-[8px] md:text-[9px] font-bold text-purple-200 uppercase tracking-widest">Asisten Analisis Data</p>
+                </div>
+              </div>
+              <button onClick={() => setIsAiOpen(false)} className="p-1.5 md:p-2 bg-white/10 hover:bg-red-500 rounded-xl transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3 md:p-4 bg-gray-50 flex flex-col gap-3 md:gap-4">
+              {chatHistory.map((chat, idx) => (
+                <div key={idx} className={`flex w-full ${chat.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`p-2.5 md:p-3 max-w-[85%] rounded-2xl text-xs md:text-sm shadow-sm ${
+                    chat.role === 'user' 
+                      ? 'bg-purple-600 text-white rounded-tr-none' 
+                      : 'bg-white border border-gray-100 text-gray-700 rounded-tl-none font-medium whitespace-pre-wrap'
+                  }`}>
+                    {chat.text}
+                  </div>
+                </div>
+              ))}
+              {isAiTyping && (
+                <div className="flex w-full justify-start">
+                  <div className="p-3 md:p-4 max-w-[80%] rounded-2xl bg-white border border-gray-100 rounded-tl-none flex items-center gap-1 shadow-sm">
+                    <div className="w-1.5 h-1.5 md:w-2 md:h-2 bg-purple-400 rounded-full animate-bounce"></div>
+                    <div className="w-1.5 h-1.5 md:w-2 md:h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                    <div className="w-1.5 h-1.5 md:w-2 md:h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 md:p-4 bg-white border-t border-gray-100 flex items-center gap-2 shrink-0">
+              <input 
+                type="text" 
+                value={aiInput}
+                onChange={(e) => setAiInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSendAiMessage()}
+                placeholder="Ketik pertanyaanmu..." 
+                className="flex-1 bg-gray-100 border-none rounded-xl py-2.5 md:py-3 px-3 md:px-4 text-xs md:text-sm focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50 font-medium"
+              />
+              <button 
+                onClick={handleSendAiMessage}
+                disabled={!aiInput.trim() || isAiTyping}
+                className="p-2.5 md:p-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-50 transition-colors shadow-md"
+              >
+                <Send size={16} />
+              </button>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* ========================================================= */}
+      {/* MODAL RINCIAN SEKOLAH */}
+      {/* ========================================================= */}
+      {activeRowModal && (
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-0 md:p-6 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full h-full md:max-w-7xl md:h-[95vh] md:rounded-[3rem] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-300">
+            
+            <div className="bg-purple-700 p-4 md:p-6 text-white flex flex-col md:flex-row items-start md:items-center justify-between shrink-0 gap-4">
+              <div className="flex items-center gap-3 md:gap-4 w-full md:w-auto justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="bg-white/20 p-2 md:p-3 rounded-xl md:rounded-2xl"><MapPin className="w-5 h-5 md:w-6 md:h-6" /></div>
+                  <div>
+                    <h3 className="text-lg md:text-2xl font-black uppercase tracking-tight">Rincian: {activeRowModal.modalTitle}</h3>
+                    <p className="text-[10px] md:text-xs font-bold text-purple-200 uppercase tracking-widest mt-0.5 md:mt-1">
+                      {activeRowModal.modalSubtitle} • Tahun {selectedYear}
+                    </p>
+                  </div>
+                </div>
+                {/* Tombol Close Khusus Mobile (ditaruh sejajar dengan judul) */}
+                <button onClick={handleCloseModal} className="md:hidden p-2 bg-white/10 hover:bg-red-500 rounded-xl transition-colors">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="flex flex-col items-end gap-1.5 w-full md:w-auto">
+                <div className="flex items-center gap-3 w-full md:w-auto">
+                  <button 
+                    onClick={() => downloadDetailExcel(activeRowModal.modalTitle, filteredAndSortedModalList)}
+                    className="flex-1 md:flex-none justify-center flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 px-4 py-2.5 md:px-5 md:py-3 rounded-xl font-black uppercase text-[10px] md:text-xs transition-all shadow-lg active:scale-95"
+                  >
+                    <Download size={14} /> Unduh Format Rinci
+                  </button>
+                  {/* Tombol Close Khusus Desktop */}
+                  <button onClick={handleCloseModal} className="hidden md:block p-3 bg-white/10 hover:bg-red-500 rounded-xl transition-colors">
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-4 md:px-8 py-3 md:py-4 bg-white border-b border-gray-100 flex flex-col md:flex-row items-center justify-between shrink-0 shadow-sm z-10 gap-3">
+              <div className="relative w-full md:w-[28rem]">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                <input 
+                  type="text" 
+                  placeholder="Cari Nama Sekolah atau NPSN..." 
+                  value={modalSearchQuery}
+                  onChange={(e) => setModalSearchQuery(e.target.value)}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl md:rounded-2xl py-2.5 md:py-3 pl-10 pr-4 text-xs md:text-sm focus:outline-none focus:border-purple-500 focus:ring-4 focus:ring-purple-500/10 font-bold text-gray-700 transition-all"
+                />
+              </div>
+              <div className="text-[10px] md:text-xs font-black text-gray-400 uppercase tracking-widest bg-gray-100 px-3 md:px-4 py-2 rounded-lg md:rounded-xl w-full md:w-auto text-center">
+                Menampilkan <span className="text-purple-600">{filteredAndSortedModalList.length}</span> Sekolah
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-auto p-4 md:p-8 bg-gray-50">
+              <div className="flex flex-col gap-4 md:gap-6 pb-6">
+                {filteredAndSortedModalList.length === 0 ? (
+                  <div className="text-center py-20 text-gray-400 font-black uppercase tracking-widest text-sm">
+                    {modalSearchQuery ? 'Pencarian Tidak Ditemukan.' : 'Tidak ada data sekolah.'}
+                  </div>
+                ) : (
+                  filteredAndSortedModalList.map((school, i) => {
+                    const statusColors = {
+                      'Lengkap': 'bg-emerald-100 text-emerald-800 border-emerald-200',
+                      'Cukup': 'bg-blue-100 text-blue-800 border-blue-200',
+                      'Kurang': 'bg-orange-100 text-orange-800 border-orange-200',
+                      'Sangat Kurang': 'bg-red-100 text-red-800 border-red-200'
+                    };
+                    
+                    const reqRooms = getRequiredRooms(String(school.jenjang).toUpperCase());
+
+                    return (
+                      <div key={i} className="bg-white p-4 md:p-6 rounded-2xl md:rounded-[2rem] border border-gray-200 shadow-sm flex flex-col gap-3 md:gap-4 hover:shadow-lg transition-all">
+                        <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b pb-3 md:pb-4 gap-3">
+                          <div className="flex flex-wrap md:flex-nowrap items-center gap-2 md:gap-4">
+                            <div className="bg-gray-100 text-gray-500 font-mono text-xs md:text-sm px-3 md:px-4 py-1.5 md:py-2 rounded-lg md:rounded-xl font-bold border border-gray-200">
+                              {school.npsn}
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="font-black text-gray-900 uppercase text-sm md:text-lg leading-tight">{school.nama_sekolah}</span>
+                              <span className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-widest mt-0.5 md:mt-1">
+                                {school.jenjang}
+                              </span>
+                            </div>
+                          </div>
+                          <div className={`px-4 py-2 rounded-lg md:rounded-xl border ${statusColors[school.auditCategory]} font-black uppercase text-[10px] md:text-xs tracking-wider shadow-sm self-start md:self-auto`}>
+                            {school.auditCategory}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 md:gap-3">
+                          {reqRooms.map((roomKey, idx) => {
+                            const label = ROOM_LABELS[roomKey] || roomKey;
+                            return (
+                              <div key={idx} className="bg-gray-50 border border-gray-100 rounded-xl p-2.5 md:p-3 flex flex-col gap-1.5 md:gap-2">
+                                <span className="text-[9px] md:text-[10px] font-black text-gray-700 uppercase tracking-wider">{label}</span>
+                                <div className="flex flex-wrap gap-1.5 md:gap-2 text-[9px] md:text-[10px] font-bold uppercase">
+                                  {CONDITIONS.map(cond => {
+                                    const val = parseInt(school[`${roomKey}_${cond.key}`]) || 0;
+                                    return (
+                                      <span key={cond.key} className={`${cond.color} bg-white px-1.5 md:px-2 py-0.5 md:py-1 rounded shadow-sm border border-gray-100 flex items-center gap-1`}>
+                                        {cond.label}: <span className="font-black text-[10px] md:text-xs">{val}</span>
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

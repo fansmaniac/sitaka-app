@@ -13,12 +13,16 @@ import {
   Map
 } from 'lucide-react';
 
-import DapodikPage from './pages/DapodikPage';
-import RaporPendidikanPage from './pages/RaporPendidikanPage';
-import DataATSPage from './pages/DataATSPage';
-import LoginPage from './pages/LoginPage';
-import AdminDashboard from './pages/AdminDashboard';
-import DataSarprasPage from './pages/DataSarprasPage';
+// --- IMPORT PATHS ---
+// Jika Vite masih error 404, artinya file-file ini belum benar-benar dipindahkan ke sub-foldernya.
+// Pastikan folder dapodik, rapor, dataATS, admin sudah dibuat dan filenya dimasukkan ke sana.
+import DapodikPage from './pages/dapodik/DapodikPage';
+import RaporPendidikanPage from './pages/rapor/RaporPendidikanPage';
+import DataATSPage from './pages/dataATS/DataATSPage';
+// Sesuaikan kembali jika DataSarprasPage belum dipindah. Di screenshot awal dia ada di src/pages/DataSarprasPage.jsx
+import DataSarprasPage from './pages/dataSarpras/DataSarprasPage'; 
+import LoginPage from './pages/admin/LoginPage';
+import AdminDashboard from './pages/admin/AdminDashboard';
 
 // Komponen utama yang berisi logika navigasi
 function AppContent() {
@@ -75,7 +79,6 @@ function AppContent() {
             </button>
           </div>
         ) : (
-          /* --- BAGIAN TOMBOL LOGIN DIUBAH DI SINI --- */
           <button 
             onClick={() => navigate('/login')} 
             title="Login Admin"
@@ -105,7 +108,7 @@ function AppContent() {
                 <School className="w-10 h-10 md:w-16 md:h-16 text-white" />
              </div>
              <h1 className="text-5xl sm:text-7xl md:text-8xl font-black text-gray-900 leading-none uppercase tracking-tighter">
-               D-PENA KALBAR
+                D-PENA KALBAR
              </h1>
           </div>
           <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-blue-600 tracking-[0.1em] md:tracking-[0.2em] px-2">

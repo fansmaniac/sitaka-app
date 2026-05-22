@@ -6,9 +6,12 @@ import { collection, doc, query, where, getDocs, setDoc } from 'firebase/firesto
 // =====================================================================
 // UTILITY & REFERENSI
 // =====================================================================
+
+// Fungsi ekstraktor data SUPER KEBAL (mengabaikan spasi dan underscore)
 const getVal = (obj, keyName) => {
   if (!obj) return '';
-  const key = Object.keys(obj).find(k => k.trim().toLowerCase() === keyName.toLowerCase());
+  const target = keyName.toLowerCase().replace(/[\s_]/g, '');
+  const key = Object.keys(obj).find(k => String(k).trim().toLowerCase().replace(/[\s_]/g, '') === target);
   return key ? obj[key] : '';
 };
 
@@ -21,6 +24,15 @@ const getNum = (obj, keyName) => {
       return isNaN(parsed) ? 0 : parsed;
   }
   return 0;
+};
+
+// PEMBERSIH NPSN ULTIMATE (Membunuh desimal .0 dari Excel dan karakter gaib)
+const cleanNpsn = (str) => {
+  let s = String(str || '').trim();
+  if (s.endsWith('.0')) {
+     s = s.slice(0, -2); // Hapus ".0" di belakang jika terbaca sebagai float
+  }
+  return s.replace(/[^0-9a-zA-Z]/g, '').toUpperCase();
 };
 
 const KABUPATEN_LIST = [
@@ -57,7 +69,6 @@ const identifyJenjangGroup = (jenjangDb) => {
     if (JENJANG_GROUPS[group].includes(j)) return group;
   }
   
-  // ROBUST FALLBACK JIKA FORMAT STRING KOTOR
   if (j.includes('TK') || j.includes('KB') || j.includes('PAUD') || j.includes('SPS') || j.includes('TPA')) return 'PAUD';
   if (j.includes('SD') && !j.includes('SLB')) return 'SD';
   if (j.includes('SMP') && !j.includes('SLB')) return 'SMP';
@@ -89,7 +100,6 @@ const identifyJenjangGroupRK = (jenjangDb) => {
     if (JENJANG_GROUPS_RK[group].includes(j)) return group;
   }
 
-  // ROBUST FALLBACK (Kecuali KB, TPA, SPS)
   if (j.includes('TK')) return 'TK';
   if (j.includes('SD') && !j.includes('SLB')) return 'SD';
   if (j.includes('SMP') && !j.includes('SLB')) return 'SMP';
@@ -133,7 +143,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
         }
       }
 
-      // Cek agregasi khusus Sekolah Lebih Shift di collection rombel_agregasi
       const rombelSnap = await getDocs(query(collection(db, 'rombel_agregasi'), where("__name__", "==", `sekolah_lebih_shift_${year}`)));
       if (!rombelSnap.empty) {
           const data = rombelSnap.docs[0].data();
@@ -179,10 +188,9 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       setUploadProgress(40);
 
-      // 1. Buat Peta (Map) Ruang Kelas dari Sarpras by NPSN
       const sarprasMap = new Map();
       allSarprasData.forEach(s => {
-        const npsn = String(s.npsn || s.NPSN || getVal(s, 'npsn')).trim();
+        const npsn = cleanNpsn(getVal(s, 'npsn'));
         if (npsn) {
           const kBaik = getNum(s, 'ruang_kelas_baik');
           const kRusakRingan = getNum(s, 'ruang_kelas_rusak_ringan');
@@ -195,7 +203,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
         }
       });
 
-      // 2. Siapkan Wadah Agregasi
       const tab1Data = JENJANG_KEYS_RK.map(k => ({ jenjang: k, sekolah_count: 0, kelas_total: 0, rombel_total: 0, double_shift_count: 0 }));
       const mapWilayah = new Map();
 
@@ -216,14 +223,13 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       setUploadProgress(60);
 
-      // 3. Olah Data Sekolah dan Bandingkan dengan Map Sarpras
       allSekolahData.forEach(item => {
         const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
         const group = identifyJenjangGroupRK(bentuk);
         if (!group) return;
 
-        const npsn = String(item.npsn || item.NPSN || getVal(item, 'npsn')).trim();
-        const kelasTotal = sarprasMap.get(npsn) || 0; // Tarik data kelas dari Sarpras
+        const npsn = cleanNpsn(getVal(item, 'npsn'));
+        const kelasTotal = sarprasMap.get(npsn) || 0; 
 
         let rombelTotal = 0;
         Object.keys(item).forEach(k => {
@@ -233,15 +239,12 @@ export default function AdminMesinKalkulasi({ onBack }) {
             }
         });
 
-        // Safeguard (Jika nol, coba narik dari field default Rombel)
         if (rombelTotal === 0) {
             rombelTotal = getNum(item, 'rombel') || getNum(item, 'rombongan_belajar');
         }
 
-        // Penentuan Sekolah Lebih Shift
         const isDoubleShift = rombelTotal > kelasTotal;
 
-        // Agregasi Tab 1 (Per Jenjang)
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
         if (rowTab1) {
            rowTab1.sekolah_count++;
@@ -250,7 +253,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
            if (isDoubleShift) rowTab1.double_shift_count++;
         }
 
-        // Agregasi Tab 2 (Per Wilayah)
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
         const rowTab2 = initWilayah(kabDb, keyKec);
@@ -265,7 +267,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       const tab2DataRaw = Array.from(mapWilayah.values());
 
-      // 4. Simpan ke Collection 'rombel_agregasi'
       const docRef = doc(db, 'rombel_agregasi', `sekolah_lebih_shift_${year}`);
       await setDoc(docRef, {
         tahun_data: year,
@@ -286,7 +287,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
   };
 
   // =====================================================================
-  // 1. SEKOLAH VS PD (PD / SEKOLAH)
+  // 1. SEKOLAH VS PD
   // =====================================================================
   const handleCalculateRasioSekolahPD = async (year) => {
     setUploading(true);
@@ -399,7 +400,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
   };
 
   // =====================================================================
-  // 2. SEKOLAH VS GURU (GURU / SEKOLAH)
+  // 2. SEKOLAH VS GURU (GURU / SEKOLAH) ---> METODE INDEPENDEN
   // =====================================================================
   const handleCalculateRasioSekolahGuru = async (year) => {
     setUploading(true);
@@ -409,7 +410,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
     try {
       const qSek = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", year));
       const snapSek = await getDocs(qSek);
-      const qPtk = query(collection(db, 'dapodik_ptk_chunks'), where("tahun_data", "==", year));
+      const qPtk = query(collection(db, 'dapodik_ptk_chunks'), where("tahun_data", "==", year)); 
       const snapPtk = await getDocs(qPtk);
 
       if (snapSek.empty || snapPtk.empty) {
@@ -424,68 +425,70 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       setUploadProgress(40); 
 
-      const mapSekolah = new Map();
-      allSekolahData.forEach(s => {
-         const npsn = String(getVal(s, 'npsn')).trim();
-         if(npsn) mapSekolah.set(npsn, { ...s, guru_aktual: 0 });
-      });
+      const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, sek_n: 0, guru_n: 0, sek_s: 0, guru_s: 0 }));
+      const mapWilayah = new Map();
 
-      allPtkData.forEach(p => {
-         const isGuru = String(getVal(p, 'jenis_ptk')).toUpperCase().includes('GURU');
-         const isInduk = String(getVal(p, 'status_tugas') || getVal(p, 'ptk_induk')).trim().toUpperCase() === 'INDUK' || String(getVal(p, 'status_tugas')).trim() === '1';
-         if(isGuru && isInduk) {
-            const npsn = String(getVal(p, 'npsn')).trim();
-            if(mapSekolah.has(npsn)) {
-               mapSekolah.get(npsn).guru_aktual++;
-            }
-         }
+      const initWilayah = (kabDb, keyKec) => {
+          const uniqueId = `${kabDb}_${keyKec}`;
+          if (!mapWilayah.has(uniqueId)) {
+              const init = { wilayah: kabDb, kecamatan: keyKec };
+              JENJANG_KEYS.forEach(k => { 
+                 init[`${k}_sek`] = 0; init[`${k}_guru`] = 0;
+                 init[`${k}_sek_n`] = 0; init[`${k}_guru_n`] = 0;
+                 init[`${k}_sek_s`] = 0; init[`${k}_guru_s`] = 0;
+              });
+              mapWilayah.set(uniqueId, init);
+          }
+          return mapWilayah.get(uniqueId);
+      };
+
+      // 1. OLAH DATA SEKOLAH (Hitung jumlah sekolah)
+      allSekolahData.forEach(item => {
+        const bentuk = String(item.bentuk_pendidikan || getVal(item, 'bentuk_pendidikan') || item.jenjang || getVal(item, 'jenjang')).trim().toUpperCase();
+        const group = identifyJenjangGroup(bentuk);
+        if (!group) return;
+
+        const isNegeri = String(item.status_sekolah || getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
+        const kabDb = cleanKabupatenName(item.kabupaten || getVal(item, 'kabupaten') || item['Kabupaten/Kota']);
+        const keyKec = String(item.kecamatan || getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+
+        const rowTab1 = tab1Data.find(r => r.jenjang === group);
+        if (rowTab1) {
+           if (isNegeri) rowTab1.sek_n++; else rowTab1.sek_s++;
+        }
+
+        const rowTab2 = initWilayah(kabDb, keyKec);
+        rowTab2[`${group}_sek`]++;
+        if (isNegeri) rowTab2[`${group}_sek_n`]++; else rowTab2[`${group}_sek_s`]++;
       });
 
       setUploadProgress(60); 
 
-      const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, sek_n: 0, guru_n: 0, sek_s: 0, guru_s: 0 }));
-      const mapWilayah = new Map();
+      // 2. OLAH DATA PTK (Hitung jumlah guru secara independen)
+      allPtkData.forEach(p => {
+         const jenisPtk = String(p.jenis_ptk || p['Jenis PTK'] || getVal(p, 'jenis_ptk')).toUpperCase();
+         const isGuru = jenisPtk.includes('GURU');
+         const statusTugas = String(p.status_tugas || p.ptk_induk || getVal(p, 'status_tugas')).trim().toUpperCase();
+         const isInduk = statusTugas === 'INDUK' || statusTugas === '1' || statusTugas === 'YA' || statusTugas === 'Y' || statusTugas.includes('INDUK');
+         
+         if(isGuru && isInduk) {
+            const bentuk = String(p.bentuk_pendidikan || getVal(p, 'bentuk_pendidikan') || p.jenjang || getVal(p, 'jenjang')).trim().toUpperCase();
+            const group = identifyJenjangGroup(bentuk);
+            if (!group) return;
 
-      Array.from(mapSekolah.values()).forEach(item => {
-        const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
-        const group = identifyJenjangGroup(bentuk);
-        if (!group) return;
+            const isNegeri = String(p.status_sekolah || getVal(p, 'status_sekolah')).toUpperCase() === 'NEGERI';
+            const kabDb = cleanKabupatenName(p.kabupaten || getVal(p, 'kabupaten') || p['Kabupaten/Kota']);
+            const keyKec = String(p.kecamatan || getVal(p, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
 
-        const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
-        const guruAktual = item.guru_aktual;
+            const rowTab1 = tab1Data.find(r => r.jenjang === group);
+            if (rowTab1) {
+                if (isNegeri) rowTab1.guru_n++; else rowTab1.guru_s++;
+            }
 
-        const rowTab1 = tab1Data.find(r => r.jenjang === group);
-        if (rowTab1) {
-           if (isNegeri) { rowTab1.sek_n++; rowTab1.guru_n += guruAktual; } 
-           else { rowTab1.sek_s++; rowTab1.guru_s += guruAktual; }
-        }
-
-        const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
-        const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
-        const uniqueId = `${kabDb}_${keyKec}`;
-
-        if (!mapWilayah.has(uniqueId)) {
-          const init = { wilayah: kabDb, kecamatan: keyKec };
-          JENJANG_KEYS.forEach(k => { 
-             init[`${k}_sek`] = 0; 
-             init[`${k}_guru`] = 0;
-             init[`${k}_sek_n`] = 0; init[`${k}_guru_n`] = 0;
-             init[`${k}_sek_s`] = 0; init[`${k}_guru_s`] = 0;
-          });
-          mapWilayah.set(uniqueId, init);
-        }
-
-        const rowTab2 = mapWilayah.get(uniqueId);
-        rowTab2[`${group}_sek`]++;
-        rowTab2[`${group}_guru`] += guruAktual;
-        
-        if (isNegeri) {
-           rowTab2[`${group}_sek_n`]++;
-           rowTab2[`${group}_guru_n`] += guruAktual;
-        } else {
-           rowTab2[`${group}_sek_s`]++;
-           rowTab2[`${group}_guru_s`] += guruAktual;
-        }
+            const rowTab2 = initWilayah(kabDb, keyKec);
+            rowTab2[`${group}_guru`]++;
+            if (isNegeri) rowTab2[`${group}_guru_n`]++; else rowTab2[`${group}_guru_s`]++;
+         }
       });
 
       setUploadProgress(80); 
@@ -498,7 +501,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
       });
 
       setUploadProgress(100);
-      alert(`KALKULASI SUKSES!\n\nHasil rasio Sekolah VS Guru tahun ${year} berhasil dihitung dan disimpan.`);
+      alert(`KALKULASI SUKSES!\n\nHasil rasio Sekolah VS Guru tahun ${year} berhasil dihitung tanpa join NPSN.`);
       checkCalcStatus();
     } catch (error) {
       console.error(error);
@@ -509,7 +512,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
   };
 
   // =====================================================================
-  // 3. ROMBEL VS GURU (GURU / ROMBEL)
+  // 3. ROMBEL VS GURU (GURU / ROMBEL) ---> METODE INDEPENDEN
   // =====================================================================
   const handleCalculateRasioRombelGuru = async (year) => {
     setUploading(true);
@@ -519,7 +522,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
     try {
       const qSek = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", year));
       const snapSek = await getDocs(qSek);
-      const qPtk = query(collection(db, 'dapodik_ptk_chunks'), where("tahun_data", "==", year));
+      const qPtk = query(collection(db, 'dapodik_ptk_chunks'), where("tahun_data", "==", year)); 
       const snapPtk = await getDocs(qPtk);
 
       if (snapSek.empty || snapPtk.empty) {
@@ -534,77 +537,78 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       setUploadProgress(40);
 
-      const mapSekolah = new Map();
-      allSekolahData.forEach(s => {
-         const npsn = String(getVal(s, 'npsn')).trim();
-         if(npsn) {
-             let rombelTotal = 0;
-             Object.keys(s).forEach(k => {
-                 const keyStr = k.trim().toLowerCase();
-                 if (/^rombel_(tka|tkb|t?\d{1,2}|paket_[abc])$/.test(keyStr)) {
-                     rombelTotal += parseInt(s[k]) || 0;
-                 }
-             });
-             mapSekolah.set(npsn, { ...s, rombel_total: rombelTotal, guru_aktual: 0 });
-         }
-      });
+      const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, rombel_n: 0, guru_n: 0, rombel_s: 0, guru_s: 0 }));
+      const mapWilayah = new Map();
 
-      allPtkData.forEach(p => {
-         const isGuru = String(getVal(p, 'jenis_ptk')).toUpperCase().includes('GURU');
-         const isInduk = String(getVal(p, 'status_tugas') || getVal(p, 'ptk_induk')).trim().toUpperCase() === 'INDUK' || String(getVal(p, 'status_tugas')).trim() === '1';
-         if(isGuru && isInduk) {
-            const npsn = String(getVal(p, 'npsn')).trim();
-            if(mapSekolah.has(npsn)) {
-               mapSekolah.get(npsn).guru_aktual++;
+      const initWilayah = (kabDb, keyKec) => {
+          const uniqueId = `${kabDb}_${keyKec}`;
+          if (!mapWilayah.has(uniqueId)) {
+              const init = { wilayah: kabDb, kecamatan: keyKec };
+              JENJANG_KEYS.forEach(k => { 
+                 init[`${k}_rombel`] = 0; init[`${k}_guru`] = 0;
+                 init[`${k}_rombel_n`] = 0; init[`${k}_guru_n`] = 0;
+                 init[`${k}_rombel_s`] = 0; init[`${k}_guru_s`] = 0;
+              });
+              mapWilayah.set(uniqueId, init);
+          }
+          return mapWilayah.get(uniqueId);
+      };
+
+      // 1. OLAH DATA SEKOLAH (Hitung Rombel)
+      allSekolahData.forEach(item => {
+        const bentuk = String(item.bentuk_pendidikan || getVal(item, 'bentuk_pendidikan') || item.jenjang || getVal(item, 'jenjang')).trim().toUpperCase();
+        const group = identifyJenjangGroup(bentuk);
+        if (!group) return;
+
+        const isNegeri = String(item.status_sekolah || getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
+        const kabDb = cleanKabupatenName(item.kabupaten || getVal(item, 'kabupaten') || item['Kabupaten/Kota']);
+        const keyKec = String(item.kecamatan || getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+
+        let rombelTotal = 0;
+        Object.keys(item).forEach(k => {
+            const keyStr = k.trim().toLowerCase();
+            if (/^rombel_(tka|tkb|t?\d{1,2}|paket_[abc])$/.test(keyStr)) {
+                rombelTotal += parseInt(item[k]) || 0;
             }
-         }
+        });
+
+        const rowTab1 = tab1Data.find(r => r.jenjang === group);
+        if (rowTab1) {
+           if (isNegeri) rowTab1.rombel_n += rombelTotal; else rowTab1.rombel_s += rombelTotal;
+        }
+
+        const rowTab2 = initWilayah(kabDb, keyKec);
+        rowTab2[`${group}_rombel`] += rombelTotal;
+        if (isNegeri) rowTab2[`${group}_rombel_n`] += rombelTotal; else rowTab2[`${group}_rombel_s`] += rombelTotal;
       });
 
       setUploadProgress(60);
 
-      const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, rombel_n: 0, guru_n: 0, rombel_s: 0, guru_s: 0 }));
-      const mapWilayah = new Map();
+      // 2. OLAH DATA PTK (Hitung Guru)
+      allPtkData.forEach(p => {
+         const jenisPtk = String(p.jenis_ptk || p['Jenis PTK'] || getVal(p, 'jenis_ptk')).toUpperCase();
+         const isGuru = jenisPtk.includes('GURU');
+         const statusTugas = String(p.status_tugas || p.ptk_induk || getVal(p, 'status_tugas')).trim().toUpperCase();
+         const isInduk = statusTugas === 'INDUK' || statusTugas === '1' || statusTugas === 'YA' || statusTugas === 'Y' || statusTugas.includes('INDUK');
+         
+         if(isGuru && isInduk) {
+            const bentuk = String(p.bentuk_pendidikan || getVal(p, 'bentuk_pendidikan') || p.jenjang || getVal(p, 'jenjang')).trim().toUpperCase();
+            const group = identifyJenjangGroup(bentuk);
+            if (!group) return;
 
-      Array.from(mapSekolah.values()).forEach(item => {
-        const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
-        const group = identifyJenjangGroup(bentuk);
-        if (!group) return;
+            const isNegeri = String(p.status_sekolah || getVal(p, 'status_sekolah')).toUpperCase() === 'NEGERI';
+            const kabDb = cleanKabupatenName(p.kabupaten || getVal(p, 'kabupaten') || p['Kabupaten/Kota']);
+            const keyKec = String(p.kecamatan || getVal(p, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
 
-        const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
-        const rombelTotal = item.rombel_total;
-        const guruAktual = item.guru_aktual;
+            const rowTab1 = tab1Data.find(r => r.jenjang === group);
+            if (rowTab1) {
+                if (isNegeri) rowTab1.guru_n++; else rowTab1.guru_s++;
+            }
 
-        const rowTab1 = tab1Data.find(r => r.jenjang === group);
-        if (rowTab1) {
-           if (isNegeri) { rowTab1.rombel_n += rombelTotal; rowTab1.guru_n += guruAktual; } 
-           else { rowTab1.rombel_s += rombelTotal; rowTab1.guru_s += guruAktual; }
-        }
-
-        const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
-        const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
-        const uniqueId = `${kabDb}_${keyKec}`;
-
-        if (!mapWilayah.has(uniqueId)) {
-          const init = { wilayah: kabDb, kecamatan: keyKec };
-          JENJANG_KEYS.forEach(k => { 
-             init[`${k}_rombel`] = 0; init[`${k}_guru`] = 0;
-             init[`${k}_rombel_n`] = 0; init[`${k}_guru_n`] = 0;
-             init[`${k}_rombel_s`] = 0; init[`${k}_guru_s`] = 0;
-          });
-          mapWilayah.set(uniqueId, init);
-        }
-
-        const rowTab2 = mapWilayah.get(uniqueId);
-        rowTab2[`${group}_rombel`] += rombelTotal;
-        rowTab2[`${group}_guru`] += guruAktual;
-        
-        if (isNegeri) {
-           rowTab2[`${group}_rombel_n`] += rombelTotal;
-           rowTab2[`${group}_guru_n`] += guruAktual;
-        } else {
-           rowTab2[`${group}_rombel_s`] += rombelTotal;
-           rowTab2[`${group}_guru_s`] += guruAktual;
-        }
+            const rowTab2 = initWilayah(kabDb, keyKec);
+            rowTab2[`${group}_guru`]++;
+            if (isNegeri) rowTab2[`${group}_guru_n`]++; else rowTab2[`${group}_guru_s`]++;
+         }
       });
 
       setUploadProgress(80); 
@@ -617,7 +621,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
       });
 
       setUploadProgress(100);
-      alert(`KALKULASI SUKSES!\n\nHasil rasio Rombel VS Guru tahun ${year} berhasil dihitung dan disimpan.`);
+      alert(`KALKULASI SUKSES!\n\nHasil rasio Rombel VS Guru tahun ${year} berhasil dihitung.`);
       checkCalcStatus();
     } catch (error) {
       console.error(error);
@@ -873,7 +877,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       setUploadProgress(40);
 
-      // KITA CERAIKAN PENGGUNAAN MAP NPSN, MURNI MENGGUNAKAN GROUPING WILAYAH
       const tab1Data = JENJANG_KEYS_RK.map(k => ({ jenjang: k, sek_n: 0, rombel_n: 0, kelas_n: 0, sek_s: 0, rombel_s: 0, kelas_s: 0 }));
       const mapWilayah = new Map();
 
@@ -983,7 +986,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
       });
 
       setUploadProgress(100);
-      alert(`KALKULASI SUKSES!\n\nHasil rasio Rombel VS Ruang Kelas tahun ${year} berhasil dihitung dan disimpan.`);
+      alert(`KALKULASI SUKSES!\n\nHasil rasio Rombel VS Ruang Kelas tahun ${year} berhasil dihitung.`);
       checkCalcStatus();
     } catch (error) {
       console.error(error);
@@ -994,7 +997,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
   };
 
   // =====================================================================
-  // 7. GURU VS PD (PD / GURU)
+  // 7. GURU VS PD (PD / GURU) ---> SOLUSI INDEPENDEN TANPA JOIN NPSN
   // =====================================================================
   const handleCalculateRasioGuruPD = async (year) => {
     setUploading(true);
@@ -1004,7 +1007,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
     try {
       const qSek = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", year));
       const snapSek = await getDocs(qSek);
-      const qPtk = query(collection(db, 'dapodik_ptk_chunks'), where("tahun_data", "==", year));
+      const qPtk = query(collection(db, 'dapodik_ptk_chunks'), where("tahun_data", "==", year)); 
       const snapPtk = await getDocs(qPtk);
 
       if (snapSek.empty || snapPtk.empty) {
@@ -1019,94 +1022,97 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       setUploadProgress(40);
 
-      const mapSekolah = new Map();
-      allSekolahData.forEach(s => {
-         const npsn = String(getVal(s, 'npsn')).trim();
-         if(npsn) {
-             let pd = parseInt(getVal(s, 'pd_total'));
-             if (isNaN(pd)) {
-               const totalLaki = (parseInt(getVal(s, 'tka_l')) || 0) + (parseInt(getVal(s, 'tkb_l')) || 0) +
-                 (parseInt(getVal(s, 't1_l')) || 0) + (parseInt(getVal(s, 't2_l')) || 0) +
-                 (parseInt(getVal(s, 't3_l')) || 0) + (parseInt(getVal(s, 't4_l')) || 0) +
-                 (parseInt(getVal(s, 't5_l')) || 0) + (parseInt(getVal(s, 't6_l')) || 0) +
-                 (parseInt(getVal(s, 't7_l')) || 0) + (parseInt(getVal(s, 't8_l')) || 0) +
-                 (parseInt(getVal(s, 't9_l')) || 0) + (parseInt(getVal(s, 't10_l')) || 0) +
-                 (parseInt(getVal(s, 't11_l')) || 0) + (parseInt(getVal(s, 't12_l')) || 0) +
-                 (parseInt(getVal(s, 't13_l')) || 0) + (parseInt(getVal(s, 'paket_a_l')) || 0) +
-                 (parseInt(getVal(s, 'paket_b_l')) || 0) + (parseInt(getVal(s, 'paket_c_l')) || 0);
+      const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, guru_n: 0, pd_n: 0, guru_s: 0, pd_s: 0 }));
+      const mapWilayah = new Map();
 
-               const totalPerempuan = (parseInt(getVal(s, 'tka_p')) || 0) + (parseInt(getVal(s, 'tkb_p')) || 0) +
-                 (parseInt(getVal(s, 't1_p')) || 0) + (parseInt(getVal(s, 't2_p')) || 0) +
-                 (parseInt(getVal(s, 't3_p')) || 0) + (parseInt(getVal(s, 't4_p')) || 0) +
-                 (parseInt(getVal(s, 't5_p')) || 0) + (parseInt(getVal(s, 't6_p')) || 0) +
-                 (parseInt(getVal(s, 't7_p')) || 0) + (parseInt(getVal(s, 't8_p')) || 0) +
-                 (parseInt(getVal(s, 't9_p')) || 0) + (parseInt(getVal(s, 't10_p')) || 0) +
-                 (parseInt(getVal(s, 't11_p')) || 0) + (parseInt(getVal(s, 't12_p')) || 0) +
-                 (parseInt(getVal(s, 't13_p')) || 0) + (parseInt(getVal(s, 'paket_a_p')) || 0) +
-                 (parseInt(getVal(s, 'paket_b_p')) || 0) + (parseInt(getVal(s, 'paket_c_p')) || 0);
+      const initWilayah = (kabDb, keyKec) => {
+          const uniqueId = `${kabDb}_${keyKec}`;
+          if (!mapWilayah.has(uniqueId)) {
+              const init = { wilayah: kabDb, kecamatan: keyKec };
+              JENJANG_KEYS.forEach(k => { 
+                 init[`${k}_guru`] = 0; init[`${k}_pd`] = 0;
+                 init[`${k}_guru_n`] = 0; init[`${k}_pd_n`] = 0;
+                 init[`${k}_guru_s`] = 0; init[`${k}_pd_s`] = 0;
+              });
+              mapWilayah.set(uniqueId, init);
+          }
+          return mapWilayah.get(uniqueId);
+      };
 
-               pd = totalLaki + totalPerempuan;
-             }
-             mapSekolah.set(npsn, { ...s, pd_total: pd, guru_aktual: 0 });
-         }
-      });
+      // 1. OLAH DATA SEKOLAH (Hitung PD)
+      allSekolahData.forEach(item => {
+        const bentuk = String(item.bentuk_pendidikan || getVal(item, 'bentuk_pendidikan') || item.jenjang || getVal(item, 'jenjang')).trim().toUpperCase();
+        const group = identifyJenjangGroup(bentuk);
+        if (!group) return;
 
-      allPtkData.forEach(p => {
-         const isGuru = String(getVal(p, 'jenis_ptk')).toUpperCase().includes('GURU');
-         const isInduk = String(getVal(p, 'status_tugas') || getVal(p, 'ptk_induk')).trim().toUpperCase() === 'INDUK' || String(getVal(p, 'status_tugas')).trim() === '1';
-         if(isGuru && isInduk) {
-            const npsn = String(getVal(p, 'npsn')).trim();
-            if(mapSekolah.has(npsn)) {
-               mapSekolah.get(npsn).guru_aktual++;
-            }
-         }
+        const isNegeri = String(item.status_sekolah || getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
+        const kabDb = cleanKabupatenName(item.kabupaten || getVal(item, 'kabupaten') || item['Kabupaten/Kota']);
+        const keyKec = String(item.kecamatan || getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+
+        let pd = parseInt(item.pd_total || getVal(item, 'pd_total'));
+        if (isNaN(pd)) {
+          const totalLaki = 
+            (parseInt(getVal(item, 'tka_l')) || 0) + (parseInt(getVal(item, 'tkb_l')) || 0) +
+            (parseInt(getVal(item, 't1_l')) || 0) + (parseInt(getVal(item, 't2_l')) || 0) +
+            (parseInt(getVal(item, 't3_l')) || 0) + (parseInt(getVal(item, 't4_l')) || 0) +
+            (parseInt(getVal(item, 't5_l')) || 0) + (parseInt(getVal(item, 't6_l')) || 0) +
+            (parseInt(getVal(item, 't7_l')) || 0) + (parseInt(getVal(item, 't8_l')) || 0) +
+            (parseInt(getVal(item, 't9_l')) || 0) + (parseInt(getVal(item, 't10_l')) || 0) +
+            (parseInt(getVal(item, 't11_l')) || 0) + (parseInt(getVal(item, 't12_l')) || 0) +
+            (parseInt(getVal(item, 't13_l')) || 0) + (parseInt(getVal(item, 'paket_a_l')) || 0) +
+            (parseInt(getVal(item, 'paket_b_l')) || 0) + (parseInt(getVal(item, 'paket_c_l')) || 0);
+
+          const totalPerempuan = 
+            (parseInt(getVal(item, 'tka_p')) || 0) + (parseInt(getVal(item, 'tkb_p')) || 0) +
+            (parseInt(getVal(item, 't1_p')) || 0) + (parseInt(getVal(item, 't2_p')) || 0) +
+            (parseInt(getVal(item, 't3_p')) || 0) + (parseInt(getVal(item, 't4_p')) || 0) +
+            (parseInt(getVal(item, 't5_p')) || 0) + (parseInt(getVal(item, 't6_p')) || 0) +
+            (parseInt(getVal(item, 't7_p')) || 0) + (parseInt(getVal(item, 't8_p')) || 0) +
+            (parseInt(getVal(item, 't9_p')) || 0) + (parseInt(getVal(item, 't10_p')) || 0) +
+            (parseInt(getVal(item, 't11_p')) || 0) + (parseInt(getVal(item, 't12_p')) || 0) +
+            (parseInt(getVal(item, 't13_p')) || 0) + (parseInt(getVal(item, 'paket_a_p')) || 0) +
+            (parseInt(getVal(item, 'paket_b_p')) || 0) + (parseInt(getVal(item, 'paket_c_p')) || 0);
+
+          pd = totalLaki + totalPerempuan;
+        }
+
+        const rowTab1 = tab1Data.find(r => r.jenjang === group);
+        if (rowTab1) {
+           if (isNegeri) rowTab1.pd_n += pd; else rowTab1.pd_s += pd;
+        }
+
+        const rowTab2 = initWilayah(kabDb, keyKec);
+        rowTab2[`${group}_pd`] += pd;
+        if (isNegeri) rowTab2[`${group}_pd_n`] += pd; else rowTab2[`${group}_pd_s`] += pd;
       });
 
       setUploadProgress(60);
 
-      const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, guru_n: 0, pd_n: 0, guru_s: 0, pd_s: 0 }));
-      const mapWilayah = new Map();
+      // 2. OLAH DATA PTK (Hitung Guru)
+      allPtkData.forEach(p => {
+         const jenisPtk = String(p.jenis_ptk || p['Jenis PTK'] || getVal(p, 'jenis_ptk')).toUpperCase();
+         const isGuru = jenisPtk.includes('GURU');
+         const statusTugas = String(p.status_tugas || p.ptk_induk || getVal(p, 'status_tugas')).trim().toUpperCase();
+         const isInduk = statusTugas === 'INDUK' || statusTugas === '1' || statusTugas === 'YA' || statusTugas === 'Y' || statusTugas.includes('INDUK');
+         
+         if(isGuru && isInduk) {
+            const bentuk = String(p.bentuk_pendidikan || getVal(p, 'bentuk_pendidikan') || p.jenjang || getVal(p, 'jenjang')).trim().toUpperCase();
+            const group = identifyJenjangGroup(bentuk);
+            if (!group) return;
 
-      Array.from(mapSekolah.values()).forEach(item => {
-        const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
-        const group = identifyJenjangGroup(bentuk);
-        if (!group) return;
+            const isNegeri = String(p.status_sekolah || getVal(p, 'status_sekolah')).toUpperCase() === 'NEGERI';
+            const kabDb = cleanKabupatenName(p.kabupaten || getVal(p, 'kabupaten') || p['Kabupaten/Kota']);
+            const keyKec = String(p.kecamatan || getVal(p, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
 
-        const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
-        const pdTotal = item.pd_total;
-        const guruAktual = item.guru_aktual;
+            const rowTab1 = tab1Data.find(r => r.jenjang === group);
+            if (rowTab1) {
+                if (isNegeri) rowTab1.guru_n++; else rowTab1.guru_s++;
+            }
 
-        const rowTab1 = tab1Data.find(r => r.jenjang === group);
-        if (rowTab1) {
-           if (isNegeri) { rowTab1.guru_n += guruAktual; rowTab1.pd_n += pdTotal; } 
-           else { rowTab1.guru_s += guruAktual; rowTab1.pd_s += pdTotal; }
-        }
-
-        const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
-        const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
-        const uniqueId = `${kabDb}_${keyKec}`;
-
-        if (!mapWilayah.has(uniqueId)) {
-          const init = { wilayah: kabDb, kecamatan: keyKec };
-          JENJANG_KEYS.forEach(k => { 
-             init[`${k}_guru`] = 0; init[`${k}_pd`] = 0;
-             init[`${k}_guru_n`] = 0; init[`${k}_pd_n`] = 0;
-             init[`${k}_guru_s`] = 0; init[`${k}_pd_s`] = 0;
-          });
-          mapWilayah.set(uniqueId, init);
-        }
-
-        const rowTab2 = mapWilayah.get(uniqueId);
-        rowTab2[`${group}_guru`] += guruAktual;
-        rowTab2[`${group}_pd`] += pdTotal;
-        
-        if (isNegeri) {
-           rowTab2[`${group}_guru_n`] += guruAktual;
-           rowTab2[`${group}_pd_n`] += pdTotal;
-        } else {
-           rowTab2[`${group}_guru_s`] += guruAktual;
-           rowTab2[`${group}_pd_s`] += pdTotal;
-        }
+            const rowTab2 = initWilayah(kabDb, keyKec);
+            rowTab2[`${group}_guru`]++;
+            if (isNegeri) rowTab2[`${group}_guru_n`]++; else rowTab2[`${group}_guru_s`]++;
+         }
       });
 
       setUploadProgress(80); 
@@ -1119,7 +1125,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
       });
 
       setUploadProgress(100);
-      alert(`KALKULASI SUKSES!\n\nHasil rasio Guru VS Peserta Didik tahun ${year} berhasil dihitung dan disimpan.`);
+      alert(`KALKULASI SUKSES!\n\nHasil rasio Guru VS Peserta Didik tahun ${year} berhasil dihitung.`);
       checkCalcStatus();
     } catch (error) {
       console.error(error);
@@ -1204,7 +1210,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
              <div className="bg-gray-50 p-6 rounded-3xl border border-gray-200 flex flex-col md:flex-row items-center justify-between gap-6">
                 <div>
                   <h4 className="text-xl font-black text-emerald-900 uppercase">Sekolah VS Guru</h4>
-                  <p className="text-sm font-medium text-gray-500 mt-1">Metodologi Baru: Pembagian Murni (Total Guru / Total Sekolah)</p>
+                  <p className="text-sm font-medium text-gray-500 mt-1">Metode Super Cepat: Agregasi Guru Independen</p>
                 </div>
                 <div className="flex gap-2">
                    {['2024', '2025', '2026'].map(year => (
@@ -1222,7 +1228,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
              <div className="bg-gray-50 p-6 rounded-3xl border border-gray-200 flex flex-col md:flex-row items-center justify-between gap-6">
                 <div>
                   <h4 className="text-xl font-black text-purple-900 uppercase">Rombel VS Guru</h4>
-                  <p className="text-sm font-medium text-gray-500 mt-1">Metodologi Baru: Pembagian Murni (Total Guru / Total Rombel)</p>
+                  <p className="text-sm font-medium text-gray-500 mt-1">Metode Super Cepat: Agregasi Guru Independen</p>
                 </div>
                 <div className="flex gap-2">
                    {['2024', '2025', '2026'].map(year => (
@@ -1294,7 +1300,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
              <div className="bg-gray-50 p-6 rounded-3xl border border-gray-200 flex flex-col md:flex-row items-center justify-between gap-6">
                 <div>
                   <h4 className="text-xl font-black text-indigo-900 uppercase">Guru VS Peserta Didik</h4>
-                  <p className="text-sm font-medium text-gray-500 mt-1">Metodologi Baru: Pembagian Murni (Total PD / Total Guru)</p>
+                  <p className="text-sm font-medium text-gray-500 mt-1">Metode Super Cepat: Agregasi Guru Independen</p>
                 </div>
                 <div className="flex gap-2">
                    {['2024', '2025', '2026'].map(year => (

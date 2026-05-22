@@ -21,7 +21,7 @@ export default function AdminDatabaseMaster({ onBack }) {
       { id: 'dapodik_sekolah' }, { id: 'dapodik_ptk' }, 
       { id: 'dapodik_kepsek' }, { id: 'rapor_pendidikan' }, 
       { id: 'data_ats' }, { id: 'data_sarpras' },
-      { id: 'data_rombel' } // <-- DITAMBAHKAN KATEGORI DATABASE ROMBEL BARU
+      { id: 'data_rombel' }
     ];
     const years = ['2024', '2025', '2026'];
     let newStatus = {};
@@ -69,7 +69,6 @@ export default function AdminDatabaseMaster({ onBack }) {
       for (let i = 0; i < totalDocs; i++) {
         delBatch.delete(allDocs[i].ref);
         delCount++;
-        // Commit penghapusan per 100 dokumen agar payload tidak bengkak
         if (delCount === 100 || i === totalDocs - 1) {
           await delBatch.commit();
           delBatch = writeBatch(db);
@@ -89,19 +88,18 @@ export default function AdminDatabaseMaster({ onBack }) {
     }
   };
 
-  // --- MESIN UPLOAD MICRO-BATCHING DENGAN REGEX HEADER STANDARDIZER SANGAT KETAT ---
+  // --- MESIN UPLOAD MICRO-BATCHING ---
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file || !activeTarget) return;
 
-    // LOGIKA PERINGATAN TIMPA DATA (OVERWRITE)
     const statusKey = `${activeTarget.collection}_${activeTarget.year}`;
     if (dbStatus[statusKey]) {
       const confirmOverwrite = window.confirm(
         `PERHATIAN!\n\nData ${activeTarget.label} untuk tahun ${activeTarget.year} sudah ada.\nApakah Anda yakin ingin MENGHAPUS data lama dan MENIMPANYA dengan data baru ini?`
       );
       if (!confirmOverwrite) {
-        e.target.value = null; // Reset input file
+        e.target.value = null;
         return;
       }
     }
@@ -111,18 +109,24 @@ export default function AdminDatabaseMaster({ onBack }) {
     setUploadProgress(0);
 
     try {
-      let jsonData = await readExcel(file);
+      let rawData = await readExcel(file);
+      let processedData = [];
       
+      // 1. PRA-PEMROSESAN SPESIFIK UNTUK PTK
       if (activeTarget.collection === 'dapodik_ptk') {
          const mapUnique = new Map();
-         jsonData.forEach(item => {
+         rawData.forEach(item => {
             const keys = Object.keys(item);
-            const statusTugasKey = keys.find(k => k.trim().toLowerCase() === 'status_tugas' || k.trim().toLowerCase() === 'ptk_induk');
-            const jenisPtkKey = keys.find(k => k.trim().toLowerCase() === 'jenis_ptk'); 
-            const nikKey = keys.find(k => k.trim().toLowerCase() === 'nik');
+            
+            // Pencarian key kebal spasi/underscore
+            const findKey = (target) => keys.find(k => k.trim().toLowerCase().replace(/[\s_]/g, '') === target);
+            
+            const statusTugasKey = findKey('statustugas') || findKey('ptkinduk');
+            const jenisPtkKey = findKey('jenisptk'); 
+            const nikKey = findKey('nik');
             
             const isGuru = jenisPtkKey ? /guru/i.test(String(item[jenisPtkKey])) : false;
-            const isInduk = statusTugasKey ? (String(item[statusTugasKey]).trim().toUpperCase() === 'INDUK' || String(item[statusTugasKey]).trim() === '1') : false;
+            const isInduk = statusTugasKey ? (String(item[statusTugasKey]).trim().toUpperCase() === 'INDUK' || String(item[statusTugasKey]).trim().toUpperCase() === 'YA' || String(item[statusTugasKey]).trim() === '1') : false;
             
             if (!isGuru || !isInduk) return; 
 
@@ -136,8 +140,8 @@ export default function AdminDatabaseMaster({ onBack }) {
                   'kabupaten', 'jenis_ptk', 'pendidikan', 'bidang_studi_sertifikasi', 
                   'status_kepegawaian', 'bentuk_pendidikan', 'status_sekolah'
                 ];
+                
                 keys.forEach(k => {
-                   // PERBAIKAN REGEX: Cegah multiple underscore
                    const normalizedK = k.trim().toLowerCase().replace(/[\s/]+/g, '_').replace(/_+/g, '_');
                    if (allowedKeys.includes(normalizedK)) {
                       filteredItem[normalizedK] = item[k];
@@ -146,13 +150,11 @@ export default function AdminDatabaseMaster({ onBack }) {
                 mapUnique.set(docId, filteredItem);
             }
          });
-         jsonData = Array.from(mapUnique.values());
-      }
-
-      // STANDARDISASI ATRIBUT UNTUK SEKOLAH, SARPRAS, DAN ROMBEL (TANPA MEMBUANG DATA DUPLIKAT/KOSONG)
-      if (activeTarget.collection === 'dapodik_sekolah' || activeTarget.collection === 'data_sarpras' || activeTarget.collection === 'data_rombel') {
-         const formattedData = [];
-         jsonData.forEach(item => {
+         processedData = Array.from(mapUnique.values());
+      } 
+      // 2. PRA-PEMROSESAN UNTUK SEKOLAH / SARPRAS / ROMBEL
+      else if (['dapodik_sekolah', 'data_sarpras', 'data_rombel'].includes(activeTarget.collection)) {
+         rawData.forEach(item => {
             const keys = Object.keys(item);
             const statusKey = keys.find(k => {
                const cleanH = k.trim().toLowerCase().replace(/[\s/]+/g, '_').replace(/_+/g, '_');
@@ -160,17 +162,16 @@ export default function AdminDatabaseMaster({ onBack }) {
             });
             
             const cleanItem = { ...item };
-            // Paksa pemetaan kunci status_sekolah agar bersih dari spasi
             if (statusKey) {
                cleanItem['status_sekolah'] = String(item[statusKey]).trim();
             }
-            // Simpan semua data, jangan dibuang meskipun NPSN kembar atau kosong
-            formattedData.push(cleanItem);
+            processedData.push(cleanItem);
          });
-         jsonData = formattedData; // Tancap gas, simpan semuanya!
+      } else {
+         processedData = rawData; // Untuk ATS atau entitas lain
       }
       
-      const totalRowsInExcel = jsonData.length;
+      const totalRowsInExcel = processedData.length;
       const collectionName = `${activeTarget.collection}_chunks`; 
       const cleanTahun = String(activeTarget.year);
       
@@ -179,13 +180,12 @@ export default function AdminDatabaseMaster({ onBack }) {
       const q = query(collection(db, collectionName), where("tahun_data", "==", cleanTahun));
       const snapshot = await getDocs(q);
       if (!snapshot.empty) {
-        const allDocs = snapshot.docs;
         let delBatch = writeBatch(db);
         let delCount = 0;
-        for (let i = 0; i < allDocs.length; i++) {
-          delBatch.delete(allDocs[i].ref);
+        for (let i = 0; i < snapshot.docs.length; i++) {
+          delBatch.delete(snapshot.docs[i].ref);
           delCount++;
-          if (delCount === 100 || i === allDocs.length - 1) {
+          if (delCount === 100 || i === snapshot.docs.length - 1) {
             await delBatch.commit();
             delBatch = writeBatch(db);
             delCount = 0;
@@ -212,14 +212,11 @@ export default function AdminDatabaseMaster({ onBack }) {
         let batchCount = 0;
 
         for (let i = 0; i < totalChunks; i++) {
-          const chunkData = jsonData.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE).map(item => {
+          // Standardisasi akhir sebelum simpan ke Firebase
+          const chunkData = processedData.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE).map(item => {
             const sanitizedItem = {};
             for (const key in item) {
                let val = item[key];
-               // PERBAIKAN REGEX SUPER KETAT:
-               // 1. Ubah spasi/slash jadi underscore
-               // 2. Hilangkan tanda kurung
-               // 3. JIKA ADA UNDERSCORE GANDA/LEBIH, JADIKAN SATU UNDERSCORE SAJA (.replace(/_+/g, '_'))
                const cleanKey = key.trim().toLowerCase()
                                  .replace(/[\s/]+/g, '_')
                                  .replace(/[()]/g, '')
@@ -236,14 +233,18 @@ export default function AdminDatabaseMaster({ onBack }) {
                }
             }
             if (sanitizedItem.nik) sanitizedItem.nik = String(sanitizedItem.nik).replace(/\D/g, '');
-            if (sanitizedItem.npsn) sanitizedItem.npsn = String(sanitizedItem.npsn).trim();
+            // Pastikan NPSN bersih dari spasi dan .0 (desimal excel)
+            if (sanitizedItem.npsn) sanitizedItem.npsn = String(sanitizedItem.npsn).replace(/\.0$/, '').replace(/[^0-9a-zA-Z]/g, '');
             if (sanitizedItem.nisn) sanitizedItem.nisn = String(sanitizedItem.nisn).trim();
             return sanitizedItem;
           });
 
+          // PENGAMANAN STRUKTUR: Pastikan `tahun_data` DITULIS SECARA EKSPLISIT DI TINGKAT ROOT
           const docRef = doc(collection(db, collectionName));
           batch.set(docRef, { 
-            tahun_data: cleanTahun, data: chunkData, last_updated: currentTime 
+            tahun_data: cleanTahun, 
+            data: chunkData, 
+            last_updated: currentTime 
           });
           batchCount++;
 
@@ -278,7 +279,7 @@ export default function AdminDatabaseMaster({ onBack }) {
   };
 
   // =====================================================================
-  // FUNGSI UNDUH FORMAT EXCEL (MENDUKUNG UPDATE UMUR PD BARU)
+  // FUNGSI UNDUH FORMAT EXCEL
   // =====================================================================
   const handleDownloadFormatSekolah = async () => {
     const workbook = new ExcelJS.Workbook();
@@ -401,12 +402,10 @@ export default function AdminDatabaseMaster({ onBack }) {
     link.click();
   };
 
-  // FORMAT UNDUHAN KHUSUS DATABASE ROMBEL
   const handleDownloadFormatRombel = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Data Rombel');
     
-    // UPDATE: Penambahan kolom "Status Sekolah" sesuai request
     const columns = [
       'Nama Satuan Pendidikan', 'NPSN', 'Bentuk Pendidikan', 'Status Sekolah', 
       'Kecamatan', 'Kabupaten/Kota', 'Jumlah Rombel', 'Ruang Kelas Baik', 
@@ -416,7 +415,6 @@ export default function AdminDatabaseMaster({ onBack }) {
 
     worksheet.columns = columns.map(col => ({ header: col, key: col, width: 22 }));
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    // Warna Rose (Merah Muda Merona)
     worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE11D48' } }; 
     
     const buffer = await workbook.xlsx.writeBuffer();
@@ -504,7 +502,6 @@ export default function AdminDatabaseMaster({ onBack }) {
           <YearUploadGroup label="Rapor Pendidikan" collection="rapor_pendidikan" icon={FileText} colorClass="bg-emerald-600" />
           <YearUploadGroup label="Database ATS" collection="data_ats" icon={Layers} colorClass="bg-orange-600" formatHandler={handleDownloadFormatATS} />
           <YearUploadGroup label="Data Sarpras" collection="data_sarpras" icon={Building2} colorClass="bg-purple-600" formatHandler={handleDownloadFormatSarpras} />
-          {/* TAMBAHAN KOTAK UPLOAD DATABASE ROMBEL DI SINI */}
           <YearUploadGroup label="Database Rombel" collection="data_rombel" icon={School} colorClass="bg-rose-600" formatHandler={handleDownloadFormatRombel} />
         </div>
       </div>

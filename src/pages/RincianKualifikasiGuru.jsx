@@ -54,18 +54,34 @@ const getKabupatenRank = (kabName) => {
 // MAPPING STRUKTUR KATEGORI BARU (SINKRON DENGAN DASHBOARD GURU)
 // =====================================================================
 const KATEGORI_MAPPING = {
-  'PAUD': ['TK', 'KB', 'PAUD', 'SPS', 'TPA'],
+  'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
   'PENDIDIKAN DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
   'PENDIDIKAN MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
-  'PENDIDIKAN INKLUSIF': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
+  'PENDIDIKAN INKLUSIF': ['SLB'],
   'PENDIDIKAN NON FORMAL': ['PKBM', 'SKB']
+};
+
+const SEMUA_SUBTABS_MAPPING = {
+  'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
+  'SD': ['SD', 'SPK SD'],
+  'SMP': ['SMP', 'SPK SMP'],
+  'SMA': ['SMA', 'SPK SMA'],
+  'SMK': ['SMK'],
+  'SLB (Inklusif)': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
+  'NON FORMAL': ['PKBM', 'SKB']
 };
 
 const isJenjangValid = (jenjangDb, targetJenjang) => {
   if (targetJenjang === 'SEMUA' || targetJenjang === 'SEMUA JENJANG') return true;
+  
   if (KATEGORI_MAPPING[targetJenjang]) {
       return KATEGORI_MAPPING[targetJenjang].includes(jenjangDb);
   }
+  
+  if (SEMUA_SUBTABS_MAPPING[targetJenjang]) {
+      return SEMUA_SUBTABS_MAPPING[targetJenjang].includes(jenjangDb);
+  }
+  
   return jenjangDb === targetJenjang;
 };
 
@@ -81,7 +97,6 @@ export default function RincianKualifikasiGuru({
   displayLastUpdated 
 }) {
   let mappedJenjang = activeJenjang;
-  if (mappedJenjang === 'SLB (Inklusif)') mappedJenjang = 'PENDIDIKAN INKLUSIF';
   if (mappedJenjang === 'SEMUA') mappedJenjang = 'SEMUA JENJANG';
 
   // STATE MODAL TABS

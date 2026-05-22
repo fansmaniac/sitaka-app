@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 // TAMBAHAN: Import useNavigate untuk membersihkan URL
 import { useNavigate } from 'react-router-dom';
 import { 
-  School, Users, GraduationCap, LineChart, 
+  School, Users, GraduationCap, MapPin, LineChart, 
   Layers, Building2, Menu, X, Loader2, RefreshCw 
 } from 'lucide-react';
 import { db } from '../firebase/config';
@@ -12,6 +12,7 @@ import { collection, getDocs, query, where, limit } from 'firebase/firestore';
 import DapodikSekolah from './DapodikSekolah';
 import DapodikGuru from './DapodikGuru'; 
 import DapodikPesertaDidik from './DapodikPesertaDidik'; 
+import DapodikDemografiAkses from './DapodikDemografiAkses'; // <-- IMPORT MENU DEMOGRAFI BARU
 import DapodikRasio from './DapodikRasio';
 import DapodikSarpras from './DapodikSarpras';
 import RombelLebihShift from './RombelLebihShift'; // <-- IMPORT MENU ROMBEL BARU
@@ -70,6 +71,7 @@ const MENU_ITEMS = [
   { id: 'sekolah', label: 'Sekolah', icon: School },
   { id: 'guru', label: 'Guru', icon: Users },
   { id: 'peserta_didik', label: 'Peserta Didik', icon: GraduationCap },
+  { id: 'demografi_akses', label: 'Demografi & Aksesibilitas', icon: MapPin }, // <-- MENU BARU DI BAWAH PESERTA DIDIK
   { id: 'rasio', label: 'Rasio / Bandingkan Data', icon: LineChart },
   { id: 'rombel', label: 'Rombel', icon: Layers }, // <-- MENU ROMBEL DIAKTIFKAN
   { id: 'sarpras', label: 'Sarpras', icon: Building2 },
@@ -193,6 +195,7 @@ export default function DapodikPage({ Header }) {
       case 'sekolah': return <DapodikSekolah data={sekolahData} selectedYear={selectedYear} />;
       case 'guru': return <DapodikGuru data={ptkData} selectedYear={selectedYear} />;
       case 'peserta_didik': return <DapodikPesertaDidik data={sekolahData} selectedYear={selectedYear} />; 
+      case 'demografi_akses': return <DapodikDemografiAkses selectedYear={selectedYear} />; // <-- ROUTING KOMPONEN BARU
       case 'rasio': return <DapodikRasio dataSekolah={sekolahData} dataGuru={ptkData} selectedYear={selectedYear} />;
       case 'rombel': return <RombelLebihShift selectedYear={selectedYear} />; // <-- TERKONEKSI KE KOMPONEN BARU
       case 'sarpras': return <DapodikSarpras selectedYear={selectedYear} />;

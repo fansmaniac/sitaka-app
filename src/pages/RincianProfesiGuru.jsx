@@ -51,34 +51,34 @@ const getKabupatenRank = (kabName) => {
 };
 
 // =====================================================================
-// MAPPING STRUKTUR KATEGORI BARU (SINKRON DENGAN DAPODIK GURU)
+// MAPPING STRUKTUR KATEGORI BARU (SINKRON 100% DENGAN DAPODIK GURU UTAMA)
 // =====================================================================
 const KATEGORI_MAPPING = {
-  'PAUD': ['TK', 'KB', 'PAUD', 'SPS', 'TPA'],
+  'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
   'PENDIDIKAN DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
   'PENDIDIKAN MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
-  'PENDIDIKAN INKLUSIF': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
+  'PENDIDIKAN INKLUSIF': ['SLB'],
   'PENDIDIKAN NON FORMAL': ['PKBM', 'SKB']
 };
 
 const SEMUA_SUBTABS_MAPPING = {
-  'PAUD': ['TK', 'KB', 'PAUD'],
+  'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
   'SD': ['SD', 'SPK SD'],
   'SMP': ['SMP', 'SPK SMP'],
   'SMA': ['SMA', 'SPK SMA'],
   'SMK': ['SMK'],
   'SLB (Inklusif)': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
-  'NON FORMAL': ['PKBM', 'SKB', 'SPS', 'TPA']
+  'NON FORMAL': ['PKBM', 'SKB']
 };
 
 const isJenjangValid = (jenjangDb, targetJenjang) => {
   if (targetJenjang === 'SEMUA' || targetJenjang === 'SEMUA JENJANG') return true;
   
-  // Deteksi jika targetnya dari mode sub-tab "Semua Jenjang"
+  // Deteksi jika targetnya dari mode sub-tab "Semua Jenjang" (PAUD, SD, SMP, dll)
   if (SEMUA_SUBTABS_MAPPING[targetJenjang]) {
       return SEMUA_SUBTABS_MAPPING[targetJenjang].includes(jenjangDb);
   }
-  // Deteksi jika targetnya adalah kategori besar
+  // Deteksi jika targetnya adalah kategori besar dropdown
   if (KATEGORI_MAPPING[targetJenjang]) {
       return KATEGORI_MAPPING[targetJenjang].includes(jenjangDb);
   }
@@ -98,7 +98,6 @@ export default function RincianProfesiGuru({
   displayLastUpdated 
 }) {
   let mappedJenjang = activeJenjang;
-  if (mappedJenjang === 'SLB (Inklusif)') mappedJenjang = 'PENDIDIKAN INKLUSIF';
   if (mappedJenjang === 'SEMUA') mappedJenjang = 'SEMUA JENJANG';
 
   // STATE MODAL TABS
@@ -177,11 +176,11 @@ export default function RincianProfesiGuru({
 
   // Dinamika Tab Jenjang di dalam Modal
   const availableTabs = useMemo(() => {
-    if (mappedJenjang === 'SEMUA JENJANG') return Object.keys(KATEGORI_MAPPING);
+    if (mappedJenjang === 'SEMUA JENJANG') return Object.keys(SEMUA_SUBTABS_MAPPING);
     if (SEMUA_SUBTABS_MAPPING[mappedJenjang]) return SEMUA_SUBTABS_MAPPING[mappedJenjang];
     if (KATEGORI_MAPPING[mappedJenjang]) return KATEGORI_MAPPING[mappedJenjang];
     
-    for (const [kat, arr] of Object.entries(KATEGORI_MAPPING)) {
+    for (const [kat, arr] of Object.entries(SEMUA_SUBTABS_MAPPING)) {
         if (arr.includes(mappedJenjang)) return arr;
     }
     return [];
@@ -294,7 +293,6 @@ export default function RincianProfesiGuru({
       const npsn = getVal(item, 'npsn') || '-';
       let namaSekolah = getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '';
       
-      // SUNTIKAN KECERDASAN: Ambil dari mapping jika kosong
       if (!namaSekolah || namaSekolah === '-') {
          namaSekolah = mapNamaSekolah.get(String(npsn).trim()) || '-';
       }
@@ -513,7 +511,7 @@ export default function RincianProfesiGuru({
                   <th className="px-4 py-3 text-left">{isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan'}</th>
                   <th className="px-3 py-3 text-emerald-600">Sudah Sertifikasi</th>
                   <th className="px-3 py-3 text-red-600">Belum Sertifikasi</th>
-                  <th className="px-4 py-3 rounded-r-xl text-amber-800">Total Guru</th>
+                  <th className="px-4 py-3 rounded-r-xl text-purple-800">Total Guru</th>
                 </tr>
               </thead>
               <tbody>
@@ -524,7 +522,7 @@ export default function RincianProfesiGuru({
                     
                     <td className="px-3 py-4 font-black text-emerald-600 text-base border-y border-gray-100 bg-emerald-50/30">{row.sert_sudah.toLocaleString()}</td>
                     <td className="px-3 py-4 font-black text-red-600 text-base border-y border-gray-100 bg-red-50/20">{row.sert_belum.toLocaleString()}</td>
-                    <td className="px-4 py-4 font-black text-amber-800 text-lg border-y border-r border-gray-100 bg-amber-50/50 rounded-r-2xl">{row.total.toLocaleString()}</td>
+                    <td className="px-4 py-4 font-black text-purple-800 text-lg border-y border-r border-gray-100 bg-purple-50/50 rounded-r-2xl">{row.total.toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
@@ -586,7 +584,7 @@ export default function RincianProfesiGuru({
               {dataSekolah.length > 0 && (
                 <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
                   <tr className="bg-amber-100 text-center font-black uppercase text-xs border-t-2 border-amber-200">
-                    <td colSpan="6" className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-amber-200 text-amber-900">
+                    <td colSpan="6" className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-amber-200 text-purple-900">
                       TOTAL GURU DARI {dataSekolah.length} SEKOLAH
                     </td>
                     <td className="px-3 py-4 text-emerald-800 text-base border-y border-amber-200">{totalGuruSekolah.sert_sudah.toLocaleString()}</td>

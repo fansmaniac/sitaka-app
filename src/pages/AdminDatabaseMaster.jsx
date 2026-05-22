@@ -148,30 +148,25 @@ export default function AdminDatabaseMaster({ onBack }) {
          jsonData = Array.from(mapUnique.values());
       }
 
-      // STANDARDISASI ATRIBUT UNTUK SEKOLAH DAN SARPRAS
+      // STANDARDISASI ATRIBUT UNTUK SEKOLAH DAN SARPRAS (TANPA MEMBUANG DATA DUPLIKAT/KOSONG)
       if (activeTarget.collection === 'dapodik_sekolah' || activeTarget.collection === 'data_sarpras') {
-         const mapUniqueSekolah = new Map();
+         const formattedData = [];
          jsonData.forEach(item => {
             const keys = Object.keys(item);
-            const npsnKey = keys.find(k => k.trim().toLowerCase() === 'npsn');
-            
             const statusKey = keys.find(k => {
                const cleanH = k.trim().toLowerCase().replace(/[\s/]+/g, '_').replace(/_+/g, '_');
                return cleanH === 'status_sekolah' || cleanH === 'status';
             });
             
-            const npsn = npsnKey ? String(item[npsnKey]).trim() : '';
-            const docId = npsn ? npsn : Math.random().toString();
-            
-            if (!mapUniqueSekolah.has(docId)) {
-                const cleanItem = { ...item };
-                if (statusKey) {
-                   cleanItem['status_sekolah'] = String(item[statusKey]).trim();
-                }
-                mapUniqueSekolah.set(docId, cleanItem);
+            const cleanItem = { ...item };
+            // Paksa pemetaan kunci status_sekolah agar bersih dari spasi
+            if (statusKey) {
+               cleanItem['status_sekolah'] = String(item[statusKey]).trim();
             }
+            // Simpan semua data, jangan dibuang meskipun NPSN kembar atau kosong
+            formattedData.push(cleanItem);
          });
-         jsonData = Array.from(mapUniqueSekolah.values());
+         jsonData = formattedData; // Tancap gas, simpan semuanya!
       }
       
       const totalRowsInExcel = jsonData.length;
@@ -282,13 +277,13 @@ export default function AdminDatabaseMaster({ onBack }) {
   };
 
   // =====================================================================
-  // FUNGSI UNDUH FORMAT EXCEL (TYPO SPASI SUDAH DIBERSIHKAN TOTAL!)
+  // FUNGSI UNDUH FORMAT EXCEL (MENDUKUNG UPDATE UMUR PD BARU)
   // =====================================================================
   const handleDownloadFormatSekolah = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Satuan Pendidikan');
     
-    // SPASI MISTERIUS TELAH DIBASMI!
+    // SPASI MISTERIUS TELAH DIBASMI DAN KOLOM UMUR PD DITAMBAHKAN!
     const columns = [
       'npsn', 'nama_satuan_pendidikan', 'status_sekolah', 'bentuk_pendidikan', 'alamat', 
       'desa', 'kecamatan', 'kabupaten', 'lintang', 'bujur', 'npwp', 'nama_kepala_sekolah', 
@@ -303,7 +298,12 @@ export default function AdminDatabaseMaster({ onBack }) {
       'l_Islam', 'p_Islam', 'l_Kristen', 'p_Kristen', 'l_Katholik', 'p_Katholik', 
       'l_Hindu', 'p_Hindu', 'l_Budha', 'p_Budha', 'l_Konghucu', 'p_Konghucu', 
       'l_Kepercayaan', 'p_Kepercayaan', 'l_agama_lainnya', 'p_agama_lainnya', 
-      'tendik', 'pd_l', 'pd_p', 'pd_total'
+      'tendik', 'pd_l', 'pd_p', 'pd_total',
+      'u0_l', 'u0_p', 'u1_l', 'u1_p', 'u2_l', 'u2_p', 'u3_l', 'u3_p', 'u4_l', 'u4_p',
+      'u5_l', 'u5_p', 'u6_l', 'u6_p', 'u7_l', 'u7_p', 'u8_l', 'u8_p', 'u9_l', 'u9_p',
+      'u10_l', 'u10_p', 'u11_l', 'u11_p', 'u12_l', 'u12_p', 'u13_l', 'u13_p', 'u14_l', 'u14_p',
+      'u15_l', 'u15_p', 'u16_l', 'u16_p', 'u17_l', 'u17_p', 'u18_l', 'u18_p', 'u19_l', 'u19_p',
+      'u20_l', 'u20_p', 'u21+_l', 'u21+_p'
     ];
 
     worksheet.columns = columns.map(col => ({ header: col, key: col, width: 15 }));
@@ -314,7 +314,7 @@ export default function AdminDatabaseMaster({ onBack }) {
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Format_Upload_Sekolah.xlsx`;
+    link.download = `Format_Upload_Sekolah_BesertaUsiaPD.xlsx`;
     link.click();
   };
 

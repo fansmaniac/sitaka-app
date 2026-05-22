@@ -27,7 +27,7 @@ const cleanKabupatenName = (rawName) => {
 };
 
 // =====================================================================
-// PEMISAHAN JENJANG SMA DAN SMK PADA MESIN UTAMA ADMIN
+// PEMISAHAN JENJANG GLOBAL PADA MESIN UTAMA ADMIN
 // =====================================================================
 const JENJANG_GROUPS = {
   'PAUD': ['TK', 'KB', 'SPS', 'TPA', 'PAUD'],
@@ -44,6 +44,28 @@ const identifyJenjangGroup = (jenjangDb) => {
   const j = String(jenjangDb).trim().toUpperCase();
   for (const group of JENJANG_KEYS) {
     if (JENJANG_GROUPS[group].includes(j)) return group;
+  }
+  return null;
+};
+
+// =====================================================================
+// PEMISAHAN JENJANG KHUSUS UNTUK ROMBEL VS KELAS (HANYA TK)
+// =====================================================================
+const JENJANG_GROUPS_RK = {
+  'TK': ['TK'], // KB, SPS, TPA DIHAPUS KHUSUS UNTUK KALKULASI INI
+  'SD': ['SD', 'SPK SD'],
+  'SMP': ['SMP', 'SPK SMP'],
+  'SMA': ['SMA', 'SPK SMA'],
+  'SMK': ['SMK'],
+  'SLB (Inklusif)': ['SLB'],
+  'NON FORMAL': ['PKBM', 'SKB']
+};
+const JENJANG_KEYS_RK = ['TK', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
+
+const identifyJenjangGroupRK = (jenjangDb) => {
+  const j = String(jenjangDb).trim().toUpperCase();
+  for (const group of JENJANG_KEYS_RK) {
+    if (JENJANG_GROUPS_RK[group].includes(j)) return group;
   }
   return null;
 };
@@ -460,7 +482,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
         let rombelTotal = 0;
         Object.keys(item).forEach(k => {
             const keyStr = k.trim().toLowerCase();
-            // PENYELESAIAN BUG: Filter Ketat Regex
             if (/^rombel_(tka|tkb|t?\d{1,2}|paket_[abc])$/.test(keyStr)) {
                 rombelTotal += parseInt(item[k]) || 0;
             }
@@ -579,7 +600,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
         let rombelTotal = 0;
         Object.keys(item).forEach(k => {
             const keyStr = k.trim().toLowerCase();
-            // PENYELESAIAN BUG: Filter Ketat Regex
             if (/^rombel_(tka|tkb|t?\d{1,2}|paket_[abc])$/.test(keyStr)) {
                 rombelTotal += parseInt(item[k]) || 0;
             }
@@ -642,7 +662,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
     }
   };
 
-  // 6. ROMBEL VS RUANG KELAS (KELAS / ROMBEL)
+  // 6. ROMBEL VS RUANG KELAS (KELAS / ROMBEL) => MENGGUNAKAN JENJANG KHUSUS RK (HANYA TK)
   const handleCalculateRasioRombelKelas = async (year) => {
     setUploading(true);
     setProgressLabel(`Menghitung Rasio Rombel VS Ruang Kelas ${year}...`);
@@ -682,13 +702,16 @@ export default function AdminMesinKalkulasi({ onBack }) {
          }
       });
 
-      const tab1Data = JENJANG_KEYS.map(k => ({ jenjang: k, sek_n: 0, rombel_n: 0, kelas_n: 0, sek_s: 0, rombel_s: 0, kelas_s: 0 }));
+      // MENGGUNAKAN JENJANG_KEYS_RK KHUSUS
+      const tab1Data = JENJANG_KEYS_RK.map(k => ({ jenjang: k, sek_n: 0, rombel_n: 0, kelas_n: 0, sek_s: 0, rombel_s: 0, kelas_s: 0 }));
       const mapWilayah = new Map();
 
       allSekolahData.forEach(item => {
         const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
-        const group = identifyJenjangGroup(bentuk);
-        if (!group) return;
+        
+        // MENGGUNAKAN FUNGSI IDENTIFIER KHUSUS RK (Abaikan KB, SPS, TPA)
+        const group = identifyJenjangGroupRK(bentuk);
+        if (!group) return; // Skip jika bukan TK, SD, SMP, SMA, SMK, SLB, atau NON FORMAL
 
         const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
         const npsn = String(getVal(item, 'npsn')).trim();
@@ -696,7 +719,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
         let rombelTotal = 0;
         Object.keys(item).forEach(k => {
             const keyStr = k.trim().toLowerCase();
-            // PENYELESAIAN BUG: Filter Ketat Regex
             if (/^rombel_(tka|tkb|t?\d{1,2}|paket_[abc])$/.test(keyStr)) {
                 rombelTotal += parseInt(item[k]) || 0;
             }
@@ -716,7 +738,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
         if (!mapWilayah.has(uniqueId)) {
           const init = { wilayah: kabDb, kecamatan: keyKec };
-          JENJANG_KEYS.forEach(k => { 
+          JENJANG_KEYS_RK.forEach(k => { 
              init[`${k}_sek`] = 0;
              init[`${k}_rombel`] = 0; 
              init[`${k}_kelas`] = 0;

@@ -13,8 +13,8 @@ const KABUPATEN_LIST = [
   "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
 ];
 
-// PEMISAHAN JENJANG SMA DAN SMK
-const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
+// PEMISAHAN JENJANG (PAUD DIUBAH MENJADI KHUSUS TK)
+const JENJANG_KEYS = ['TK', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
 
 // Fungsi hitung angka rasio mentah (Jumlah Kelas / Jumlah Rombel)
 const getRawRatio = (rombelCount, kelasCount) => {

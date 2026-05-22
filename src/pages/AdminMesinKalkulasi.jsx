@@ -12,6 +12,17 @@ const getVal = (obj, keyName) => {
   return key ? obj[key] : '';
 };
 
+// Fungsi ekstraktor angka (Anti-NaN)
+const getNum = (obj, keyName) => {
+  const val = getVal(obj, keyName);
+  if (typeof val === 'number') return val;
+  if (typeof val === 'string') {
+      const parsed = parseInt(val.replace(/[^0-9]/g, ''), 10);
+      return isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+};
+
 const KABUPATEN_LIST = [
   "BENGKAYANG", "KAPUAS HULU", "KAYONG UTARA", "KETAPANG", 
   "KUBU RAYA", "LANDAK", "MELAWI", "MEMPAWAH", "PONTIANAK", 
@@ -27,7 +38,7 @@ const cleanKabupatenName = (rawName) => {
 };
 
 // =====================================================================
-// PEMISAHAN JENJANG GLOBAL PADA MESIN UTAMA ADMIN
+// PEMISAHAN JENJANG GLOBAL + FALLBACK ANTI GAGAL
 // =====================================================================
 const JENJANG_GROUPS = {
   'PAUD': ['TK', 'KB', 'SPS', 'TPA', 'PAUD'],
@@ -45,6 +56,16 @@ const identifyJenjangGroup = (jenjangDb) => {
   for (const group of JENJANG_KEYS) {
     if (JENJANG_GROUPS[group].includes(j)) return group;
   }
+  
+  // ROBUST FALLBACK JIKA FORMAT STRING KOTOR
+  if (j.includes('TK') || j.includes('KB') || j.includes('PAUD') || j.includes('SPS') || j.includes('TPA')) return 'PAUD';
+  if (j.includes('SD') && !j.includes('SLB')) return 'SD';
+  if (j.includes('SMP') && !j.includes('SLB')) return 'SMP';
+  if (j.includes('SMA') && !j.includes('SLB')) return 'SMA';
+  if (j.includes('SMK')) return 'SMK';
+  if (j.includes('SLB') || j.includes('SDLB') || j.includes('SMPLB') || j.includes('SMALB')) return 'SLB (Inklusif)';
+  if (j.includes('PKBM') || j.includes('SKB')) return 'NON FORMAL';
+
   return null;
 };
 
@@ -52,7 +73,7 @@ const identifyJenjangGroup = (jenjangDb) => {
 // PEMISAHAN JENJANG KHUSUS UNTUK ROMBEL VS KELAS (HANYA TK)
 // =====================================================================
 const JENJANG_GROUPS_RK = {
-  'TK': ['TK'], // KB, SPS, TPA DIHAPUS KHUSUS UNTUK KALKULASI INI
+  'TK': ['TK'], 
   'SD': ['SD', 'SPK SD'],
   'SMP': ['SMP', 'SPK SMP'],
   'SMA': ['SMA', 'SPK SMA'],
@@ -67,6 +88,16 @@ const identifyJenjangGroupRK = (jenjangDb) => {
   for (const group of JENJANG_KEYS_RK) {
     if (JENJANG_GROUPS_RK[group].includes(j)) return group;
   }
+
+  // ROBUST FALLBACK (Kecuali KB, TPA, SPS)
+  if (j.includes('TK')) return 'TK';
+  if (j.includes('SD') && !j.includes('SLB')) return 'SD';
+  if (j.includes('SMP') && !j.includes('SLB')) return 'SMP';
+  if (j.includes('SMA') && !j.includes('SLB')) return 'SMA';
+  if (j.includes('SMK')) return 'SMK';
+  if (j.includes('SLB') || j.includes('SDLB') || j.includes('SMPLB') || j.includes('SMALB')) return 'SLB (Inklusif)';
+  if (j.includes('PKBM') || j.includes('SKB')) return 'NON FORMAL';
+
   return null;
 };
 
@@ -110,10 +141,8 @@ export default function AdminMesinKalkulasi({ onBack }) {
   }, []);
 
   // =====================================================================
-  // MESIN PRE-CALCULATION RASIO
-  // =====================================================================
-  
   // 1. SEKOLAH VS PD (PD / SEKOLAH)
+  // =====================================================================
   const handleCalculateRasioSekolahPD = async (year) => {
     setUploading(true);
     setProgressLabel(`Menghitung Rasio Sekolah VS PD ${year}...`);
@@ -139,7 +168,8 @@ export default function AdminMesinKalkulasi({ onBack }) {
       const mapWilayah = new Map();
 
       allSekolahData.forEach(item => {
-        const group = identifyJenjangGroup(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'));
+        const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
+        const group = identifyJenjangGroup(bentuk);
         if (!group) return;
 
         const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
@@ -223,7 +253,9 @@ export default function AdminMesinKalkulasi({ onBack }) {
     }
   };
 
+  // =====================================================================
   // 2. SEKOLAH VS GURU (GURU / SEKOLAH)
+  // =====================================================================
   const handleCalculateRasioSekolahGuru = async (year) => {
     setUploading(true);
     setProgressLabel(`Menghitung Rasio Sekolah VS Guru ${year}...`);
@@ -331,7 +363,9 @@ export default function AdminMesinKalkulasi({ onBack }) {
     }
   };
 
+  // =====================================================================
   // 3. ROMBEL VS GURU (GURU / ROMBEL)
+  // =====================================================================
   const handleCalculateRasioRombelGuru = async (year) => {
     setUploading(true);
     setProgressLabel(`Menghitung Rasio Rombel VS Guru ${year}...`);
@@ -362,7 +396,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
              let rombelTotal = 0;
              Object.keys(s).forEach(k => {
                  const keyStr = k.trim().toLowerCase();
-                 // PENYELESAIAN BUG: Menggunakan Regex ketat untuk menghindari rombel anomali
                  if (/^rombel_(tka|tkb|t?\d{1,2}|paket_[abc])$/.test(keyStr)) {
                      rombelTotal += parseInt(s[k]) || 0;
                  }
@@ -449,7 +482,9 @@ export default function AdminMesinKalkulasi({ onBack }) {
     }
   };
 
+  // =====================================================================
   // 4. SEKOLAH VS ROMBEL (ROMBEL / SEKOLAH)
+  // =====================================================================
   const handleCalculateRasioSekolahRombel = async (year) => {
     setUploading(true);
     setProgressLabel(`Menghitung Rasio Sekolah VS Rombel ${year}...`);
@@ -540,7 +575,9 @@ export default function AdminMesinKalkulasi({ onBack }) {
     }
   };
 
+  // =====================================================================
   // 5. ROMBEL VS PD (PD / ROMBEL)
+  // =====================================================================
   const handleCalculateRasioRombelPD = async (year) => {
     setUploading(true);
     setProgressLabel(`Menghitung Rasio Rombel VS Peserta Didik ${year}...`);
@@ -662,7 +699,10 @@ export default function AdminMesinKalkulasi({ onBack }) {
     }
   };
 
-  // 6. ROMBEL VS RUANG KELAS (KELAS / ROMBEL) => MENGGUNAKAN JENJANG KHUSUS RK (HANYA TK)
+
+  // =====================================================================
+  // 6. ROMBEL VS RUANG KELAS (KELAS / ROMBEL) ---> SOLUSI FINAL ANTI OVERWRITE
+  // =====================================================================
   const handleCalculateRasioRombelKelas = async (year) => {
     setUploading(true);
     setProgressLabel(`Menghitung Rasio Rombel VS Ruang Kelas ${year}...`);
@@ -688,33 +728,32 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       setUploadProgress(40);
 
-      const mapSarpras = new Map();
-      allSarprasData.forEach(s => {
-         const npsn = String(getVal(s, 'npsn')).trim();
-         if(npsn) {
-             const kelasBaik = parseInt(getVal(s, 'ruang_kelas_baik')) || 0;
-             const kelasRusakRingan = parseInt(getVal(s, 'ruang_kelas_rusak_ringan')) || 0;
-             const kelasRusakSedang = parseInt(getVal(s, 'ruang_kelas_rusak_sedang')) || 0;
-             const kelasRusakBerat = parseInt(getVal(s, 'ruang_kelas_rusak_berat')) || 0;
-             
-             const ruangKelasTotal = kelasBaik + kelasRusakRingan + kelasRusakSedang + kelasRusakBerat;
-             mapSarpras.set(npsn, ruangKelasTotal);
-         }
-      });
-
-      // MENGGUNAKAN JENJANG_KEYS_RK KHUSUS
+      // KITA CERAIKAN PENGGUNAAN MAP NPSN, MURNI MENGGUNAKAN GROUPING WILAYAH
       const tab1Data = JENJANG_KEYS_RK.map(k => ({ jenjang: k, sek_n: 0, rombel_n: 0, kelas_n: 0, sek_s: 0, rombel_s: 0, kelas_s: 0 }));
       const mapWilayah = new Map();
 
+      // Helper untuk Inisialisasi Wilayah
+      const initWilayah = (kabDb, keyKec) => {
+          const uniqueId = `${kabDb}_${keyKec}`;
+          if (!mapWilayah.has(uniqueId)) {
+              const init = { wilayah: kabDb, kecamatan: keyKec };
+              JENJANG_KEYS_RK.forEach(k => { 
+                 init[`${k}_sek`] = 0; init[`${k}_rombel`] = 0; init[`${k}_kelas`] = 0;
+                 init[`${k}_sek_n`] = 0; init[`${k}_rombel_n`] = 0; init[`${k}_kelas_n`] = 0;
+                 init[`${k}_sek_s`] = 0; init[`${k}_rombel_s`] = 0; init[`${k}_kelas_s`] = 0;
+              });
+              mapWilayah.set(uniqueId, init);
+          }
+          return mapWilayah.get(uniqueId);
+      };
+
+      // --- LOOPING 1: MENGHITUNG ROMBEL DARI DATA SEKOLAH ---
       allSekolahData.forEach(item => {
         const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
-        
-        // MENGGUNAKAN FUNGSI IDENTIFIER KHUSUS RK (Abaikan KB, SPS, TPA)
         const group = identifyJenjangGroupRK(bentuk);
-        if (!group) return; // Skip jika bukan TK, SD, SMP, SMA, SMK, SLB, atau NON FORMAL
+        if (!group) return; 
 
         const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
-        const npsn = String(getVal(item, 'npsn')).trim();
         
         let rombelTotal = 0;
         Object.keys(item).forEach(k => {
@@ -724,45 +763,65 @@ export default function AdminMesinKalkulasi({ onBack }) {
             }
         });
 
-        const kelasTotal = mapSarpras.get(npsn) || 0;
-
-        const rowTab1 = tab1Data.find(r => r.jenjang === group);
-        if (rowTab1) {
-           if (isNegeri) { rowTab1.sek_n++; rowTab1.rombel_n += rombelTotal; rowTab1.kelas_n += kelasTotal; } 
-           else { rowTab1.sek_s++; rowTab1.rombel_s += rombelTotal; rowTab1.kelas_s += kelasTotal; }
+        // Safeguard (Jika nol, coba narik dari field default Rombel)
+        if (rombelTotal === 0) {
+            rombelTotal = getNum(item, 'rombel') || getNum(item, 'rombongan_belajar');
         }
 
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
-        const uniqueId = `${kabDb}_${keyKec}`;
 
-        if (!mapWilayah.has(uniqueId)) {
-          const init = { wilayah: kabDb, kecamatan: keyKec };
-          JENJANG_KEYS_RK.forEach(k => { 
-             init[`${k}_sek`] = 0;
-             init[`${k}_rombel`] = 0; 
-             init[`${k}_kelas`] = 0;
-             init[`${k}_sek_n`] = 0; 
-             init[`${k}_rombel_n`] = 0; init[`${k}_kelas_n`] = 0;
-             init[`${k}_sek_s`] = 0; 
-             init[`${k}_rombel_s`] = 0; init[`${k}_kelas_s`] = 0;
-          });
-          mapWilayah.set(uniqueId, init);
+        const rowTab1 = tab1Data.find(r => r.jenjang === group);
+        if (rowTab1) {
+           if (isNegeri) { rowTab1.sek_n++; rowTab1.rombel_n += rombelTotal; } 
+           else { rowTab1.sek_s++; rowTab1.rombel_s += rombelTotal; }
         }
 
-        const rowTab2 = mapWilayah.get(uniqueId);
+        const rowTab2 = initWilayah(kabDb, keyKec);
         rowTab2[`${group}_sek`]++; 
         rowTab2[`${group}_rombel`] += rombelTotal;
-        rowTab2[`${group}_kelas`] += kelasTotal;
-        
         if (isNegeri) {
            rowTab2[`${group}_sek_n`]++; 
            rowTab2[`${group}_rombel_n`] += rombelTotal;
-           rowTab2[`${group}_kelas_n`] += kelasTotal;
         } else {
            rowTab2[`${group}_sek_s`]++; 
            rowTab2[`${group}_rombel_s`] += rombelTotal;
-           rowTab2[`${group}_kelas_s`] += kelasTotal;
+        }
+      });
+
+      setUploadProgress(60);
+
+      // --- LOOPING 2: MENGHITUNG KELAS DARI DATA SARPRAS (TANPA NPSN) ---
+      allSarprasData.forEach(s => {
+        const bentuk = String(getVal(s, 'bentuk_pendidikan') || getVal(s, 'jenjang')).trim().toUpperCase();
+        const group = identifyJenjangGroupRK(bentuk);
+        if (!group) return;
+
+        const isNegeri = String(getVal(s, 'status_sekolah')).toUpperCase() === 'NEGERI';
+        const kabDb = cleanKabupatenName(getVal(s, 'kabupaten') || getVal(s, 'Kabupaten/Kota'));
+        const keyKec = String(getVal(s, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+        
+        const kelasBaik = getNum(s, 'ruang_kelas_baik');
+        const kelasRusakRingan = getNum(s, 'ruang_kelas_rusak_ringan');
+        const kelasRusakSedang = getNum(s, 'ruang_kelas_rusak_sedang');
+        const kelasRusakBerat = getNum(s, 'ruang_kelas_rusak_berat');
+        
+        // Akumulasikan semua tipe kelas (Layak maupun Tidak Layak)
+        const ruangKelasTotal = kelasBaik + kelasRusakRingan + kelasRusakSedang + kelasRusakBerat;
+
+        const rowTab1 = tab1Data.find(r => r.jenjang === group);
+        if (rowTab1) {
+           if (isNegeri) { rowTab1.kelas_n += ruangKelasTotal; } 
+           else { rowTab1.kelas_s += ruangKelasTotal; }
+        }
+
+        const rowTab2 = initWilayah(kabDb, keyKec);
+        rowTab2[`${group}_kelas`] += ruangKelasTotal;
+        
+        if (isNegeri) {
+           rowTab2[`${group}_kelas_n`] += ruangKelasTotal;
+        } else {
+           rowTab2[`${group}_kelas_s`] += ruangKelasTotal;
         }
       });
 
@@ -789,7 +848,9 @@ export default function AdminMesinKalkulasi({ onBack }) {
     }
   };
 
+  // =====================================================================
   // 7. GURU VS PD (PD / GURU)
+  // =====================================================================
   const handleCalculateRasioGuruPD = async (year) => {
     setUploading(true);
     setProgressLabel(`Menghitung Rasio Guru VS Peserta Didik ${year}...`);

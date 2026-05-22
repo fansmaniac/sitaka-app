@@ -55,49 +55,114 @@ const getFromCache = async (key) => {
 };
 
 // =====================================================================
-// UTILITY FUNCTIONS
+// UTILITY FUNCTIONS & SUPER ROBUST EXTRACTOR
 // =====================================================================
-const getVal = (obj, keyName) => {
+
+// Ambil Teks (Mengatasi anomali nama key seperti "N P S N" atau "Ruang Kelas")
+const getString = (obj, keyName) => {
   if (!obj) return '';
-  const key = Object.keys(obj).find(k => k.trim().toLowerCase() === keyName.toLowerCase());
-  return key ? obj[key] : '';
+  const searchKey = String(keyName).toLowerCase().trim();
+  const key = Object.keys(obj).find(k => {
+      const kNorm = String(k).toLowerCase().trim();
+      return kNorm === searchKey || kNorm.replace(/[\s_\-]+/g, '') === searchKey.replace(/[\s_\-]+/g, '');
+  });
+  return key ? String(obj[key]).trim() : '';
 };
 
-// Fungsi menghitung total Rombel (Dynamic Scanner)
+// Ambil Angka (Mengatasi String "10" menjadi Integer 10)
+const getNum = (obj, keyName) => {
+  if (!obj) return 0;
+  const searchKey = String(keyName).toLowerCase().trim();
+  const key = Object.keys(obj).find(k => {
+      const kNorm = String(k).toLowerCase().trim();
+      return kNorm === searchKey || kNorm.replace(/[\s_\-]+/g, '') === searchKey.replace(/[\s_\-]+/g, '');
+  });
+  
+  if (!key) return 0;
+  
+  const val = obj[key];
+  if (typeof val === 'number') return val;
+  if (typeof val === 'string') {
+    const parsed = parseInt(val.replace(/[^0-9]/g, ''), 10);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+};
+
+// Pembersih Key untuk Pencocokan Join
+const cleanNpsn = (npsn) => npsn ? String(npsn).replace(/[^0-9a-zA-Z]/g, '').toUpperCase() : '';
+
+const cleanKecamatanForMatch = (kecStr) => {
+  if (!kecStr) return '';
+  return String(kecStr).toUpperCase().replace(/^(KEC\.|KECAMATAN)\s+/i, '').replace(/[^A-Z0-9]/g, '');
+};
+
+const normalizeSchoolName = (name) => {
+  if (!name) return '';
+  let s = String(name).toUpperCase();
+  s = s.replace(/SD\s*NEGERI/g, 'SDN');
+  s = s.replace(/SMP\s*NEGERI/g, 'SMPN');
+  s = s.replace(/SMA\s*NEGERI/g, 'SMAN');
+  s = s.replace(/SMK\s*NEGERI/g, 'SMKN');
+  s = s.replace(/TK\s*NEGERI/g, 'TKN');
+  return s.replace(/[^A-Z0-9]/g, '');
+};
+
+// Kombinasi Nama + Kecamatan untuk Backup Join
+const getSchoolMatchKey = (item) => {
+  const nama = getString(item, 'nama_sekolah') || getString(item, 'nama') || getString(item, 'sekolah');
+  const kec = getString(item, 'kecamatan');
+  
+  const namaClean = normalizeSchoolName(nama);
+  const kecClean = cleanKecamatanForMatch(kec);
+  
+  if (!namaClean) return null;
+  return `${namaClean}_${kecClean}`;
+};
+
+// =====================================================================
+// LOGIKA KALKULASI INTI
+// =====================================================================
+
 const calculateTotalRombel = (item) => {
   let total = 0;
+  const regex = /^rombel[\s_]*(tka|tkb|t?\d{1,2}|paket[\s_]*[abc])$/i;
+  
   Object.keys(item).forEach(k => {
-    if (k.toLowerCase().includes('rombel_')) {
-       total += parseInt(item[k]) || 0;
+    if (regex.test(k.trim())) {
+       const val = item[k];
+       if (typeof val === 'number') total += val;
+       else if (typeof val === 'string') total += (parseInt(val.replace(/[^0-9]/g, ''), 10) || 0);
     }
   });
+
+  if (total === 0) total = getNum(item, 'rombel') || getNum(item, 'rombongan_belajar');
   return total;
 };
 
-// Fungsi menghitung Kelas Layak Pakai (HANYA Baik & Rusak Ringan sesuai request)
+// Kelas Layak Pakai = Kondisi Baik + Rusak Ringan
 const calculateKelasLayak = (itemSarpras) => {
   if (!itemSarpras) return 0;
-  const baik = parseInt(getVal(itemSarpras, 'ruang_kelas_baik')) || 0;
-  const rr = parseInt(getVal(itemSarpras, 'ruang_kelas_rusak_ringan')) || 0;
-  return baik + rr; 
+  return getNum(itemSarpras, 'ruang_kelas_baik') + getNum(itemSarpras, 'ruang_kelas_rusak_ringan'); 
 };
 
-// PEMISAHAN JENJANG (Sesuai Konteks Request: PAUD hanya TK, dll)
-const JENJANG_GROUPS = {
-  'PAUD (TK SAJA)': ['TK'],
-  'SD': ['SD', 'SPK SD'],
-  'SMP': ['SMP', 'SPK SMP'],
-  'SMA': ['SMA', 'SPK SMA'],
-  'SMK': ['SMK'],
-  'SLB': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
-  'NON FORMAL': ['PKBM', 'SKB']
-};
-
-const identifyJenjangGroup = (jenjangDb) => {
-  const j = String(jenjangDb).trim().toUpperCase();
-  for (const [key, arr] of Object.entries(JENJANG_GROUPS)) {
-    if (arr.includes(j)) return key;
-  }
+// Menyatukan Jenjang
+const getJenjang = (item) => {
+  const j = String(getString(item, 'bentuk_pendidikan') || getString(item, 'jenjang')).toUpperCase().trim();
+  if (['TK', 'KB', 'TPA', 'SPS', 'PAUD'].includes(j)) return 'PAUD';
+  if (['SD', 'SPK SD'].includes(j)) return 'SD';
+  if (['SMP', 'SPK SMP'].includes(j)) return 'SMP';
+  if (['SMA', 'SPK SMA'].includes(j)) return 'SMA';
+  if (['SMK'].includes(j)) return 'SMK';
+  if (['SLB', 'SDLB', 'SMPLB', 'SMALB'].includes(j)) return 'SLB';
+  if (['PKBM', 'SKB'].includes(j)) return 'NON FORMAL';
+  
+  if (j.includes('TK') || j.includes('KB') || j.includes('PAUD')) return 'PAUD';
+  if (j.includes('SD') && !j.includes('SLB')) return 'SD';
+  if (j.includes('SMP') && !j.includes('SLB')) return 'SMP';
+  if (j.includes('SMA') && !j.includes('SLB')) return 'SMA';
+  if (j.includes('SMK')) return 'SMK';
+  
   return null;
 };
 
@@ -115,7 +180,6 @@ const cleanKabupatenName = (rawName) => {
   return name; 
 };
 
-// Penyesuaian nama Kota untuk Dropdown
 const formatWilayahDropdown = (wilayah) => {
   if (wilayah === 'PONTIANAK' || wilayah === 'SINGKAWANG') return `KOTA ${wilayah}`;
   return `KABUPATEN ${wilayah}`;
@@ -129,24 +193,26 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
   const [dataSarpras, setDataSarpras] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // State Filters
   const [filterWilayah, setFilterWilayah] = useState('SEMUA');
   const [filterKecamatan, setFilterKecamatan] = useState('SEMUA');
   const [filterStatus, setFilterStatus] = useState('SEMUA');
   
   const [isPending, startTransition] = useTransition();
 
-  // Fetch Data (Parallel Fetching untuk Sekolah & Sarpras)
+  // Memaksa Tarik Ulang Data via Cache v10
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
-      const cacheKeySekolah = `sekolah_modul_${selectedYear}`;
-      const cacheKeySarpras = `sarpras_modul_v3_${selectedYear}`;
+      const cacheKeySekolah = `sekolah_modul_v10_sitaka_${selectedYear}`;
+      const cacheKeySarpras = `sarpras_modul_v10_sitaka_${selectedYear}`;
+      
+      const yearStr = String(selectedYear);
+      const yearNum = Number(selectedYear);
       
       try {
         let freshSekolah = await getFromCache(cacheKeySekolah);
         if (!freshSekolah) {
-          const qSekolah = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", selectedYear));
+          const qSekolah = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "in", [yearStr, yearNum]));
           const snapSekolah = await getDocs(qSekolah);
           freshSekolah = snapSekolah.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           await saveToCache(cacheKeySekolah, freshSekolah);
@@ -154,7 +220,7 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
 
         let freshSarpras = await getFromCache(cacheKeySarpras);
         if (!freshSarpras) {
-          const qSarpras = query(collection(db, 'data_sarpras_chunks'), where("tahun_data", "==", selectedYear));
+          const qSarpras = query(collection(db, 'data_sarpras_chunks'), where("tahun_data", "in", [yearStr, yearNum]));
           const snapSarpras = await getDocs(qSarpras);
           freshSarpras = snapSarpras.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           await saveToCache(cacheKeySarpras, freshSarpras);
@@ -172,7 +238,7 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
     fetchData();
   }, [selectedYear]);
 
-  // Ekstrak Item Murni
+  // Datar Array Sekolah & Sarpras
   const allSekolahItems = useMemo(() => {
     if (!dataSekolah.length) return [];
     let items = [];
@@ -180,104 +246,127 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
     return items;
   }, [dataSekolah]);
 
-  // Mapping Sarpras (Key: NPSN, Value: Kelas Layak Pakai)
-  const mapKelasSarpras = useMemo(() => {
-    const map = new Map();
-    if (!dataSarpras.length) return map;
+  // Siapkan Mesin Peta untuk Keperluan JOIN Double Shift
+  const mapSarprasData = useMemo(() => {
+    const byNpsn = new Map();
+    const byNameKec = new Map();
+    
+    if (!dataSarpras || dataSarpras.length === 0) return { byNpsn, byNameKec };
     
     dataSarpras.forEach(chunk => {
       if (chunk && Array.isArray(chunk.data)) {
         chunk.data.forEach(item => {
-          const npsn = String(getVal(item, 'npsn')).trim();
-          if (npsn) {
-             const kelasLayak = calculateKelasLayak(item);
-             map.set(npsn, kelasLayak);
-          }
+          const npsn = cleanNpsn(getString(item, 'npsn'));
+          const matchKey = getSchoolMatchKey(item);
+          const kelasLayak = calculateKelasLayak(item);
+          
+          if (npsn) byNpsn.set(npsn, (byNpsn.get(npsn) || 0) + kelasLayak);
+          if (matchKey) byNameKec.set(matchKey, (byNameKec.get(matchKey) || 0) + kelasLayak);
         });
       }
     });
-    return map;
+    return { byNpsn, byNameKec };
   }, [dataSarpras]);
 
-  // Daftar Kecamatan Dinamis
   const listKecamatan = useMemo(() => {
     if (filterWilayah === 'SEMUA') return [];
     const validKec = allSekolahItems
-      .filter(item => cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) === filterWilayah)
-      .map(item => String(getVal(item, 'kecamatan')).trim().toUpperCase())
+      .filter(item => cleanKabupatenName(getString(item, 'kabupaten') || getString(item, 'Kabupaten/Kota')) === filterWilayah)
+      .map(item => getString(item, 'kecamatan').toUpperCase())
       .filter(k => k && k !== 'TIDAK DIKETAHUI');
     return [...new Set(validKec)].sort();
   }, [allSekolahItems, filterWilayah]);
 
-  // Auto-reset kecamatan jika wilayah berganti
   useEffect(() => {
     setFilterKecamatan('SEMUA');
   }, [filterWilayah]);
 
-  // Handlers untuk Filter (Menggunakan Concurrent Transition)
   const handleWilayahChange = (e) => { startTransition(() => setFilterWilayah(e.target.value)); };
   const handleKecamatanChange = (e) => { startTransition(() => setFilterKecamatan(e.target.value)); };
   const handleStatusChange = (e) => { startTransition(() => setFilterStatus(e.target.value)); };
 
   // =====================================================================
-  // ENGINE AGREGASI DOUBLE SHIFT
+  // ENGINE AGREGASI DOUBLE SHIFT (MEROMBOK ARSITEKTUR LOOP)
   // =====================================================================
   const aggregatedData = useMemo(() => {
-    if (!allSekolahItems.length) return [];
-
-    // Inisialisasi Keranjang Data per Jenjang
     const mapAgg = new Map();
-    Object.keys(JENJANG_GROUPS).forEach(j => {
-      mapAgg.set(j, {
-        jenjang: j,
-        jumlah_sekolah: 0,
-        jumlah_kelas: 0,
-        jumlah_rombel: 0,
-        sekolah_double_shift: 0
-      });
+    const orderJenjang = ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'NON FORMAL'];
+    
+    orderJenjang.forEach(j => {
+      mapAgg.set(j, { jenjang: j, jumlah_sekolah: 0, jumlah_kelas: 0, jumlah_rombel: 0, sekolah_double_shift: 0 });
     });
 
+    if (!allSekolahItems.length) return Array.from(mapAgg.values());
+
+    // 1. LOOP SEKOLAH: Hitung Sekolah, Rombel & Kalkulasi Relasi Double Shift
     allSekolahItems.forEach(item => {
-      // Filter Wilayah
+      const jenjang = getJenjang(item);
+      if (!jenjang || !mapAgg.has(jenjang)) return;
+
       if (filterWilayah !== 'SEMUA') {
-        const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+        const kabDb = cleanKabupatenName(getString(item, 'kabupaten') || getString(item, 'Kabupaten/Kota'));
         if (kabDb !== filterWilayah) return;
       }
-      // Filter Kecamatan
       if (filterKecamatan !== 'SEMUA') {
-        const kecDb = String(getVal(item, 'kecamatan')).trim().toUpperCase();
+        const kecDb = getString(item, 'kecamatan').toUpperCase();
         if (kecDb !== filterKecamatan) return;
       }
-      // Filter Status Sekolah
       if (filterStatus !== 'SEMUA') {
-        const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
+        const statusDb = getString(item, 'status_sekolah').toUpperCase();
         if (statusDb !== filterStatus) return;
       }
 
-      // Deteksi Jenjang
-      const group = identifyJenjangGroup(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'));
-      if (!group) return; 
-
-      const row = mapAgg.get(group);
-      const npsn = String(getVal(item, 'npsn')).trim();
-      
+      const row = mapAgg.get(jenjang);
       const rombel = calculateTotalRombel(item);
-      // Ambil ruang kelas dari Sarpras (Jika tidak ada sarpras, asumsikan 0)
-      const kelas = mapKelasSarpras.has(npsn) ? mapKelasSarpras.get(npsn) : 0;
       
-      // LOGIKA DOUBLE SHIFT: Rombel > Kelas
-      const isDoubleShift = rombel > kelas;
+      // Ambil Kelas dari Peta Sarpras untuk mencari sekolah yang kekurangan kelas
+      const npsn = cleanNpsn(getString(item, 'npsn'));
+      const matchKey = getSchoolMatchKey(item);
+      let kelasForSchool = 0;
+
+      if (npsn && mapSarprasData.byNpsn.has(npsn)) {
+          kelasForSchool = mapSarprasData.byNpsn.get(npsn);
+      } else if (matchKey && mapSarprasData.byNameKec.has(matchKey)) {
+          kelasForSchool = mapSarprasData.byNameKec.get(matchKey);
+      }
+      
+      const isDoubleShift = rombel > kelasForSchool;
 
       row.jumlah_sekolah++;
-      row.jumlah_kelas += kelas;
       row.jumlah_rombel += rombel;
-      if (isDoubleShift) {
-         row.sekolah_double_shift++;
+      if (isDoubleShift) row.sekolah_double_shift++;
+    });
+
+    // 2. LOOP SARPRAS: Hitung Total "Jumlah Kelas Layak" Secara Independen 
+    // Sama persis dengan suksesnya DapodikSarprasKondisi.jsx (Menghindari 0 akibat gagal JOIN)
+    dataSarpras.forEach(chunk => {
+      if (chunk && Array.isArray(chunk.data)) {
+        chunk.data.forEach(item => {
+          const jenjang = getJenjang(item);
+          if (!jenjang || !mapAgg.has(jenjang)) return;
+
+          // Samakan Filter dengan Sekolah
+          if (filterWilayah !== 'SEMUA') {
+            const kabDb = cleanKabupatenName(getString(item, 'kabupaten') || getString(item, 'Kabupaten/Kota'));
+            if (kabDb !== filterWilayah) return;
+          }
+          if (filterKecamatan !== 'SEMUA') {
+            const kecDb = getString(item, 'kecamatan').toUpperCase();
+            if (kecDb !== filterKecamatan) return;
+          }
+          if (filterStatus !== 'SEMUA') {
+            const statusDb = getString(item, 'status_sekolah').toUpperCase();
+            if (statusDb !== filterStatus) return;
+          }
+
+          const kelasLayak = calculateKelasLayak(item);
+          mapAgg.get(jenjang).jumlah_kelas += kelasLayak;
+        });
       }
     });
 
     return Array.from(mapAgg.values());
-  }, [allSekolahItems, mapKelasSarpras, filterWilayah, filterKecamatan, filterStatus]);
+  }, [allSekolahItems, dataSarpras, mapSarprasData, filterWilayah, filterKecamatan, filterStatus]);
 
   // Grand Total
   const grandTotals = useMemo(() => {
@@ -289,6 +378,9 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
       return acc;
     }, { jumlah_sekolah: 0, jumlah_kelas: 0, jumlah_rombel: 0, sekolah_double_shift: 0 });
   }, [aggregatedData]);
+
+  const totalPersenValue = grandTotals.jumlah_sekolah > 0 ? ((grandTotals.sekolah_double_shift / grandTotals.jumlah_sekolah) * 100) : 0;
+  const totalPersenStr = totalPersenValue % 1 === 0 ? totalPersenValue : totalPersenValue.toFixed(1);
 
   // =====================================================================
   // EXPORT EXCEL
@@ -307,21 +399,21 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
     ];
 
     aggregatedData.forEach(item => {
-      const persen = item.jumlah_sekolah > 0 ? ((item.sekolah_double_shift / item.jumlah_sekolah) * 100).toFixed(1) : 0;
-      worksheet.addRow({ ...item, persentase: `${persen}%` });
+      const persenValue = item.jumlah_sekolah > 0 ? ((item.sekolah_double_shift / item.jumlah_sekolah) * 100) : 0;
+      const persenStr = persenValue % 1 === 0 ? persenValue : persenValue.toFixed(1);
+      worksheet.addRow({ ...item, persentase: `${persenStr}%` });
     });
-
-    const totalPersen = grandTotals.jumlah_sekolah > 0 ? ((grandTotals.sekolah_double_shift / grandTotals.jumlah_sekolah) * 100).toFixed(1) : 0;
+    
     const totalRow = worksheet.addRow({ 
       jenjang: 'TOTAL KESELURUHAN', 
       ...grandTotals,
-      persentase: `${totalPersen}%`
+      persentase: `${totalPersenStr}%`
     });
 
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBE123C' } }; // Rose 700
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBE123C' } }; 
     totalRow.font = { bold: true, color: { argb: 'FF881337' } }; 
-    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE4E6' } }; // Rose 100
+    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE4E6' } }; 
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -369,7 +461,7 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
               </span>
             )}
 
-            {/* Filter Wilayah (Kab/Kota) */}
+            {/* Filter Wilayah */}
             <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm w-full md:w-auto focus-within:border-rose-500 focus-within:ring-2 focus-within:ring-rose-100">
               <MapPin size={16} className="text-gray-400 mr-2 shrink-0" />
               <select value={filterWilayah} onChange={handleWilayahChange} autoComplete="off" className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer w-full pr-4 leading-tight">
@@ -380,7 +472,7 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
               </select>
             </div>
 
-            {/* Filter Kecamatan (Disabled jika SEMUA WILAYAH) */}
+            {/* Filter Kecamatan */}
             <div className={`flex items-center bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm w-full md:w-auto focus-within:border-rose-500 focus-within:ring-2 focus-within:ring-rose-100 ${filterWilayah === 'SEMUA' ? 'opacity-50 pointer-events-none' : ''}`}>
               <MapPin size={16} className="text-gray-400 mr-2 shrink-0" />
               <select value={filterKecamatan} onChange={handleKecamatanChange} autoComplete="off" disabled={filterWilayah === 'SEMUA'} className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer w-full pr-4 leading-tight">
@@ -426,7 +518,8 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
               </thead>
               <tbody>
                 {aggregatedData.map((row, idx) => {
-                  const persen = row.jumlah_sekolah > 0 ? ((row.sekolah_double_shift / row.jumlah_sekolah) * 100).toFixed(1) : 0;
+                  const persenValue = row.jumlah_sekolah > 0 ? ((row.sekolah_double_shift / row.jumlah_sekolah) * 100) : 0;
+                  const persenStr = persenValue % 1 === 0 ? persenValue : persenValue.toFixed(1);
                   
                   return (
                     <tr key={idx} className="bg-white shadow-sm hover:shadow-md hover:scale-[1.01] transition-all group">
@@ -437,7 +530,7 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
                       
                       <td className="px-4 py-3 font-black text-rose-600 text-lg border-y border-l-2 border-rose-100 bg-rose-50">{row.sekolah_double_shift.toLocaleString()}</td>
                       <td className="px-4 py-3 font-black text-rose-800 text-lg border-y border-r border-gray-100 bg-rose-100/50 rounded-r-2xl">
-                        {persen}%
+                        {persenStr}%
                       </td>
                     </tr>
                   );
@@ -451,7 +544,7 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
                   <td className="px-4 py-4 text-indigo-800 border-y border-gray-300">{grandTotals.jumlah_rombel.toLocaleString()}</td>
                   <td className="px-4 py-4 text-rose-800 text-lg border-y border-l-2 border-rose-300 bg-rose-100">{grandTotals.sekolah_double_shift.toLocaleString()}</td>
                   <td className="px-4 py-4 rounded-r-2xl border-y border-r border-gray-300 bg-rose-200/50 text-rose-900 text-lg">
-                    {grandTotals.jumlah_sekolah > 0 ? ((grandTotals.sekolah_double_shift / grandTotals.jumlah_sekolah) * 100).toFixed(1) : 0}%
+                    {totalPersenStr}%
                   </td>
                 </tr>
               </tfoot>

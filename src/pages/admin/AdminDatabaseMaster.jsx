@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   UploadCloud, ArrowLeft, School, Users, UserCheck, Loader2, 
-  FileText, Layers, CheckCircle, Download, Trash2, Building2 
+  FileText, Layers, CheckCircle, Download, Trash2, Building2, MapPin 
 } from 'lucide-react';
 import { db } from '../../firebase/config';
 import { collection, doc, query, where, getDocs, limit, setDoc, writeBatch } from 'firebase/firestore';
@@ -21,7 +21,7 @@ export default function AdminDatabaseMaster({ onBack }) {
       { id: 'dapodik_sekolah' }, { id: 'dapodik_ptk' }, 
       { id: 'dapodik_kepsek' }, { id: 'rapor_pendidikan' }, 
       { id: 'data_ats' }, { id: 'data_sarpras' },
-      { id: 'data_rombel' }
+      { id: 'data_rombel' }, { id: 'data_akses_pd' } // <-- DATABASE AKSES PD
     ];
     const years = ['2024', '2025', '2026'];
     let newStatus = {};
@@ -88,7 +88,7 @@ export default function AdminDatabaseMaster({ onBack }) {
     }
   };
 
-  // --- MESIN UPLOAD MICRO-BATCHING ---
+  // --- MESIN UPLOAD MICRO-BATCHING (HEMAT KUOTA) ---
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file || !activeTarget) return;
@@ -117,8 +117,6 @@ export default function AdminDatabaseMaster({ onBack }) {
          const mapUnique = new Map();
          rawData.forEach(item => {
             const keys = Object.keys(item);
-            
-            // Pencarian key kebal spasi/underscore
             const findKey = (target) => keys.find(k => k.trim().toLowerCase().replace(/[\s_]/g, '') === target);
             
             const statusTugasKey = findKey('statustugas') || findKey('ptkinduk');
@@ -152,8 +150,8 @@ export default function AdminDatabaseMaster({ onBack }) {
          });
          processedData = Array.from(mapUnique.values());
       } 
-      // 2. PRA-PEMROSESAN UNTUK SEKOLAH / SARPRAS / ROMBEL
-      else if (['dapodik_sekolah', 'data_sarpras', 'data_rombel'].includes(activeTarget.collection)) {
+      // 2. PRA-PEMROSESAN UNTUK SEKOLAH / SARPRAS / ROMBEL / AKSES PD
+      else if (['dapodik_sekolah', 'data_sarpras', 'data_rombel', 'data_akses_pd'].includes(activeTarget.collection)) {
          rawData.forEach(item => {
             const keys = Object.keys(item);
             const statusKey = keys.find(k => {
@@ -175,7 +173,7 @@ export default function AdminDatabaseMaster({ onBack }) {
       const collectionName = `${activeTarget.collection}_chunks`; 
       const cleanTahun = String(activeTarget.year);
       
-      // PEMBERSIHAN OTOMATIS SISA DOKUMEN LAMA
+      // PEMBERSIHAN OTOMATIS SISA DOKUMEN LAMA (OVERWRITE)
       setProgressLabel(`Membersihkan Sisa Dokumen Lama...`);
       const q = query(collection(db, collectionName), where("tahun_data", "==", cleanTahun));
       const snapshot = await getDocs(q);
@@ -206,6 +204,7 @@ export default function AdminDatabaseMaster({ onBack }) {
       } else {
         setProgressLabel(`Menyimpan ${totalRowsInExcel.toLocaleString('id-ID')} Baris Data...`);
         
+        // CHUNKING LOGIC: Simpan 100 baris ke dalam 1 dokumen Firebase
         const CHUNK_SIZE = 100; 
         const totalChunks = Math.ceil(totalRowsInExcel / CHUNK_SIZE);
         let batch = writeBatch(db);
@@ -239,7 +238,7 @@ export default function AdminDatabaseMaster({ onBack }) {
             return sanitizedItem;
           });
 
-          // PENGAMANAN STRUKTUR: Pastikan `tahun_data` DITULIS SECARA EKSPLISIT DI TINGKAT ROOT
+          // PENGAMANAN STRUKTUR CHUNK
           const docRef = doc(collection(db, collectionName));
           batch.set(docRef, { 
             tahun_data: cleanTahun, 
@@ -425,6 +424,31 @@ export default function AdminDatabaseMaster({ onBack }) {
     link.click();
   };
 
+  // FORMAT UNDUH KHUSUS AKSES PD SESUAI DENGAN FILE CSV ASLI
+  const handleDownloadFormatAksesPD = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Akses Peserta Didik');
+    
+    const columns = [
+      'nisn', 'nama', 'jenis_kelamin', 'tanggal_lahir', 'agama', 'alat_transportasi',
+      'layak_PIP', 'penerima_KIP', 'kebutuhan_khusus', 'sekolah_asal', 'tingkat_pendidikan',
+      'jarak_rumah_ke_sekolah', 'menit_tempuh_ke_sekolah', 'nama_sekolah', 'npsn',
+      'bentuk_pendidikan', 'desa', 'kecamatan', 'kabupaten', 'status_sekolah',
+      'wilayah_terpencil', 'wilayah_perbatasan'
+    ];
+
+    worksheet.columns = columns.map(col => ({ header: col, key: col, width: 22 }));
+    worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D9488' } }; // Teal 600
+    
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Format_Upload_Akses_PD.xlsx`;
+    link.click();
+  };
+
   const YearUploadGroup = ({ label, collection, icon: Icon, colorClass, formatHandler }) => (
     <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-gray-100 flex flex-col gap-6 relative">
       {formatHandler && (
@@ -503,6 +527,9 @@ export default function AdminDatabaseMaster({ onBack }) {
           <YearUploadGroup label="Database ATS" collection="data_ats" icon={Layers} colorClass="bg-orange-600" formatHandler={handleDownloadFormatATS} />
           <YearUploadGroup label="Data Sarpras" collection="data_sarpras" icon={Building2} colorClass="bg-purple-600" formatHandler={handleDownloadFormatSarpras} />
           <YearUploadGroup label="Database Rombel" collection="data_rombel" icon={School} colorClass="bg-rose-600" formatHandler={handleDownloadFormatRombel} />
+          
+          {/* KARTU DATABASE AKSES PD DENGAN WARNA TEAL (HIJAU KEBIRUAN) */}
+          <YearUploadGroup label="Database Akses PD" collection="data_akses_pd" icon={MapPin} colorClass="bg-teal-600" formatHandler={handleDownloadFormatAksesPD} />
         </div>
       </div>
     </>

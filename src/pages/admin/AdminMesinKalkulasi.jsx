@@ -136,23 +136,37 @@ export default function AdminMesinKalkulasi({ onBack }) {
            const data = docSnap.docs[0].data();
            if (data.last_updated) {
               const d = new Date(data.last_updated);
-              newStatus[`${type}_${year}`] = `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+              newStatus[`${type}_${year}`] = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth()+1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
            } else {
               newStatus[`${type}_${year}`] = 'Selesai';
            }
         }
       }
 
+      // Cek Status Sekolah Lebih Shift (di rombel_agregasi)
       const rombelSnap = await getDocs(query(collection(db, 'rombel_agregasi'), where("__name__", "==", `sekolah_lebih_shift_${year}`)));
       if (!rombelSnap.empty) {
           const data = rombelSnap.docs[0].data();
           if (data.last_updated) {
              const d = new Date(data.last_updated);
-             newStatus[`sekolah_lebih_shift_${year}`] = `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+             newStatus[`sekolah_lebih_shift_${year}`] = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth()+1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
           } else {
              newStatus[`sekolah_lebih_shift_${year}`] = 'Selesai';
           }
       }
+
+      // Cek Status Aksesibilitas PD (di akses_pd_agregasi)
+      const aksesSnap = await getDocs(query(collection(db, 'akses_pd_agregasi'), where("__name__", "==", `jarak_waktu_${year}`)));
+      if (!aksesSnap.empty) {
+          const data = aksesSnap.docs[0].data();
+          if (data.last_updated) {
+             const d = new Date(data.last_updated);
+             newStatus[`akses_pd_${year}`] = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth()+1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+          } else {
+             newStatus[`akses_pd_${year}`] = 'Selesai';
+          }
+      }
+
     }
     setCalcStatus(newStatus);
   };
@@ -1135,6 +1149,130 @@ export default function AdminMesinKalkulasi({ onBack }) {
     }
   };
 
+  // =====================================================================
+  // 9. MESIN BARU: AKSESIBILITAS PESERTA DIDIK (JARAK & WAKTU TEMPUH)
+  // =====================================================================
+  const handleCalculateAksesPD = async (year) => {
+    setUploading(true);
+    setProgressLabel(`Menghitung Data Aksesibilitas PD ${year}...`);
+    setUploadProgress(10);
+
+    try {
+      const qAkses = query(collection(db, 'data_akses_pd_chunks'), where("tahun_data", "==", year));
+      const snapAkses = await getDocs(qAkses);
+
+      if (snapAkses.empty) {
+        alert("Database Akses PD Kosong! Pastikan data akses PD sudah diunggah untuk tahun ini.");
+        setUploading(false); return;
+      }
+
+      let allAksesData = [];
+      snapAkses.forEach(doc => { 
+          if(doc.data().data) allAksesData = allAksesData.concat(doc.data().data); 
+      });
+
+      setUploadProgress(40);
+
+      // Map untuk Agregasi: Struktur -> Map<Kabupaten, Map<Kecamatan, Map<Jenjang, Map<ModaTransportasi, Data>>>>
+      const mapKabupaten = new Map();
+
+      const getWilayahNode = (kab, kec, jenjang, moda) => {
+          if (!mapKabupaten.has(kab)) mapKabupaten.set(kab, new Map());
+          const kabNode = mapKabupaten.get(kab);
+          
+          if (!kabNode.has(kec)) kabNode.set(kec, new Map());
+          const kecNode = kabNode.get(kec);
+          
+          if (!kecNode.has(jenjang)) kecNode.set(jenjang, new Map());
+          const jenjangNode = kecNode.get(jenjang);
+
+          if (!jenjangNode.has(moda)) {
+              jenjangNode.set(moda, {
+                  jarak_kurang_1_waktu_kurang_30: 0,
+                  jarak_kurang_1_waktu_lebih_30: 0,
+                  jarak_1_2_waktu_kurang_30: 0,
+                  jarak_1_2_waktu_lebih_30: 0,
+                  jarak_lebih_2_waktu_kurang_30: 0,
+                  jarak_lebih_2_waktu_lebih_30: 0,
+              });
+          }
+          return jenjangNode.get(moda);
+      };
+
+      setUploadProgress(50);
+
+      allAksesData.forEach(item => {
+          const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
+          const group = identifyJenjangGroup(bentuk);
+          // Lewatkan data jika jenjang tidak dikenali atau di luar grup utama kita
+          if (!group) return; 
+
+          const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+          const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+          
+          let modaRaw = String(getVal(item, 'alat_transportasi')).trim().toUpperCase();
+          if (!modaRaw || modaRaw === 'UNDEFINED' || modaRaw === 'NULL') modaRaw = 'TIDAK DIKETAHUI';
+          
+          const jarak = getNum(item, 'jarak_rumah_ke_sekolah');
+          const waktu = getNum(item, 'menit_tempuh_ke_sekolah');
+
+          const targetNode = getWilayahNode(kabDb, keyKec, group, modaRaw);
+
+          // LOGIKA PENGELOMPOKAN JARAK DAN WAKTU (Nested Grouping)
+          if (jarak < 1) {
+              if (waktu < 30) targetNode.jarak_kurang_1_waktu_kurang_30++;
+              else targetNode.jarak_kurang_1_waktu_lebih_30++;
+          } 
+          else if (jarak >= 1 && jarak <= 2) {
+              if (waktu < 30) targetNode.jarak_1_2_waktu_kurang_30++;
+              else targetNode.jarak_1_2_waktu_lebih_30++;
+          } 
+          else { // Jarak > 2
+              if (waktu < 30) targetNode.jarak_lebih_2_waktu_kurang_30++;
+              else targetNode.jarak_lebih_2_waktu_lebih_30++;
+          }
+      });
+
+      setUploadProgress(80);
+
+      // Serialize Map menjadi Array Objects yang Flat untuk disave di Firestore
+      const finalDataToSave = [];
+      
+      mapKabupaten.forEach((kecMap, kabKey) => {
+          kecMap.forEach((jenjangMap, kecKey) => {
+              jenjangMap.forEach((modaMap, jenjangKey) => {
+                  modaMap.forEach((stats, modaKey) => {
+                      finalDataToSave.push({
+                          kabupaten: kabKey,
+                          kecamatan: kecKey,
+                          jenjang: jenjangKey,
+                          moda_transportasi: modaKey,
+                          ...stats
+                      });
+                  });
+              });
+          });
+      });
+
+      const docRef = doc(db, 'akses_pd_agregasi', `jarak_waktu_${year}`);
+      await setDoc(docRef, {
+        tahun_data: year, 
+        data_agregasi: finalDataToSave, 
+        last_updated: new Date().toISOString()
+      });
+
+      setUploadProgress(100);
+      alert(`KALKULASI SUKSES!\n\nAnalisis Aksesibilitas PD (Jarak & Waktu Tempuh) tahun ${year} berhasil diproses.`);
+      checkCalcStatus();
+    } catch (error) {
+      console.error(error);
+      alert("Terjadi kesalahan saat melakukan kalkulasi Aksesibilitas PD.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+
   return (
     <>
       {uploading && (
@@ -1170,8 +1308,26 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
            <div className="grid grid-cols-1 gap-6">
 
+             {/* MESIN BARU 2: AKSESIBILITAS PESERTA DIDIK */}
+             <div className="bg-teal-50 p-6 rounded-3xl border border-teal-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
+                <div>
+                  <h4 className="text-xl font-black text-teal-900 uppercase">Aksesibilitas PD (Jarak & Waktu)</h4>
+                  <p className="text-sm font-medium text-teal-700 mt-1">Mengelompokkan Moda Transportasi beserta persilangan Jarak & Waktu Tempuh PD.</p>
+                </div>
+                <div className="flex gap-2">
+                   {['2024', '2025', '2026'].map(year => (
+                     <div key={year} className="flex flex-col items-center gap-1">
+                       <button onClick={() => handleCalculateAksesPD(year)} className="bg-white border-2 border-teal-300 text-teal-700 hover:bg-teal-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
+                         Hitung {year}
+                       </button>
+                       <span className="text-[9px] font-bold text-teal-600/60">{calcStatus[`akses_pd_${year}`] || 'Belum'}</span>
+                     </div>
+                   ))}
+                </div>
+             </div>
+
              {/* MESIN BARU: SEKOLAH LEBIH SHIFT (JOIN NPSN) */}
-             <div className="bg-red-50 p-6 rounded-3xl border border-red-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
+             <div className="bg-red-50 p-6 rounded-3xl border border-red-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm mt-4">
                 <div>
                   <h4 className="text-xl font-black text-red-900 uppercase">Sekolah Lebih Shift</h4>
                   <p className="text-sm font-medium text-gray-600 mt-1">Metodologi Baru: Agregasi per NPSN (Jumlah Rombel &gt; Ruang Kelas)</p>

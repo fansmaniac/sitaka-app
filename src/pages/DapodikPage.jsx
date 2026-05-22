@@ -13,12 +13,8 @@ import DapodikSekolah from './DapodikSekolah';
 import DapodikGuru from './DapodikGuru'; 
 import DapodikPesertaDidik from './DapodikPesertaDidik'; 
 import DapodikRasio from './DapodikRasio';
-import DapodikSarpras from './DapodikSarpras'; // <-- IMPORT DAPODIK SARPRAS AKTIF
-
-// =====================================================================
-// PLACEHOLDER KOMPONEN (Nanti kita pisah ke file masing-masing)
-// =====================================================================
-const DapodikRombel = () => <div className="p-8 text-center text-gray-500 font-bold animate-in fade-in zoom-in-95">Tampilan Dapodik Rombel (Segera Hadir)</div>;
+import DapodikSarpras from './DapodikSarpras';
+import RombelLebihShift from './RombelLebihShift'; // <-- IMPORT MENU ROMBEL BARU
 
 // =====================================================================
 // UTILITY: INDEXED-DB CACHING (BRANKAS LOKAL)
@@ -75,13 +71,12 @@ const MENU_ITEMS = [
   { id: 'guru', label: 'Guru', icon: Users },
   { id: 'peserta_didik', label: 'Peserta Didik', icon: GraduationCap },
   { id: 'rasio', label: 'Rasio / Bandingkan Data', icon: LineChart },
-  // Menu Rombel masih dinonaktifkan sementara
-  // { id: 'rombel', label: 'Rombel', icon: Layers },
-  { id: 'sarpras', label: 'Sarpras', icon: Building2 }, // <-- MENU SARPRAS DIAKTIFKAN
+  { id: 'rombel', label: 'Rombel', icon: Layers }, // <-- MENU ROMBEL DIAKTIFKAN
+  { id: 'sarpras', label: 'Sarpras', icon: Building2 },
 ];
 
 export default function DapodikPage({ Header }) {
-  const navigate = useNavigate(); // <-- Inisialisasi navigate
+  const navigate = useNavigate();
   const [activeMenu, setActiveMenu] = useState('sekolah');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   
@@ -199,8 +194,8 @@ export default function DapodikPage({ Header }) {
       case 'guru': return <DapodikGuru data={ptkData} selectedYear={selectedYear} />;
       case 'peserta_didik': return <DapodikPesertaDidik data={sekolahData} selectedYear={selectedYear} />; 
       case 'rasio': return <DapodikRasio dataSekolah={sekolahData} dataGuru={ptkData} selectedYear={selectedYear} />;
-      case 'rombel': return <DapodikRombel />;
-      case 'sarpras': return <DapodikSarpras selectedYear={selectedYear} />; // <-- SUNTIKKAN TAHUN KE SARPRAS
+      case 'rombel': return <RombelLebihShift selectedYear={selectedYear} />; // <-- TERKONEKSI KE KOMPONEN BARU
+      case 'sarpras': return <DapodikSarpras selectedYear={selectedYear} />;
       default: return <DapodikSekolah data={sekolahData} selectedYear={selectedYear} />;
     }
   };
@@ -321,7 +316,7 @@ export default function DapodikPage({ Header }) {
                   onClick={() => {
                     setActiveMenu(menu.id);
                     setIsMobileMenuOpen(false); // Otomatis tutup sidebar di HP setelah klik
-                    navigate('/dapodik'); // <-- KUNCI RAHASIA: Membersihkan parameter URL yang nyangkut
+                    navigate('/dapodik'); // Membersihkan parameter URL yang nyangkut
                   }}
                   className={`
                     w-full flex items-center gap-4 px-4 py-4 rounded-2xl text-left transition-all duration-300 group

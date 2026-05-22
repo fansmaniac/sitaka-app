@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect, useTransition } from 'react';
 import { 
-  Building2, HardHat, FileSpreadsheet, Search, Loader2, AlertCircle, 
-  MapPin, School, ArrowUpDown
+  Building2, FileSpreadsheet, Loader2, MapPin, School, ArrowUpDown, X, Info, ChevronRight
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import { db } from '../firebase/config';
@@ -10,8 +9,8 @@ import { collection, query, where, getDocs } from 'firebase/firestore';
 // =====================================================================
 // UTILITY: CACHING LOKAL
 // =====================================================================
-const DB_NAME = "SitakaCacheDB_DoubleShiftModul";
-const STORE_NAME = "doubleShiftData";
+const DB_NAME = "SitakaCacheDB_RombelData";
+const STORE_NAME = "rombelMaster";
 const CACHE_EXPIRY_HOURS = 12;
 
 const initDB = () => {
@@ -55,126 +54,18 @@ const getFromCache = async (key) => {
 };
 
 // =====================================================================
-// UTILITY FUNCTIONS & SUPER ROBUST EXTRACTOR
+// UTILITY FUNCTIONS
 // =====================================================================
-
-// Ambil Teks (Mengatasi anomali nama key seperti "N P S N" atau "Ruang Kelas")
-const getString = (obj, keyName) => {
-  if (!obj) return '';
-  const searchKey = String(keyName).toLowerCase().trim();
-  const key = Object.keys(obj).find(k => {
-      const kNorm = String(k).toLowerCase().trim();
-      return kNorm === searchKey || kNorm.replace(/[\s_\-]+/g, '') === searchKey.replace(/[\s_\-]+/g, '');
-  });
-  return key ? String(obj[key]).trim() : '';
-};
-
-// Ambil Angka (Mengatasi String "10" menjadi Integer 10)
-const getNum = (obj, keyName) => {
-  if (!obj) return 0;
-  const searchKey = String(keyName).toLowerCase().trim();
-  const key = Object.keys(obj).find(k => {
-      const kNorm = String(k).toLowerCase().trim();
-      return kNorm === searchKey || kNorm.replace(/[\s_\-]+/g, '') === searchKey.replace(/[\s_\-]+/g, '');
-  });
-  
-  if (!key) return 0;
-  
-  const val = obj[key];
-  if (typeof val === 'number') return val;
-  if (typeof val === 'string') {
-    const parsed = parseInt(val.replace(/[^0-9]/g, ''), 10);
-    return isNaN(parsed) ? 0 : parsed;
-  }
-  return 0;
-};
-
-// Pembersih Key untuk Pencocokan Join
-const cleanNpsn = (npsn) => npsn ? String(npsn).replace(/[^0-9a-zA-Z]/g, '').toUpperCase() : '';
-
-const cleanKecamatanForMatch = (kecStr) => {
-  if (!kecStr) return '';
-  return String(kecStr).toUpperCase().replace(/^(KEC\.|KECAMATAN)\s+/i, '').replace(/[^A-Z0-9]/g, '');
-};
-
-const normalizeSchoolName = (name) => {
-  if (!name) return '';
-  let s = String(name).toUpperCase();
-  s = s.replace(/SD\s*NEGERI/g, 'SDN');
-  s = s.replace(/SMP\s*NEGERI/g, 'SMPN');
-  s = s.replace(/SMA\s*NEGERI/g, 'SMAN');
-  s = s.replace(/SMK\s*NEGERI/g, 'SMKN');
-  s = s.replace(/TK\s*NEGERI/g, 'TKN');
-  return s.replace(/[^A-Z0-9]/g, '');
-};
-
-// Kombinasi Nama + Kecamatan untuk Backup Join
-const getSchoolMatchKey = (item) => {
-  const nama = getString(item, 'nama_sekolah') || getString(item, 'nama') || getString(item, 'sekolah');
-  const kec = getString(item, 'kecamatan');
-  
-  const namaClean = normalizeSchoolName(nama);
-  const kecClean = cleanKecamatanForMatch(kec);
-  
-  if (!namaClean) return null;
-  return `${namaClean}_${kecClean}`;
-};
-
-// =====================================================================
-// LOGIKA KALKULASI INTI
-// =====================================================================
-
-const calculateTotalRombel = (item) => {
-  let total = 0;
-  const regex = /^rombel[\s_]*(tka|tkb|t?\d{1,2}|paket[\s_]*[abc])$/i;
-  
-  Object.keys(item).forEach(k => {
-    if (regex.test(k.trim())) {
-       const val = item[k];
-       if (typeof val === 'number') total += val;
-       else if (typeof val === 'string') total += (parseInt(val.replace(/[^0-9]/g, ''), 10) || 0);
-    }
-  });
-
-  if (total === 0) total = getNum(item, 'rombel') || getNum(item, 'rombongan_belajar');
-  return total;
-};
-
-// UPDATE: Total Ruang Kelas = Semua Kondisi
-const calculateTotalKelas = (itemSarpras) => {
-  if (!itemSarpras) return 0;
-  return getNum(itemSarpras, 'ruang_kelas_baik') + 
-         getNum(itemSarpras, 'ruang_kelas_rusak_ringan') +
-         getNum(itemSarpras, 'ruang_kelas_rusak_sedang') +
-         getNum(itemSarpras, 'ruang_kelas_rusak_berat') +
-         (getNum(itemSarpras, 'ruang_kelas_tidak_bisa_dipakai') || getNum(itemSarpras, 'ruang_kelas_tidak_bis_dipakai') || 0); 
-};
-
-// Menyatukan Jenjang
-const getJenjang = (item) => {
-  const j = String(getString(item, 'bentuk_pendidikan') || getString(item, 'jenjang')).toUpperCase().trim();
-  if (['TK', 'KB', 'TPA', 'SPS', 'PAUD'].includes(j)) return 'PAUD';
-  if (['SD', 'SPK SD'].includes(j)) return 'SD';
-  if (['SMP', 'SPK SMP'].includes(j)) return 'SMP';
-  if (['SMA', 'SPK SMA'].includes(j)) return 'SMA';
-  if (['SMK'].includes(j)) return 'SMK';
-  if (['SLB', 'SDLB', 'SMPLB', 'SMALB'].includes(j)) return 'SLB';
-  if (['PKBM', 'SKB'].includes(j)) return 'NON FORMAL';
-  
-  if (j.includes('TK') || j.includes('KB') || j.includes('PAUD')) return 'PAUD';
-  if (j.includes('SD') && !j.includes('SLB')) return 'SD';
-  if (j.includes('SMP') && !j.includes('SLB')) return 'SMP';
-  if (j.includes('SMA') && !j.includes('SLB')) return 'SMA';
-  if (j.includes('SMK')) return 'SMK';
-  
-  return null;
-};
-
 const KABUPATEN_LIST = [
   "BENGKAYANG", "KAPUAS HULU", "KAYONG UTARA", "KETAPANG", 
   "KUBU RAYA", "LANDAK", "MELAWI", "MEMPAWAH", "PONTIANAK", 
   "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
 ];
+
+const formatWilayahDropdown = (wilayah) => {
+  if (wilayah === 'PONTIANAK' || wilayah === 'SINGKAWANG') return `KOTA ${wilayah}`;
+  return `KABUPATEN ${wilayah}`;
+};
 
 const cleanKabupatenName = (rawName) => {
   if (!rawName) return "TIDAK DIKETAHUI";
@@ -184,220 +75,148 @@ const cleanKabupatenName = (rawName) => {
   return name; 
 };
 
-const formatWilayahDropdown = (wilayah) => {
-  if (wilayah === 'PONTIANAK' || wilayah === 'SINGKAWANG') return `KOTA ${wilayah}`;
-  return `KABUPATEN ${wilayah}`;
+const getJenjang = (bentuk) => {
+  const j = String(bentuk || '').toUpperCase().trim();
+  if (['TK', 'KB', 'TPA', 'SPS', 'PAUD'].includes(j)) return 'PAUD (TK)';
+  if (['SD', 'SPK SD'].includes(j)) return 'SD';
+  if (['SMP', 'SPK SMP'].includes(j)) return 'SMP';
+  if (['SMA', 'SPK SMA'].includes(j)) return 'SMA';
+  if (['SMK'].includes(j)) return 'SMK';
+  if (['SLB', 'SDLB', 'SMPLB', 'SMALB'].includes(j)) return 'SLB';
+  if (['PKBM', 'SKB'].includes(j)) return 'NON FORMAL';
+  
+  if (j.includes('TK') || j.includes('KB') || j.includes('PAUD')) return 'PAUD (TK)';
+  if (j.includes('SD') && !j.includes('SLB')) return 'SD';
+  if (j.includes('SMP') && !j.includes('SLB')) return 'SMP';
+  if (j.includes('SMA') && !j.includes('SLB')) return 'SMA';
+  if (j.includes('SMK')) return 'SMK';
+  
+  return null;
+};
+
+// Ekstraktor field kebal typo
+const getVal = (obj, keyNames) => {
+  if (!obj) return '';
+  const keys = Array.isArray(keyNames) ? keyNames : [keyNames];
+  for (let keyName of keys) {
+      const searchKey = String(keyName).toLowerCase().trim().replace(/_/g, '');
+      const foundKey = Object.keys(obj).find(k => k.toLowerCase().replace(/_/g, '') === searchKey);
+      if (foundKey) return obj[foundKey];
+  }
+  return '';
 };
 
 // =====================================================================
 // MAIN COMPONENT
 // =====================================================================
 export default function RombelLebihShift({ selectedYear = '2026' }) {
-  const [dataSekolah, setDataSekolah] = useState([]);
-  const [dataSarpras, setDataSarpras] = useState([]);
+  const [dataMaster, setDataMaster] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Filter Utama
   const [filterWilayah, setFilterWilayah] = useState('SEMUA');
-  const [filterKecamatan, setFilterKecamatan] = useState('SEMUA');
   const [filterStatus, setFilterStatus] = useState('SEMUA');
+  
+  // State Modal Detail & Filternya
+  const [selectedJenjangDetail, setSelectedJenjangDetail] = useState(null);
+  const [modalKecamatanFilter, setModalKecamatanFilter] = useState('SEMUA');
+  const [modalStatusFilter, setModalStatusFilter] = useState('SEMUA'); 
   
   const [isPending, startTransition] = useTransition();
 
-  // Memaksa Tarik Ulang Data via Cache v10
+  // 1. FETCH DATA DARI KOLEKSI DATA_ROMBEL_CHUNKS
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
-      const cacheKeySekolah = `sekolah_modul_v10_sitaka_${selectedYear}`;
-      const cacheKeySarpras = `sarpras_modul_v10_sitaka_${selectedYear}`;
-      
-      const yearStr = String(selectedYear);
-      const yearNum = Number(selectedYear);
-      
+      const cacheKey = `rombel_master_${selectedYear}`;
       try {
-        let freshSekolah = await getFromCache(cacheKeySekolah);
-        if (!freshSekolah) {
-          const qSekolah = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "in", [yearStr, yearNum]));
-          const snapSekolah = await getDocs(qSekolah);
-          freshSekolah = snapSekolah.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          await saveToCache(cacheKeySekolah, freshSekolah);
+        let freshData = await getFromCache(cacheKey);
+        if (!freshData) {
+          const q = query(collection(db, 'data_rombel_chunks'), where("tahun_data", "==", String(selectedYear)));
+          const snap = await getDocs(q);
+          let allData = [];
+          snap.forEach(doc => {
+            if (doc.data().data && Array.isArray(doc.data().data)) {
+              allData = allData.concat(doc.data().data);
+            }
+          });
+          freshData = allData;
+          await saveToCache(cacheKey, freshData);
         }
-
-        let freshSarpras = await getFromCache(cacheKeySarpras);
-        if (!freshSarpras) {
-          const qSarpras = query(collection(db, 'data_sarpras_chunks'), where("tahun_data", "in", [yearStr, yearNum]));
-          const snapSarpras = await getDocs(qSarpras);
-          freshSarpras = snapSarpras.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          await saveToCache(cacheKeySarpras, freshSarpras);
-        }
-
-        setDataSekolah(freshSekolah);
-        setDataSarpras(freshSarpras);
+        setDataMaster(freshData);
       } catch (error) {
-        console.error("Gagal memuat data master:", error);
+        console.error("Gagal memuat data rombel:", error);
       } finally {
         setLoading(false);
       }
     };
-
     fetchData();
   }, [selectedYear]);
 
-  // Datar Array Sekolah & Sarpras
-  const allSekolahItems = useMemo(() => {
-    if (!dataSekolah.length) return [];
-    let items = [];
-    dataSekolah.forEach(chunk => { if (chunk && Array.isArray(chunk.data)) items = items.concat(chunk.data); });
-    return items;
-  }, [dataSekolah]);
+  // 2. PARSING & CLEANING DATA
+  const parsedData = useMemo(() => {
+    return dataMaster.map(item => {
+      const rombel = parseInt(getVal(item, ['jumlah_rombel', 'jumlahrombel'])) || 0;
+      const kelas = parseInt(getVal(item, ['jumlah_ruang_kelas', 'jumlahruangkelas'])) || 0;
+      const bentuk = getVal(item, ['bentuk_pendidikan', 'bentukpendidikan']);
+      const jenjang = getJenjang(bentuk);
+      
+      return {
+        nama: getVal(item, ['nama_satuan_pendidikan', 'namasatuanpendidikan']) || "TIDAK DIKETAHUI",
+        npsn: getVal(item, 'npsn') || "-",
+        jenjang,
+        kabupaten: cleanKabupatenName(getVal(item, ['kabupaten_kota', 'kabupatenkota', 'kabupaten'])),
+        kecamatan: String(getVal(item, 'kecamatan') || '').toUpperCase(),
+        status: String(getVal(item, ['status_sekolah', 'statussekolah']) || '').toUpperCase(),
+        rombel,
+        kelas,
+        isDoubleShift: rombel > kelas,
+        selisih: kelas - rombel // Kelas - Rombel sesuai request
+      };
+    }).filter(i => i.jenjang !== null);
+  }, [dataMaster]);
 
-  // Siapkan Mesin Peta untuk Keperluan JOIN Double Shift
-  const mapSarprasData = useMemo(() => {
-    const byNpsn = new Map();
-    const byNameKec = new Map();
-    
-    if (!dataSarpras || dataSarpras.length === 0) return { byNpsn, byNameKec };
-    
-    dataSarpras.forEach(chunk => {
-      if (chunk && Array.isArray(chunk.data)) {
-        chunk.data.forEach(item => {
-          const npsn = cleanNpsn(getString(item, 'npsn'));
-          const matchKey = getSchoolMatchKey(item);
-          const totalKelas = calculateTotalKelas(item);
-          
-          if (npsn) byNpsn.set(npsn, (byNpsn.get(npsn) || 0) + totalKelas);
-          if (matchKey) byNameKec.set(matchKey, (byNameKec.get(matchKey) || 0) + totalKelas);
-        });
-      }
-    });
-    return { byNpsn, byNameKec };
-  }, [dataSarpras]);
-
+  // 3. DAFTAR KECAMATAN DINAMIS (Ditarik berdasarkan filter wilayah utama)
   const listKecamatan = useMemo(() => {
     if (filterWilayah === 'SEMUA') return [];
-    const validKec = allSekolahItems
-      .filter(item => cleanKabupatenName(getString(item, 'kabupaten') || getString(item, 'Kabupaten/Kota')) === filterWilayah)
-      .map(item => getString(item, 'kecamatan').toUpperCase())
+    const validKec = parsedData
+      .filter(item => item.kabupaten === filterWilayah)
+      .map(item => item.kecamatan)
       .filter(k => k && k !== 'TIDAK DIKETAHUI');
     return [...new Set(validKec)].sort();
-  }, [allSekolahItems, filterWilayah]);
-
-  useEffect(() => {
-    setFilterKecamatan('SEMUA');
-  }, [filterWilayah]);
+  }, [parsedData, filterWilayah]);
 
   const handleWilayahChange = (e) => { startTransition(() => setFilterWilayah(e.target.value)); };
-  const handleKecamatanChange = (e) => { startTransition(() => setFilterKecamatan(e.target.value)); };
   const handleStatusChange = (e) => { startTransition(() => setFilterStatus(e.target.value)); };
 
-  // =====================================================================
-  // TAHAP 1: PRE-COMPUTATION (Hanya jalan sekali saat data load)
-  // Menyiapkan 1 Array flat yang sudah ada perhitungan kelas & rombelnya
-  // =====================================================================
-  const masterDataBersih = useMemo(() => {
-    if (!allSekolahItems.length) return [];
-
-    return allSekolahItems.map(item => {
-      const jenjang = getJenjang(item);
-      const rombel = calculateTotalRombel(item);
-      const npsn = cleanNpsn(getString(item, 'npsn'));
-      const matchKey = getSchoolMatchKey(item);
-      
-      let kelasForSchool = 0;
-      if (npsn && mapSarprasData.byNpsn.has(npsn)) {
-          kelasForSchool = mapSarprasData.byNpsn.get(npsn);
-      } else if (matchKey && mapSarprasData.byNameKec.has(matchKey)) {
-          kelasForSchool = mapSarprasData.byNameKec.get(matchKey);
-      }
-
-      return {
-        jenjang,
-        kabupaten: cleanKabupatenName(getString(item, 'kabupaten') || getString(item, 'Kabupaten/Kota')),
-        kecamatan: getString(item, 'kecamatan').toUpperCase(),
-        status: getString(item, 'status_sekolah').toUpperCase(),
-        rombel: rombel,
-        kelas: kelasForSchool, // Kelas untuk kalkulasi shift per sekolah
-        isDoubleShift: rombel > kelasForSchool
-      };
-    }).filter(item => item.jenjang !== null); // Buang yang jenjangnya tidak valid
-  }, [allSekolahItems, mapSarprasData]);
-
-  // Hitung Total Kelas Murni (Independen)
-  const masterTotalKelas = useMemo(() => {
-    const totalKelasPerJenjang = {};
-    dataSarpras.forEach(chunk => {
-      if (chunk && Array.isArray(chunk.data)) {
-        chunk.data.forEach(item => {
-          const jenjang = getJenjang(item);
-          if (jenjang) {
-            const totalKelas = calculateTotalKelas(item);
-            if (!totalKelasPerJenjang[jenjang]) totalKelasPerJenjang[jenjang] = [];
-            
-            // Simpan detail untuk di-filter nanti
-            totalKelasPerJenjang[jenjang].push({
-              kabupaten: cleanKabupatenName(getString(item, 'kabupaten') || getString(item, 'Kabupaten/Kota')),
-              kecamatan: getString(item, 'kecamatan').toUpperCase(),
-              status: getString(item, 'status_sekolah').toUpperCase(),
-              totalKelas
-            });
-          }
-        });
-      }
-    });
-    return totalKelasPerJenjang;
-  }, [dataSarpras]);
-
-
-  // =====================================================================
-  // TAHAP 2: FILTERING & AGREGASI CEPAT (Jalan saat dropdown berubah)
-  // Sangat ringan, tidak ada regex atau parsing string
-  // =====================================================================
+  // 4. KALKULASI DATA TABEL BERDASARKAN FILTER UTAMA
   const aggregatedData = useMemo(() => {
+    const JENJANG = ['PAUD (TK)', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'NON FORMAL'];
     const mapAgg = new Map();
-    const orderJenjang = ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'NON FORMAL'];
     
-    orderJenjang.forEach(j => {
-      mapAgg.set(j, { jenjang: j, jumlah_sekolah: 0, jumlah_kelas: 0, jumlah_rombel: 0, sekolah_double_shift: 0 });
+    JENJANG.forEach(j => {
+         mapAgg.set(j, { jenjang: j, jumlah_sekolah: 0, jumlah_kelas: 0, jumlah_rombel: 0, sekolah_double_shift: 0 });
     });
 
-    // 1. Agregasi Data Sekolah
-    for (let i = 0; i < masterDataBersih.length; i++) {
-      const item = masterDataBersih[i];
-      
-      if (filterWilayah !== 'SEMUA' && item.kabupaten !== filterWilayah) continue;
-      if (filterKecamatan !== 'SEMUA' && item.kecamatan !== filterKecamatan) continue;
-      if (filterStatus !== 'SEMUA' && item.status !== filterStatus) continue;
+    parsedData.forEach(item => {
+        if (filterWilayah !== 'SEMUA' && item.kabupaten !== filterWilayah) return;
+        if (filterStatus !== 'SEMUA' && item.status !== filterStatus) return;
 
-      const row = mapAgg.get(item.jenjang);
-      if (row) {
-        row.jumlah_sekolah++;
-        row.jumlah_rombel += item.rombel;
-        if (item.isDoubleShift) row.sekolah_double_shift++;
-      }
-    }
-
-    // 2. Agregasi Data Kelas (Independen dari loop atas)
-    Object.keys(masterTotalKelas).forEach(jenjang => {
-       const sarprasItems = masterTotalKelas[jenjang];
-       let sumKelas = 0;
-       
-       for(let i=0; i < sarprasItems.length; i++) {
-         const item = sarprasItems[i];
-         if (filterWilayah !== 'SEMUA' && item.kabupaten !== filterWilayah) continue;
-         if (filterKecamatan !== 'SEMUA' && item.kecamatan !== filterKecamatan) continue;
-         if (filterStatus !== 'SEMUA' && item.status !== filterStatus) continue;
-         
-         sumKelas += item.totalKelas;
-       }
-       
-       if(mapAgg.has(jenjang)) {
-         mapAgg.get(jenjang).jumlah_kelas = sumKelas;
-       }
+        const agg = mapAgg.get(item.jenjang);
+        if (agg) {
+            agg.jumlah_sekolah += 1; 
+            agg.jumlah_kelas += item.kelas;
+            agg.jumlah_rombel += item.rombel;
+            if (item.isDoubleShift) {
+               agg.sekolah_double_shift += 1;
+            }
+        }
     });
 
     return Array.from(mapAgg.values());
-  }, [masterDataBersih, masterTotalKelas, filterWilayah, filterKecamatan, filterStatus]);
+  }, [parsedData, filterWilayah, filterStatus]);
 
-  // Grand Total
+  // 5. GRAND TOTAL UNTUK FOOTER
   const grandTotals = useMemo(() => {
     return aggregatedData.reduce((acc, curr) => {
       acc.jumlah_sekolah += curr.jumlah_sekolah;
@@ -411,52 +230,96 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
   const totalPersenValue = grandTotals.jumlah_sekolah > 0 ? ((grandTotals.sekolah_double_shift / grandTotals.jumlah_sekolah) * 100) : 0;
   const totalPersenStr = totalPersenValue % 1 === 0 ? totalPersenValue : totalPersenValue.toFixed(1);
 
-  // =====================================================================
-  // EXPORT EXCEL
-  // =====================================================================
+  // 6. LIST DETAIL MODAL
+  const detailList = useMemo(() => {
+    if (!selectedJenjangDetail) return [];
+    return parsedData.filter(item => 
+      item.jenjang === selectedJenjangDetail && 
+      item.isDoubleShift &&
+      (filterWilayah === 'SEMUA' || item.kabupaten === filterWilayah) &&
+      (filterStatus === 'SEMUA' || item.status === filterStatus) &&
+      (modalKecamatanFilter === 'SEMUA' || item.kecamatan === modalKecamatanFilter) &&
+      (modalStatusFilter === 'SEMUA' || item.status === modalStatusFilter)
+    ).sort((a, b) => a.selisih - b.selisih); // Urutkan dari yang selisih minusnya paling besar
+  }, [selectedJenjangDetail, parsedData, filterWilayah, filterStatus, modalKecamatanFilter, modalStatusFilter]);
+
+  // 7. UNDUH EXCEL AGREGASI UTAMA
   const downloadExcel = async () => {
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Analisis Shift');
-
+    const worksheet = workbook.addWorksheet('Analisis Double Shift');
+    
     worksheet.columns = [
-      { header: 'Jenjang Pendidikan', key: 'jenjang', width: 25 },
+      { header: 'Jenjang', key: 'jenjang', width: 20 },
       { header: 'Jumlah Sekolah', key: 'jumlah_sekolah', width: 18 },
-      { header: 'Jumlah Kelas', key: 'jumlah_kelas', width: 15 },
-      { header: 'Jumlah Rombel', key: 'jumlah_rombel', width: 15 },
+      { header: 'Jumlah Kelas', key: 'jumlah_kelas', width: 18 },
+      { header: 'Jumlah Rombel', key: 'jumlah_rombel', width: 18 },
       { header: 'Sekolah Double Shift', key: 'sekolah_double_shift', width: 22 },
-      { header: '% Double Shift', key: 'persentase', width: 18 }
+      { header: 'Persentase (%)', key: 'persentase', width: 18 }
     ];
 
-    aggregatedData.forEach(item => {
-      const persenValue = item.jumlah_sekolah > 0 ? ((item.sekolah_double_shift / item.jumlah_sekolah) * 100) : 0;
-      const persenStr = persenValue % 1 === 0 ? persenValue : persenValue.toFixed(1);
-      worksheet.addRow({ ...item, persentase: `${persenStr}%` });
+    aggregatedData.forEach(row => {
+      const persentase = row.jumlah_sekolah === 0 ? 0 : ((row.sekolah_double_shift / row.jumlah_sekolah) * 100).toFixed(2);
+      worksheet.addRow({ ...row, persentase: `${persentase}%` });
     });
-    
-    const totalRow = worksheet.addRow({ 
-      jenjang: 'TOTAL KESELURUHAN', 
-      ...grandTotals,
-      persentase: `${totalPersenStr}%`
-    });
-
-    worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBE123C' } }; 
-    totalRow.font = { bold: true, color: { argb: 'FF881337' } }; 
-    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE4E6' } }; 
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Analisis_DoubleShift_${filterWilayah}_${selectedYear}.xlsx`;
+    link.download = `Analisis_Shift_${filterWilayah}_${selectedYear}.xlsx`;
     link.click();
   };
+
+  // 8. UNDUH EXCEL RINCIAN SEKOLAH (MODAL)
+  const downloadDetailExcel = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet(`Rincian ${selectedJenjangDetail}`);
+    
+    worksheet.columns = [
+      { header: 'NPSN', key: 'npsn', width: 15 },
+      { header: 'Nama Sekolah', key: 'nama', width: 40 },
+      { header: 'Kecamatan', key: 'kecamatan', width: 25 },
+      { header: 'Status', key: 'status', width: 15 },
+      { header: 'Jumlah Kelas', key: 'kelas', width: 15 },
+      { header: 'Jumlah Rombel', key: 'rombel', width: 15 },
+      { header: 'Selisih', key: 'selisih', width: 15 }
+    ];
+
+    worksheet.getRow(1).font = { bold: true };
+
+    detailList.forEach(row => {
+      worksheet.addRow({
+        npsn: row.npsn,
+        nama: row.nama,
+        kecamatan: row.kecamatan,
+        status: row.status,
+        kelas: row.kelas,
+        rombel: row.rombel,
+        selisih: row.selisih
+      });
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Rincian_DoubleShift_${selectedJenjangDetail}_${filterWilayah}_${selectedYear}.xlsx`;
+    link.click();
+  };
+
+  // Efek Reset Filter Modal
+  useEffect(() => {
+    if (selectedJenjangDetail) {
+      setModalStatusFilter('SEMUA');
+      setModalKecamatanFilter('SEMUA');
+    }
+  }, [selectedJenjangDetail]);
 
   if (loading) {
     return (
       <div className="h-full flex flex-col items-center justify-center italic font-black uppercase tracking-widest text-rose-300">
         <Loader2 className="animate-spin text-rose-600 mb-4" size={64} />
-        Sinkronisasi Data Sekolah & Sarpras...
+        Memuat Database Rombel...
       </div>
     );
   }
@@ -478,11 +341,8 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
           </div>
         </div>
 
-        {/* KONTROL FILTER */}
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3 w-full md:w-auto relative">
-            
-            {/* Indikator Transition */}
             {isPending && (
               <span className="absolute -left-6 top-1/2 -translate-y-1/2 flex h-3 w-3">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
@@ -490,10 +350,9 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
               </span>
             )}
 
-            {/* Filter Wilayah */}
             <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm w-full md:w-auto focus-within:border-rose-500 focus-within:ring-2 focus-within:ring-rose-100">
               <MapPin size={16} className="text-gray-400 mr-2 shrink-0" />
-              <select value={filterWilayah} onChange={handleWilayahChange} autoComplete="off" className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer w-full pr-4 leading-tight">
+              <select value={filterWilayah} onChange={handleWilayahChange} className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer w-full pr-4 leading-tight">
                 <option value="SEMUA">Semua Wilayah</option>
                 {KABUPATEN_LIST.map(kab => (
                    <option key={kab} value={kab}>{formatWilayahDropdown(kab)}</option>
@@ -501,27 +360,14 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
               </select>
             </div>
 
-            {/* Filter Kecamatan */}
-            <div className={`flex items-center bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm w-full md:w-auto focus-within:border-rose-500 focus-within:ring-2 focus-within:ring-rose-100 ${filterWilayah === 'SEMUA' ? 'opacity-50 pointer-events-none' : ''}`}>
-              <MapPin size={16} className="text-gray-400 mr-2 shrink-0" />
-              <select value={filterKecamatan} onChange={handleKecamatanChange} autoComplete="off" disabled={filterWilayah === 'SEMUA'} className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer w-full pr-4 leading-tight">
-                <option value="SEMUA">Semua Kecamatan</option>
-                {listKecamatan.map(kec => (
-                   <option key={kec} value={kec}>KECAMATAN {kec}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Filter Status Sekolah */}
             <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm w-full md:w-auto focus-within:border-rose-500 focus-within:ring-2 focus-within:ring-rose-100">
               <Building2 size={16} className="text-gray-400 mr-2 shrink-0" />
-              <select value={filterStatus} onChange={handleStatusChange} autoComplete="off" className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer w-full pr-4 leading-tight">
+              <select value={filterStatus} onChange={handleStatusChange} className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer w-full pr-4 leading-tight">
                 <option value="SEMUA">Semua Status</option>
                 <option value="NEGERI">Negeri</option>
                 <option value="SWASTA">Swasta</option>
               </select>
             </div>
-
           </div>
 
           <button onClick={downloadExcel} className="flex items-center justify-center gap-2 bg-rose-50 text-rose-700 hover:bg-rose-600 hover:text-white px-5 py-2.5 rounded-xl font-black uppercase text-[10px] md:text-xs shadow-sm border border-rose-200 transition-all active:scale-95 shrink-0 w-full md:w-auto">
@@ -542,24 +388,33 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
                   <th className="px-4 py-3 text-emerald-600">Jml Ruang Kelas</th>
                   <th className="px-4 py-3 text-indigo-600">Jml Rombel</th>
                   <th className="px-4 py-3 text-rose-600 border-l-2 border-rose-100">Sekolah Shift</th>
-                  <th className="px-4 py-3 rounded-r-xl text-rose-800">% Shift</th>
+                  <th className="px-4 py-3 text-rose-800">% Shift</th>
+                  <th className="px-4 py-3 rounded-r-xl text-gray-400">Aksi</th>
                 </tr>
               </thead>
               <tbody>
                 {aggregatedData.map((row, idx) => {
                   const persenValue = row.jumlah_sekolah > 0 ? ((row.sekolah_double_shift / row.jumlah_sekolah) * 100) : 0;
                   const persenStr = persenValue % 1 === 0 ? persenValue : persenValue.toFixed(1);
-                  
                   return (
-                    <tr key={idx} className="bg-white shadow-sm hover:shadow-md hover:scale-[1.01] transition-all group">
-                      <td className="px-4 py-3 rounded-l-2xl font-black text-gray-800 text-sm uppercase text-left border-y border-l border-gray-100 whitespace-nowrap">{row.jenjang}</td>
+                    <tr key={idx} className="bg-white shadow-sm hover:shadow-md transition-all group">
+                      <td className="px-4 py-3 rounded-l-2xl font-black text-gray-800 text-sm uppercase text-left border-y border-l border-gray-100">{row.jenjang}</td>
                       <td className="px-4 py-3 font-bold text-cyan-700 text-base border-y border-gray-100 bg-cyan-50/30">{row.jumlah_sekolah.toLocaleString()}</td>
                       <td className="px-4 py-3 font-bold text-emerald-600 text-base border-y border-gray-100 bg-emerald-50/30">{row.jumlah_kelas.toLocaleString()}</td>
                       <td className="px-4 py-3 font-bold text-indigo-600 text-base border-y border-gray-100 bg-indigo-50/30">{row.jumlah_rombel.toLocaleString()}</td>
-                      
                       <td className="px-4 py-3 font-black text-rose-600 text-lg border-y border-l-2 border-rose-100 bg-rose-50">{row.sekolah_double_shift.toLocaleString()}</td>
-                      <td className="px-4 py-3 font-black text-rose-800 text-lg border-y border-r border-gray-100 bg-rose-100/50 rounded-r-2xl">
-                        {persenStr}%
+                      <td className="px-4 py-3 font-black text-rose-800 text-lg border-y border-gray-100 bg-rose-100/50">{persenStr}%</td>
+                      <td className="px-4 py-3 border-y border-r border-gray-100 rounded-r-2xl">
+                         <button 
+                            disabled={row.sekolah_double_shift === 0}
+                            onClick={() => setSelectedJenjangDetail(row.jenjang)}
+                            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full font-black text-[10px] uppercase transition-all
+                              ${row.sekolah_double_shift > 0 
+                                ? 'bg-rose-600 text-white hover:bg-rose-700 shadow-md active:scale-95' 
+                                : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                         >
+                           <Info size={14} /> Rincian
+                         </button>
                       </td>
                     </tr>
                   );
@@ -572,26 +427,142 @@ export default function RombelLebihShift({ selectedYear = '2026' }) {
                   <td className="px-4 py-4 text-emerald-800 border-y border-gray-300">{grandTotals.jumlah_kelas.toLocaleString()}</td>
                   <td className="px-4 py-4 text-indigo-800 border-y border-gray-300">{grandTotals.jumlah_rombel.toLocaleString()}</td>
                   <td className="px-4 py-4 text-rose-800 text-lg border-y border-l-2 border-rose-300 bg-rose-100">{grandTotals.sekolah_double_shift.toLocaleString()}</td>
-                  <td className="px-4 py-4 rounded-r-2xl border-y border-r border-gray-300 bg-rose-200/50 text-rose-900 text-lg">
-                    {totalPersenStr}%
-                  </td>
+                  <td className="px-4 py-4 border-y border-gray-300 bg-rose-200/50 text-rose-900 text-lg">{totalPersenStr}%</td>
+                  <td className="px-4 py-4 rounded-r-2xl border-y border-r border-gray-300 bg-gray-100"></td>
                 </tr>
               </tfoot>
             </table>
+          </div>
+        </div>
+      </div>
+
+      {/* MODAL RINCIAN SEKOLAH */}
+      {selectedJenjangDetail && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-4xl max-h-[85vh] rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden border border-white/20 animate-in zoom-in-95 duration-300">
             
-            <div className="mt-6 px-4 bg-yellow-50 border border-yellow-200 rounded-xl p-4 flex gap-3 text-left">
-              <AlertCircle size={24} className="text-yellow-600 shrink-0" />
-              <div>
-                <h4 className="font-black text-yellow-800 text-xs uppercase tracking-widest mb-1">Catatan Metodologi</h4>
-                <p className="text-xs font-medium text-yellow-700 leading-relaxed">
-                  Sekolah diindikasikan menyelenggarakan sistem <strong>Double Shift</strong> apabila total jumlah <strong>Rombongan Belajar (Rombel)</strong> melebihi total keseluruhan <strong>Ruang Kelas</strong> yang tersedia. Perhitungan ruang kelas ini murni mencakup semua kondisi ruangan (Baik, Rusak Ringan, Rusak Sedang, Rusak Berat, hingga Tidak Bisa Dipakai).
-                </p>
+            {/* Header Modal */}
+            <div className="bg-rose-600 p-6 md:p-8 flex flex-col md:flex-row items-start md:items-center justify-between text-white shrink-0 gap-4">
+              <div className="flex items-center gap-4">
+                <div className="bg-white/20 p-3 rounded-2xl backdrop-blur-md hidden md:block">
+                   <School size={32} />
+                </div>
+                <div>
+                  <h3 className="text-xl md:text-2xl font-black uppercase tracking-tight leading-none">Rincian Double Shift</h3>
+                  <p className="text-rose-100 text-[10px] font-bold uppercase tracking-widest mt-1.5 opacity-80">
+                    Jenjang {selectedJenjangDetail} • Filter Aktif: {filterWilayah}
+                  </p>
+                </div>
               </div>
+              
+              <div className="flex items-center gap-2 flex-wrap md:flex-nowrap justify-start md:justify-end w-full md:w-auto">
+                {/* Filter Kecamatan Khusus Modal */}
+                <div className={`flex items-center bg-white/20 border border-white/30 rounded-xl px-3 py-1.5 shadow-sm ${filterWilayah === 'SEMUA' ? 'opacity-50 pointer-events-none' : ''}`}>
+                  <MapPin size={14} className="text-white mr-2 shrink-0" />
+                  <select 
+                    value={modalKecamatanFilter} 
+                    onChange={(e) => setModalKecamatanFilter(e.target.value)} 
+                    disabled={filterWilayah === 'SEMUA'}
+                    className="bg-transparent text-xs font-black uppercase text-white outline-none cursor-pointer pr-4 leading-tight [&>option]:text-gray-800"
+                  >
+                    <option value="SEMUA">Semua Kecamatan</option>
+                    {listKecamatan.map(kec => (
+                       <option key={kec} value={kec}>KECAMATAN {kec}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Filter Status Khusus Modal */}
+                <div className="flex items-center bg-white/20 border border-white/30 rounded-xl px-3 py-1.5 shadow-sm">
+                  <Building2 size={14} className="text-white mr-2 shrink-0" />
+                  <select 
+                    value={modalStatusFilter} 
+                    onChange={(e) => setModalStatusFilter(e.target.value)} 
+                    className="bg-transparent text-xs font-black uppercase text-white outline-none cursor-pointer pr-4 leading-tight [&>option]:text-gray-800"
+                  >
+                    <option value="SEMUA">Semua Status</option>
+                    <option value="NEGERI">Negeri</option>
+                    <option value="SWASTA">Swasta</option>
+                  </select>
+                </div>
+
+                <button onClick={() => setSelectedJenjangDetail(null)} className="p-2 ml-2 bg-white/10 hover:bg-white/30 rounded-full transition-colors shrink-0">
+                  <X size={24} />
+                </button>
+              </div>
+            </div>
+
+            {/* Body Modal */}
+            <div className="flex-1 overflow-auto p-4 md:p-8 bg-gray-50 custom-scrollbar">
+               <div className="space-y-3">
+                 {detailList.length > 0 ? detailList.map((sch, i) => (
+                   <div key={i} className="bg-white border border-gray-200 p-4 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-rose-300 hover:shadow-md transition-all group">
+                      <div className="flex items-start gap-4">
+                        {/* Pindahkan Kecamatan ke atas */}
+                        <div className="bg-rose-50 text-rose-600 p-3 rounded-2xl group-hover:bg-rose-600 group-hover:text-white transition-colors flex items-center justify-center flex-col shrink-0 min-w-[80px]">
+                           <span className="text-[10px] font-black uppercase tracking-widest leading-none mb-1">KECAMATAN</span>
+                           <span className="text-xs font-bold leading-none text-center">{sch.kecamatan}</span>
+                        </div>
+                        <div>
+                          <h4 className="font-black text-gray-800 text-sm md:text-base uppercase leading-tight group-hover:text-rose-700 transition-colors">{sch.nama}</h4>
+                          <p className="text-[10px] font-bold text-gray-400 mt-1 uppercase tracking-wider">
+                            NPSN: {sch.npsn} • {sch.status}
+                          </p>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-2 md:gap-4 shrink-0">
+                        <div className="bg-emerald-50 px-4 py-2 rounded-2xl border border-emerald-100 text-center min-w-[70px]">
+                           <p className="text-[9px] font-black text-emerald-600 uppercase">Kelas</p>
+                           <p className="text-lg font-black text-emerald-700 leading-none">{sch.kelas}</p>
+                        </div>
+                        <div className="flex items-center text-rose-300">
+                           <ChevronRight size={20} />
+                        </div>
+                        <div className="bg-indigo-50 px-4 py-2 rounded-2xl border border-indigo-100 text-center min-w-[70px]">
+                           <p className="text-[9px] font-black text-indigo-600 uppercase">Rombel</p>
+                           <p className="text-lg font-black text-indigo-700 leading-none">{sch.rombel}</p>
+                        </div>
+                        {/* Perhitungan (Kelas - Rombel) */}
+                        <div className="ml-2 bg-rose-100 px-3 py-1.5 rounded-full text-[10px] font-black text-rose-700 uppercase whitespace-nowrap min-w-[90px] text-center shadow-sm">
+                           Selisih: {sch.selisih}
+                        </div>
+                      </div>
+                   </div>
+                 )) : (
+                   <div className="text-center py-20 flex flex-col items-center justify-center">
+                      <div className="bg-gray-100 p-4 rounded-full mb-4">
+                         <School size={40} className="text-gray-300" />
+                      </div>
+                      <p className="text-gray-400 font-bold uppercase tracking-widest text-sm">Tidak ada data sesuai filter</p>
+                   </div>
+                 )}
+               </div>
+            </div>
+
+            {/* Footer Modal dengan Tombol Unduh Rincian */}
+            <div className="p-4 md:p-6 bg-white border-t border-gray-100 flex flex-col-reverse md:flex-row justify-between items-center gap-4">
+               <button 
+                  onClick={downloadDetailExcel} 
+                  disabled={detailList.length === 0}
+                  className={`flex items-center justify-center gap-2 px-6 py-3 rounded-2xl font-black uppercase text-xs transition-all shadow-sm w-full md:w-auto
+                    ${detailList.length > 0 
+                      ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white border border-emerald-200 active:scale-95' 
+                      : 'bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200'}`}
+               >
+                 <FileSpreadsheet size={16} /> Unduh Rincian (.xlsx)
+               </button>
+               <button 
+                  onClick={() => setSelectedJenjangDetail(null)}
+                  className="bg-gray-800 text-white px-8 py-3 rounded-2xl font-black uppercase text-xs hover:bg-black transition-all active:scale-95 shadow-lg shadow-gray-200 w-full md:w-auto"
+               >
+                 Tutup Rincian
+               </button>
             </div>
 
           </div>
         </div>
-      </div>
+      )}
 
     </div>
   );

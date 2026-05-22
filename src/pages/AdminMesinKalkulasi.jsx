@@ -119,8 +119,8 @@ export default function AdminMesinKalkulasi({ onBack }) {
     const years = ['2024', '2025', '2026'];
     let newStatus = {};
     
-    for (const type of calcTypes) {
-      for (const year of years) {
+    for (const year of years) {
+      for (const type of calcTypes) {
         const docSnap = await getDocs(query(collection(db, 'dapodik_agregasi'), where("__name__", "==", `${type}_${year}`)));
         if (!docSnap.empty) {
            const data = docSnap.docs[0].data();
@@ -132,6 +132,18 @@ export default function AdminMesinKalkulasi({ onBack }) {
            }
         }
       }
+
+      // Cek agregasi khusus Sekolah Lebih Shift di collection rombel_agregasi
+      const rombelSnap = await getDocs(query(collection(db, 'rombel_agregasi'), where("__name__", "==", `sekolah_lebih_shift_${year}`)));
+      if (!rombelSnap.empty) {
+          const data = rombelSnap.docs[0].data();
+          if (data.last_updated) {
+             const d = new Date(data.last_updated);
+             newStatus[`sekolah_lebih_shift_${year}`] = `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+          } else {
+             newStatus[`sekolah_lebih_shift_${year}`] = 'Selesai';
+          }
+      }
     }
     setCalcStatus(newStatus);
   };
@@ -139,6 +151,139 @@ export default function AdminMesinKalkulasi({ onBack }) {
   useEffect(() => { 
      checkCalcStatus(); 
   }, []);
+
+  // =====================================================================
+  // 8. MESIN BARU: SEKOLAH LEBIH SHIFT (JOIN NPSN)
+  // =====================================================================
+  const handleCalculateSekolahLebihShift = async (year) => {
+    setUploading(true);
+    setProgressLabel(`Menghitung Sekolah Lebih Shift ${year}...`);
+    setUploadProgress(10);
+
+    try {
+      const qSekolah = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", year));
+      const qSarpras = query(collection(db, 'data_sarpras_chunks'), where("tahun_data", "==", year));
+
+      const [snapSekolah, snapSarpras] = await Promise.all([getDocs(qSekolah), getDocs(qSarpras)]);
+
+      if (snapSekolah.empty || snapSarpras.empty) {
+        alert("Data Sekolah atau Data Sarpras Kosong! Pastikan kedua data sudah diunggah untuk tahun ini.");
+        setUploading(false); return;
+      }
+
+      let allSekolahData = [];
+      snapSekolah.forEach(doc => { if (doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data); });
+      
+      let allSarprasData = [];
+      snapSarpras.forEach(doc => { if (doc.data().data) allSarprasData = allSarprasData.concat(doc.data().data); });
+
+      setUploadProgress(40);
+
+      // 1. Buat Peta (Map) Ruang Kelas dari Sarpras by NPSN
+      const sarprasMap = new Map();
+      allSarprasData.forEach(s => {
+        const npsn = String(s.npsn || s.NPSN || getVal(s, 'npsn')).trim();
+        if (npsn) {
+          const kBaik = getNum(s, 'ruang_kelas_baik');
+          const kRusakRingan = getNum(s, 'ruang_kelas_rusak_ringan');
+          const kRusakSedang = getNum(s, 'ruang_kelas_rusak_sedang');
+          const kRusakBerat = getNum(s, 'ruang_kelas_rusak_berat');
+          const kTidakBisaDipakai = getNum(s, 'ruang_kelas_tidak_bisa_dipakai');
+          
+          const totalKelas = kBaik + kRusakRingan + kRusakSedang + kRusakBerat + kTidakBisaDipakai;
+          sarprasMap.set(npsn, totalKelas);
+        }
+      });
+
+      // 2. Siapkan Wadah Agregasi
+      const tab1Data = JENJANG_KEYS_RK.map(k => ({ jenjang: k, sekolah_count: 0, kelas_total: 0, rombel_total: 0, double_shift_count: 0 }));
+      const mapWilayah = new Map();
+
+      const initWilayah = (kabDb, keyKec) => {
+          const uniqueId = `${kabDb}_${keyKec}`;
+          if (!mapWilayah.has(uniqueId)) {
+              const init = { wilayah: kabDb, kecamatan: keyKec };
+              JENJANG_KEYS_RK.forEach(k => { 
+                 init[`${k}_sekolah`] = 0; 
+                 init[`${k}_kelas`] = 0; 
+                 init[`${k}_rombel`] = 0; 
+                 init[`${k}_double_shift`] = 0;
+              });
+              mapWilayah.set(uniqueId, init);
+          }
+          return mapWilayah.get(uniqueId);
+      };
+
+      setUploadProgress(60);
+
+      // 3. Olah Data Sekolah dan Bandingkan dengan Map Sarpras
+      allSekolahData.forEach(item => {
+        const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
+        const group = identifyJenjangGroupRK(bentuk);
+        if (!group) return;
+
+        const npsn = String(item.npsn || item.NPSN || getVal(item, 'npsn')).trim();
+        const kelasTotal = sarprasMap.get(npsn) || 0; // Tarik data kelas dari Sarpras
+
+        let rombelTotal = 0;
+        Object.keys(item).forEach(k => {
+            const keyStr = k.trim().toLowerCase();
+            if (/^rombel_(tka|tkb|t?\d{1,2}|paket_[abc])$/.test(keyStr)) {
+                rombelTotal += parseInt(item[k]) || 0;
+            }
+        });
+
+        // Safeguard (Jika nol, coba narik dari field default Rombel)
+        if (rombelTotal === 0) {
+            rombelTotal = getNum(item, 'rombel') || getNum(item, 'rombongan_belajar');
+        }
+
+        // Penentuan Sekolah Lebih Shift
+        const isDoubleShift = rombelTotal > kelasTotal;
+
+        // Agregasi Tab 1 (Per Jenjang)
+        const rowTab1 = tab1Data.find(r => r.jenjang === group);
+        if (rowTab1) {
+           rowTab1.sekolah_count++;
+           rowTab1.kelas_total += kelasTotal;
+           rowTab1.rombel_total += rombelTotal;
+           if (isDoubleShift) rowTab1.double_shift_count++;
+        }
+
+        // Agregasi Tab 2 (Per Wilayah)
+        const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+        const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+        const rowTab2 = initWilayah(kabDb, keyKec);
+
+        rowTab2[`${group}_sekolah`]++;
+        rowTab2[`${group}_kelas`] += kelasTotal;
+        rowTab2[`${group}_rombel`] += rombelTotal;
+        if (isDoubleShift) rowTab2[`${group}_double_shift`]++;
+      });
+
+      setUploadProgress(80);
+
+      const tab2DataRaw = Array.from(mapWilayah.values());
+
+      // 4. Simpan ke Collection 'rombel_agregasi'
+      const docRef = doc(db, 'rombel_agregasi', `sekolah_lebih_shift_${year}`);
+      await setDoc(docRef, {
+        tahun_data: year,
+        tabel1: tab1Data, 
+        tabel2: tab2DataRaw, 
+        last_updated: new Date().toISOString()
+      });
+
+      setUploadProgress(100);
+      alert(`KALKULASI SUKSES!\n\nAnalisis Sekolah Lebih Shift tahun ${year} berhasil diproses dan disimpan ke 'rombel_agregasi'.`);
+      checkCalcStatus();
+    } catch (error) {
+      console.error(error);
+      alert("Terjadi kesalahan saat melakukan kalkulasi Sekolah Lebih Shift.");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   // =====================================================================
   // 1. SEKOLAH VS PD (PD / SEKOLAH)
@@ -1018,6 +1163,24 @@ export default function AdminMesinKalkulasi({ onBack }) {
            </div>
 
            <div className="grid grid-cols-1 gap-6">
+
+             {/* MESIN BARU: SEKOLAH LEBIH SHIFT (JOIN NPSN) */}
+             <div className="bg-red-50 p-6 rounded-3xl border border-red-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
+                <div>
+                  <h4 className="text-xl font-black text-red-900 uppercase">Sekolah Lebih Shift</h4>
+                  <p className="text-sm font-medium text-gray-600 mt-1">Metodologi Baru: Agregasi per NPSN (Jumlah Rombel &gt; Ruang Kelas)</p>
+                </div>
+                <div className="flex gap-2">
+                   {['2024', '2025', '2026'].map(year => (
+                     <div key={year} className="flex flex-col items-center gap-1">
+                       <button onClick={() => handleCalculateSekolahLebihShift(year)} className="bg-white border-2 border-red-300 text-red-600 hover:bg-red-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
+                         Hitung {year}
+                       </button>
+                       <span className="text-[9px] font-bold text-gray-400">{calcStatus[`sekolah_lebih_shift_${year}`] || 'Belum'}</span>
+                     </div>
+                   ))}
+                </div>
+             </div>
              
              {/* SEKOLAH VS PD */}
              <div className="bg-gray-50 p-6 rounded-3xl border border-gray-200 flex flex-col md:flex-row items-center justify-between gap-6">

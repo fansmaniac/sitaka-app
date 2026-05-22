@@ -20,7 +20,8 @@ export default function AdminDatabaseMaster({ onBack }) {
     const categories = [
       { id: 'dapodik_sekolah' }, { id: 'dapodik_ptk' }, 
       { id: 'dapodik_kepsek' }, { id: 'rapor_pendidikan' }, 
-      { id: 'data_ats' }, { id: 'data_sarpras' } 
+      { id: 'data_ats' }, { id: 'data_sarpras' },
+      { id: 'data_rombel' } // <-- DITAMBAHKAN KATEGORI DATABASE ROMBEL BARU
     ];
     const years = ['2024', '2025', '2026'];
     let newStatus = {};
@@ -148,8 +149,8 @@ export default function AdminDatabaseMaster({ onBack }) {
          jsonData = Array.from(mapUnique.values());
       }
 
-      // STANDARDISASI ATRIBUT UNTUK SEKOLAH DAN SARPRAS (TANPA MEMBUANG DATA DUPLIKAT/KOSONG)
-      if (activeTarget.collection === 'dapodik_sekolah' || activeTarget.collection === 'data_sarpras') {
+      // STANDARDISASI ATRIBUT UNTUK SEKOLAH, SARPRAS, DAN ROMBEL (TANPA MEMBUANG DATA DUPLIKAT/KOSONG)
+      if (activeTarget.collection === 'dapodik_sekolah' || activeTarget.collection === 'data_sarpras' || activeTarget.collection === 'data_rombel') {
          const formattedData = [];
          jsonData.forEach(item => {
             const keys = Object.keys(item);
@@ -283,7 +284,6 @@ export default function AdminDatabaseMaster({ onBack }) {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Satuan Pendidikan');
     
-    // SPASI MISTERIUS TELAH DIBASMI DAN KOLOM UMUR PD DITAMBAHKAN!
     const columns = [
       'npsn', 'nama_satuan_pendidikan', 'status_sekolah', 'bentuk_pendidikan', 'alamat', 
       'desa', 'kecamatan', 'kabupaten', 'lintang', 'bujur', 'npwp', 'nama_kepala_sekolah', 
@@ -378,7 +378,6 @@ export default function AdminDatabaseMaster({ onBack }) {
     link.click();
   };
 
-  // FORMAT UNDUHAN DATABASE ATS
   const handleDownloadFormatATS = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Data ATS');
@@ -399,6 +398,32 @@ export default function AdminDatabaseMaster({ onBack }) {
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = `Format_Upload_ATS.xlsx`;
+    link.click();
+  };
+
+  // FORMAT UNDUHAN KHUSUS DATABASE ROMBEL
+  const handleDownloadFormatRombel = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Data Rombel');
+    
+    // UPDATE: Penambahan kolom "Status Sekolah" sesuai request
+    const columns = [
+      'Nama Satuan Pendidikan', 'NPSN', 'Bentuk Pendidikan', 'Status Sekolah', 
+      'Kecamatan', 'Kabupaten/Kota', 'Jumlah Rombel', 'Ruang Kelas Baik', 
+      'Ruang Kelas Rusak Ringan', 'Ruang Kelas Rusak Sedang', 'Ruang Kelas Rusak Berat', 
+      'Ruang Kelas Rusak Total', 'Jumlah Ruang Kelas'
+    ];
+
+    worksheet.columns = columns.map(col => ({ header: col, key: col, width: 22 }));
+    worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    // Warna Rose (Merah Muda Merona)
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE11D48' } }; 
+    
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Format_Upload_Rombel.xlsx`;
     link.click();
   };
 
@@ -477,9 +502,10 @@ export default function AdminDatabaseMaster({ onBack }) {
           <YearUploadGroup label="Database PTK" collection="dapodik_ptk" icon={Users} colorClass="bg-blue-500" formatHandler={handleDownloadFormatPtk} />
           <YearUploadGroup label="Database Kepsek" collection="dapodik_kepsek" icon={UserCheck} colorClass="bg-blue-400" />
           <YearUploadGroup label="Rapor Pendidikan" collection="rapor_pendidikan" icon={FileText} colorClass="bg-emerald-600" />
-          {/* FORMAT HANDLER ATS DITAMBAHKAN DI SINI */}
           <YearUploadGroup label="Database ATS" collection="data_ats" icon={Layers} colorClass="bg-orange-600" formatHandler={handleDownloadFormatATS} />
           <YearUploadGroup label="Data Sarpras" collection="data_sarpras" icon={Building2} colorClass="bg-purple-600" formatHandler={handleDownloadFormatSarpras} />
+          {/* TAMBAHAN KOTAK UPLOAD DATABASE ROMBEL DI SINI */}
+          <YearUploadGroup label="Database Rombel" collection="data_rombel" icon={School} colorClass="bg-rose-600" formatHandler={handleDownloadFormatRombel} />
         </div>
       </div>
     </>

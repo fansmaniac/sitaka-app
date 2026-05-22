@@ -51,24 +51,24 @@ const getKabupatenRank = (kabName) => {
 };
 
 // =====================================================================
-// MAPPING STRUKTUR KATEGORI BARU (SINKRON DENGAN DAPODIK GURU)
+// MAPPING STRUKTUR KATEGORI BARU (SINKRON 100% DENGAN DAPODIK GURU)
 // =====================================================================
 const KATEGORI_MAPPING = {
-  'PAUD': ['TK', 'KB', 'PAUD', 'SPS', 'TPA'],
+  'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
   'PENDIDIKAN DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
   'PENDIDIKAN MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
-  'PENDIDIKAN INKLUSIF': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
+  'PENDIDIKAN INKLUSIF': ['SLB'],
   'PENDIDIKAN NON FORMAL': ['PKBM', 'SKB']
 };
 
 const SEMUA_SUBTABS_MAPPING = {
-  'PAUD': ['TK', 'KB', 'PAUD'],
+  'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
   'SD': ['SD', 'SPK SD'],
   'SMP': ['SMP', 'SPK SMP'],
   'SMA': ['SMA', 'SPK SMA'],
   'SMK': ['SMK'],
   'SLB (Inklusif)': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
-  'NON FORMAL': ['PKBM', 'SKB', 'SPS', 'TPA']
+  'NON FORMAL': ['PKBM', 'SKB']
 };
 
 const isJenjangValid = (jenjangDb, targetJenjang) => {
@@ -98,7 +98,6 @@ export default function RincianKepegawaianGuru({
   displayLastUpdated 
 }) {
   let mappedJenjang = activeJenjang;
-  if (mappedJenjang === 'SLB (Inklusif)') mappedJenjang = 'PENDIDIKAN INKLUSIF';
   if (mappedJenjang === 'SEMUA') mappedJenjang = 'SEMUA JENJANG';
 
   // STATE MODAL TABS
@@ -177,11 +176,11 @@ export default function RincianKepegawaianGuru({
 
   // Dinamika Tab Jenjang di dalam Modal
   const availableTabs = useMemo(() => {
-    if (mappedJenjang === 'SEMUA JENJANG') return Object.keys(KATEGORI_MAPPING);
+    if (mappedJenjang === 'SEMUA JENJANG') return Object.keys(SEMUA_SUBTABS_MAPPING);
     if (SEMUA_SUBTABS_MAPPING[mappedJenjang]) return SEMUA_SUBTABS_MAPPING[mappedJenjang];
     if (KATEGORI_MAPPING[mappedJenjang]) return KATEGORI_MAPPING[mappedJenjang];
     
-    for (const [kat, arr] of Object.entries(KATEGORI_MAPPING)) {
+    for (const [kat, arr] of Object.entries(SEMUA_SUBTABS_MAPPING)) {
         if (arr.includes(mappedJenjang)) return arr;
     }
     return [];

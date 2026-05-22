@@ -30,7 +30,45 @@ const KEPEGAWAIAN_WEIGHT = {
   'Lainnya': 6
 };
 
-const JENJANG_LIST = ['TK', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'PKBM', 'TPA', 'SPS', 'SKB', 'KB'];
+// =====================================================================
+// MAPPING STRUKTUR KATEGORI BARU (SINKRON 100% DENGAN DAPODIK GURU)
+// =====================================================================
+const KATEGORI_MAPPING = {
+  'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
+  'PENDIDIKAN DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
+  'PENDIDIKAN MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
+  'PENDIDIKAN INKLUSIF': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
+  'PENDIDIKAN NON FORMAL': ['PKBM', 'SKB']
+};
+
+const SEMUA_SUBTABS_MAPPING = {
+  'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
+  'SD': ['SD', 'SPK SD'],
+  'SMP': ['SMP', 'SPK SMP'],
+  'SMA': ['SMA', 'SPK SMA'],
+  'SMK': ['SMK'],
+  'SLB (Inklusif)': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
+  'NON FORMAL': ['PKBM', 'SKB']
+};
+
+const isJenjangValid = (jenjangDb, targetJenjang) => {
+  if (targetJenjang === 'SEMUA' || targetJenjang === 'SEMUA JENJANG') return true;
+  
+  if (KATEGORI_MAPPING[targetJenjang]) {
+      return KATEGORI_MAPPING[targetJenjang].includes(jenjangDb);
+  }
+  
+  if (SEMUA_SUBTABS_MAPPING[targetJenjang]) {
+      return SEMUA_SUBTABS_MAPPING[targetJenjang].includes(jenjangDb);
+  }
+  
+  return jenjangDb === targetJenjang;
+};
+
+// Daftar Jenjang untuk Dropdown Filter Modal (Sinkron dengan Mapping)
+const FILTER_JENJANG = [
+  'PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'
+];
 
 export default function RincianStatusKepegawaianModal({ isOpen, onClose, data, wilayah }) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -77,9 +115,9 @@ export default function RincianStatusKepegawaianModal({ isOpen, onClose, data, w
       const statusSekolahDb = String(getVal(ptk, 'status_sekolah') || '').trim().toUpperCase();
       if (filterStatusSekolah !== 'SEMUA' && statusSekolahDb !== filterStatusSekolah) return false;
 
-      // 5. Filter Jenjang
+      // 5. Filter Jenjang menggunakan Logika Mapping Sinkron
       const jenjang = String(getVal(ptk, 'bentuk_pendidikan') || getVal(ptk, 'jenjang') || '').trim().toUpperCase();
-      if (filterJenjang !== 'SEMUA' && jenjang !== filterJenjang) return false;
+      if (!isJenjangValid(jenjang, filterJenjang)) return false;
 
       return true;
     });
@@ -188,7 +226,7 @@ export default function RincianStatusKepegawaianModal({ isOpen, onClose, data, w
               className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer"
             >
               <option value="SEMUA">Semua Jenjang</option>
-              {JENJANG_LIST.map(j => <option key={j} value={j}>{j}</option>)}
+              {FILTER_JENJANG.map(j => <option key={j} value={j}>{j}</option>)}
             </select>
           </div>
         </div>

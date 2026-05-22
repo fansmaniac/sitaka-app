@@ -33,8 +33,45 @@ const getKabupatenRank = (kabName) => {
   return 99;
 };
 
-// Daftar Jenjang untuk Filter
-const FILTER_JENJANG = ['TK', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'PKBM', 'TPA', 'SPS', 'SKB', 'KB'];
+// =====================================================================
+// MAPPING STRUKTUR KATEGORI BARU (SINKRON 100% DENGAN DAPODIK GURU)
+// =====================================================================
+const KATEGORI_MAPPING = {
+  'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
+  'PENDIDIKAN DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
+  'PENDIDIKAN MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
+  'PENDIDIKAN INKLUSIF': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
+  'PENDIDIKAN NON FORMAL': ['PKBM', 'SKB']
+};
+
+const SEMUA_SUBTABS_MAPPING = {
+  'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
+  'SD': ['SD', 'SPK SD'],
+  'SMP': ['SMP', 'SPK SMP'],
+  'SMA': ['SMA', 'SPK SMA'],
+  'SMK': ['SMK'],
+  'SLB (Inklusif)': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
+  'NON FORMAL': ['PKBM', 'SKB']
+};
+
+const isJenjangValid = (jenjangDb, targetJenjang) => {
+  if (targetJenjang === 'SEMUA' || targetJenjang === 'SEMUA JENJANG') return true;
+  
+  if (KATEGORI_MAPPING[targetJenjang]) {
+      return KATEGORI_MAPPING[targetJenjang].includes(jenjangDb);
+  }
+  
+  if (SEMUA_SUBTABS_MAPPING[targetJenjang]) {
+      return SEMUA_SUBTABS_MAPPING[targetJenjang].includes(jenjangDb);
+  }
+  
+  return jenjangDb === targetJenjang;
+};
+
+// Daftar Jenjang untuk Dropdown Filter (Sinkron dengan Mapping)
+const FILTER_JENJANG = [
+  'PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'
+];
 
 export default function RincianStatusKepegawaianPage({ data, statusLabel, onBack, title }) {
   const [selectedKab, setSelectedKab] = useState('SEMUA'); 
@@ -64,11 +101,11 @@ export default function RincianStatusKepegawaianPage({ data, statusLabel, onBack
       const kab = String(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota') || '').trim().toUpperCase();
       if (selectedKab !== 'SEMUA' && kab !== selectedKab.toUpperCase()) return false;
 
-      // Filter Jenjang
+      // Filter Jenjang dengan logika Mapping Sinkron
       const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
-      if (selectedJenjang !== 'SEMUA' && jenjangDb !== selectedJenjang.toUpperCase()) return false;
+      if (!isJenjangValid(jenjangDb, selectedJenjang)) return false;
 
-      // Filter Status Sekolah (Baca langsung dari kolom database)
+      // Filter Status Sekolah
       const statusSekolahDb = String(getVal(item, 'status_sekolah') || '').trim().toUpperCase();
       if (selectedStatus !== 'SEMUA' && statusSekolahDb !== selectedStatus) return false;
 

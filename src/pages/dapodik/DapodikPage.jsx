@@ -3,7 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   School, Users, GraduationCap, MapPin, LineChart, 
-  Layers, Building2, Menu, X, Loader2, RefreshCw 
+  Layers, Building2, Menu, X, Loader2, RefreshCw,
+  TrendingUp // <-- Tambahan Ikon untuk Menu Trend Data
 } from 'lucide-react';
 import { db } from '../../firebase/config';
 import { collection, getDocs, query, where, limit } from 'firebase/firestore';
@@ -16,6 +17,7 @@ import DapodikDemografiAkses from './DapodikDemografiAkses';
 import DapodikRasio from './DapodikRasio';
 import DapodikSarpras from './DapodikSarpras';
 import RombelLebihShift from './RombelLebihShift'; 
+import TrendData from './TrendData'; // <-- IMPORT HALAMAN TREND DATA BARU
 
 // =====================================================================
 // UTILITY: INDEXED-DB CACHING (BRANKAS LOKAL)
@@ -75,6 +77,7 @@ const MENU_ITEMS = [
   { id: 'rasio', label: 'Rasio / Bandingkan Data', icon: LineChart },
   { id: 'rombel', label: 'Rombel', icon: Layers }, 
   { id: 'sarpras', label: 'Sarpras', icon: Building2 },
+  { id: 'trend_data', label: 'Trend Data Siswa & Sekolah', icon: TrendingUp }, // <-- MENU BARU DI BAWAH SARPRAS
 ];
 
 export default function DapodikPage({ Header }) {
@@ -199,6 +202,7 @@ export default function DapodikPage({ Header }) {
       case 'rasio': return <DapodikRasio dataSekolah={sekolahData} dataGuru={ptkData} selectedYear={selectedYear} />;
       case 'rombel': return <RombelLebihShift selectedYear={selectedYear} />; 
       case 'sarpras': return <DapodikSarpras selectedYear={selectedYear} />;
+      case 'trend_data': return <TrendData selectedYear={selectedYear} />; // <-- KONDISIONAL TAMPILAN MENU BARU
       default: return <DapodikSekolah data={sekolahData} selectedYear={selectedYear} />;
     }
   };

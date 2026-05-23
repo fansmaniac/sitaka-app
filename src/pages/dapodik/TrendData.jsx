@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   TrendingUp, 
   School, 
@@ -8,11 +8,18 @@ import {
   MapPin, 
   Eye, 
   GraduationCap,
-  Loader2
+  Loader2,
+  Activity,
+  Image,
+  BarChart2
 } from 'lucide-react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase/config'; 
 import ExcelJS from 'exceljs';
+import { 
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
+} from 'recharts';
+import { toPng } from 'html-to-image';
 
 // =====================================================================
 // MASTER CONFIGURATION & MAPPING
@@ -27,12 +34,12 @@ const CATEGORIES = [
 ];
 
 const SUB_TABS_MAPPING = {
-  'SEMUA': ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'NON FORMAL'],
-  'PAUD': ['TK', 'KB', 'SPS', 'TPA'],
-  'JENJANG DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
-  'JENJANG MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
-  'JENJANG INKLUSIF': ['SLB'],
-  'JENJANG NON FORMAL': ['PKBM', 'SKB']
+  'SEMUA': ['SEMUA', 'PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'NON FORMAL'],
+  'PAUD': ['SEMUA', 'TK', 'KB', 'SPS', 'TPA'],
+  'JENJANG DASAR': ['SEMUA', 'SD', 'SPK SD', 'SMP', 'SPK SMP'],
+  'JENJANG MENENGAH': ['SEMUA', 'SMA', 'SPK SMA', 'SMK'],
+  'JENJANG INKLUSIF': ['SEMUA', 'SLB'],
+  'JENJANG NON FORMAL': ['SEMUA', 'PKBM', 'SKB']
 };
 
 const DAFTAR_WILAYAH = [
@@ -42,19 +49,22 @@ const DAFTAR_WILAYAH = [
   "Kabupaten Sintang", "Kota Pontianak", "Kota Singkawang"
 ];
 
-// Tahun dinamis sesuai update database terbaru
 const YEARS = ['2024', '2025', '2026'];
 
 export default function TrendData() {
   // State Utama
   const [activeView, setActiveView] = useState('SISWA'); // 'SISWA' | 'SEKOLAH'
   const [selectedCategory, setSelectedCategory] = useState('SEMUA');
-  const [activeSubTab, setActiveSubTab] = useState('PAUD');
+  const [activeSubTab, setActiveSubTab] = useState('SEMUA');
   const [selectedWilayah, setSelectedWilayah] = useState('Semua');
   
   // State Data & Loading
   const [dataTrendRaw, setDataTrendRaw] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Refs untuk Container DALAM (yang akan diunduh)
+  const lineChartRef = useRef(null);
+  const barChartRef = useRef(null);
 
   // Auto-reset sub-tab ketika kategori dropdown atas berubah
   useEffect(() => {
@@ -95,13 +105,20 @@ export default function TrendData() {
   const processedData = useMemo(() => {
     if (!dataTrendRaw || dataTrendRaw.length === 0) return [];
 
-    // Pembersih nama wilayah untuk mencocokkan format Dropdown dengan Database
     const cleanSelectedWilayah = selectedWilayah.toUpperCase().replace(/^(KAB\.|KABUPATEN|KOTA)\s+/i, '').trim();
 
-    // Fungsi cerdas untuk mencocokkan Sub-Tab dengan bentuk pendidikan di DB
-    const checkBentukMatch = (bentukDb, tabActive) => {
+    const checkBentukMatch = (bentukDb, tabActive, catActive) => {
       const dbVal = bentukDb.toUpperCase();
       const tab = tabActive.toUpperCase();
+
+      if (tab === 'SEMUA') {
+        if (catActive === 'SEMUA') return true;
+        if (catActive === 'PAUD') return ['TK', 'KB', 'SPS', 'TPA', 'PAUD', 'KOBER'].includes(dbVal);
+        if (catActive === 'JENJANG DASAR') return ['SD', 'SPK SD', 'SMP', 'SPK SMP'].includes(dbVal);
+        if (catActive === 'JENJANG MENENGAH') return ['SMA', 'SPK SMA', 'SMK'].includes(dbVal);
+        if (catActive === 'JENJANG INKLUSIF') return ['SLB'].includes(dbVal);
+        if (catActive === 'JENJANG NON FORMAL') return ['PKBM', 'SKB', 'NON FORMAL'].includes(dbVal);
+      }
 
       if (tab === 'PAUD') return ['TK', 'KB', 'SPS', 'TPA', 'PAUD', 'KOBER'].includes(dbVal);
       if (tab === 'NON FORMAL') return ['PKBM', 'SKB', 'NON FORMAL'].includes(dbVal);
@@ -109,22 +126,19 @@ export default function TrendData() {
       if (tab === 'SMP') return ['SMP', 'SPK SMP'].includes(dbVal);
       if (tab === 'SMA') return ['SMA', 'SPK SMA'].includes(dbVal);
       
-      // Fallback untuk pencocokan presisi (misal: 'TK' murni, 'SMK', 'SLB')
       return dbVal === tab;
     };
 
-    // 1. Filter by Bentuk Pendidikan & Wilayah
     let filtered = dataTrendRaw.filter(item => {
       const bentukDb = String(item.bentuk_pendidikan || item.jenjang || '').toUpperCase().trim();
       const kabDb = String(item.kabupaten || '').toUpperCase();
 
-      const matchBentuk = checkBentukMatch(bentukDb, activeSubTab);
+      const matchBentuk = checkBentukMatch(bentukDb, activeSubTab, selectedCategory);
       const matchWilayah = selectedWilayah === 'Semua' || kabDb.includes(cleanSelectedWilayah);
       
       return matchBentuk && matchWilayah;
     });
 
-    // 2. Group by Kecamatan
     const grouped = {};
     filtered.forEach(item => {
       const kec = item.kecamatan || 'TIDAK DIKETAHUI';
@@ -141,7 +155,6 @@ export default function TrendData() {
       const statusDb = String(item.status_sekolah || item.status || '').toUpperCase();
       const isNegeri = statusDb === 'NEGERI' || statusDb === 'N';
       
-      // Ambil nilai bergantung pada view (Siswa atau Sekolah)
       const val = activeView === 'SISWA' 
         ? (Number(item.jumlah_siswa) || 0) 
         : (Number(item.jumlah_sekolah) || 0);
@@ -155,9 +168,8 @@ export default function TrendData() {
       }
     });
 
-    // Sort Alphabetical by Kecamatan
     return Object.values(grouped).sort((a, b) => a.kecamatan.localeCompare(b.kecamatan));
-  }, [dataTrendRaw, activeSubTab, selectedWilayah, activeView]);
+  }, [dataTrendRaw, activeSubTab, selectedCategory, selectedWilayah, activeView]);
 
   // Kalkulasi Grand Total Bawah Tabel
   const grandTotals = useMemo(() => {
@@ -172,6 +184,56 @@ export default function TrendData() {
       '2026_n': 0, '2026_s': 0
     });
   }, [processedData]);
+
+  // Persiapan Data untuk Grafik Recharts
+  const chartData = useMemo(() => {
+    if (processedData.length === 0) return [];
+    return [
+      { 
+        tahun: '2024', 
+        Negeri: grandTotals['2024_n'], 
+        Swasta: grandTotals['2024_s'], 
+        Total: grandTotals['2024_n'] + grandTotals['2024_s'] 
+      },
+      { 
+        tahun: '2025', 
+        Negeri: grandTotals['2025_n'], 
+        Swasta: grandTotals['2025_s'], 
+        Total: grandTotals['2025_n'] + grandTotals['2025_s'] 
+      },
+      { 
+        tahun: '2026', 
+        Negeri: grandTotals['2026_n'], 
+        Swasta: grandTotals['2026_s'], 
+        Total: grandTotals['2026_n'] + grandTotals['2026_s'] 
+      },
+    ];
+  }, [grandTotals]);
+
+  // =====================================================================
+  // LOGIK UNDUH GRAFIK PRESISI (TANPA INJECT STYLE)
+  // =====================================================================
+  const handleDownloadChartPNG = useCallback((targetRef, filePrefix) => {
+    if (targetRef.current === null) return;
+
+    // Kunci sukses: Jangan paksa style width/height di sini. Biarkan toPng 
+    // merender persis seperti yang tampil di UI (yang sudah kita atur min-width-nya).
+    // pixelRatio dinaikkan agar resolusi tajam (retina ready).
+    toPng(targetRef.current, { 
+      cacheBust: true, 
+      backgroundColor: '#ffffff',
+      pixelRatio: 3 
+    })
+      .then((dataUrl) => {
+        const link = document.createElement('a');
+        link.download = `${filePrefix}_${activeView}_${activeSubTab}_${selectedWilayah}.png`;
+        link.href = dataUrl;
+        link.click();
+      })
+      .catch((err) => {
+        console.error('Gagal mengunduh grafik:', err);
+      });
+  }, [activeView, activeSubTab, selectedWilayah]);
 
   // =====================================================================
   // EXPORT EXCEL
@@ -216,7 +278,7 @@ export default function TrendData() {
   };
 
   return (
-    <div className="h-full flex flex-col p-4 md:p-8 bg-gray-50/30 animate-in fade-in duration-500">
+    <div className="h-full flex flex-col p-4 md:p-8 bg-gray-50/30 animate-in fade-in duration-500 overflow-y-auto custom-scrollbar">
       
       {/* 1. TOP BAR: TAB UTAMA TREND & DROPDOWN JENJANG */}
       <div className="bg-white p-4 rounded-3xl shadow-sm border border-gray-100 flex flex-col gap-4 mb-6 shrink-0">
@@ -277,7 +339,7 @@ export default function TrendData() {
               </select>
             </div>
 
-            {/* Tombol Unduh Rekap */}
+            {/* Tombol Unduh Rekap Excel Utama */}
             <button 
               onClick={handleDownloadExcel}
               disabled={processedData.length === 0}
@@ -285,8 +347,9 @@ export default function TrendData() {
               activeView === 'SISWA' ? 'bg-blue-600 hover:bg-blue-700 border-blue-500' : 'bg-emerald-600 hover:bg-emerald-700 border-emerald-500'
             } disabled:opacity-50 disabled:cursor-not-allowed`}>
               <FileSpreadsheet size={16} />
-              <span className="hidden sm:inline">Unduh Excel</span>
+              <span className="hidden sm:inline">Unduh Rekap Excel</span>
             </button>
+
           </div>
 
         </div>
@@ -313,16 +376,104 @@ export default function TrendData() {
       <div className="mb-4 text-left">
         <h3 className="text-lg md:text-xl font-black text-gray-800 uppercase tracking-tight flex items-center gap-2">
           <TrendingUp size={20} className={activeView === 'SISWA' ? 'text-blue-600' : 'text-emerald-600'} />
-          Trend {activeView === 'SISWA' ? 'Siswa' : 'Sekolah'} {activeSubTab} 3 Tahun Terakhir
+          Trend {activeView === 'SISWA' ? 'Siswa' : 'Sekolah'} {activeSubTab === 'SEMUA' ? selectedCategory : activeSubTab} 3 Tahun Terakhir
         </h3>
         <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-0.5">
           Ruang Lingkup Wilayah: <span className="text-gray-600">{selectedWilayah}</span>
         </p>
       </div>
 
+      {/* =====================================================================
+          LAYOUT GRAFIK TERBELAH DUA (CONTAINER LUAR & CONTAINER DALAM)
+         ===================================================================== */}
+      {!loading && processedData.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 shrink-0">
+          
+          {/* ======================= KIRI: LINE CHART ======================= */}
+          <div className="bg-white p-5 md:p-6 rounded-3xl shadow-sm border border-gray-200 flex flex-col justify-between">
+            <div className="flex justify-between items-center mb-6">
+              <h4 className="text-xs font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
+                <Activity size={16} className="text-blue-500" />
+                Grafik Garis Pertumbuhan
+              </h4>
+              <button 
+                onClick={() => handleDownloadChartPNG(lineChartRef, 'Trend_Line')}
+                className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-gray-800 hover:bg-gray-900 text-white text-[10px] font-black uppercase rounded-xl transition-all shadow-sm active:scale-95"
+              >
+                <Image size={12} /> Unduh Gambar
+              </button>
+            </div>
+            
+            {/* Wrapper Scroll. Di layar sempit user bisa geser. Saat difoto, ukurannya aman (min-w-600px) */}
+            <div className="w-full overflow-x-auto custom-scrollbar pb-2">
+              {/* TARGET UNDUHAN: Diberi padding dan min-width agar proporsional dan tidak bergeser */}
+              <div className="min-w-[600px] bg-white p-4 rounded-xl" ref={lineChartRef}>
+                <div className="w-full h-[320px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={chartData} margin={{ top: 20, right: 40, bottom: 20, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                      <XAxis dataKey="tahun" axisLine={false} tickLine={false} tick={{ fontSize: 12, fontWeight: 'bold', fill: '#9ca3af' }} dy={10} />
+                      <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fontWeight: 'bold', fill: '#9ca3af' }} width={60} />
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '1rem', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 'bold', fontSize: '12px' }}
+                      />
+                      <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 'bold', paddingTop: '20px' }} />
+                      
+                      <Line type="monotone" dataKey="Total" name="Total" stroke={activeView === 'SISWA' ? '#2563eb' : '#059669'} strokeWidth={4} dot={{ r: 5 }} />
+                      <Line type="monotone" dataKey="Negeri" name="Negeri" stroke="#10b981" strokeWidth={2} strokeDasharray="4 4" />
+                      <Line type="monotone" dataKey="Swasta" name="Swasta" stroke="#8b5cf6" strokeWidth={2} strokeDasharray="4 4" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ======================= KANAN: BAR CHART ======================= */}
+          <div className="bg-white p-5 md:p-6 rounded-3xl shadow-sm border border-gray-200 flex flex-col justify-between">
+            <div className="flex justify-between items-center mb-6">
+              <h4 className="text-xs font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
+                <BarChart2 size={16} className="text-emerald-500" />
+                Grafik Batang Perbandingan
+              </h4>
+              <button 
+                onClick={() => handleDownloadChartPNG(barChartRef, 'Trend_Bar')}
+                className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-gray-800 hover:bg-gray-900 text-white text-[10px] font-black uppercase rounded-xl transition-all shadow-sm active:scale-95"
+              >
+                <Image size={12} /> Unduh Gambar
+              </button>
+            </div>
+            
+            {/* Wrapper Scroll. Di layar sempit user bisa geser. Saat difoto, ukurannya aman (min-w-600px) */}
+            <div className="w-full overflow-x-auto custom-scrollbar pb-2">
+              {/* TARGET UNDUHAN: Diberi padding dan min-width agar proporsional dan tidak bergeser */}
+              <div className="min-w-[600px] bg-white p-4 rounded-xl" ref={barChartRef}>
+                <div className="w-full h-[320px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData} margin={{ top: 20, right: 40, bottom: 20, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                      <XAxis dataKey="tahun" axisLine={false} tickLine={false} tick={{ fontSize: 12, fontWeight: 'bold', fill: '#9ca3af' }} dy={10} />
+                      <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fontWeight: 'bold', fill: '#9ca3af' }} width={60} />
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '1rem', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 'bold', fontSize: '12px' }}
+                      />
+                      <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 'bold', paddingTop: '20px' }} />
+                      
+                      <Bar dataKey="Negeri" name="Negeri" fill="#10b981" radius={[4, 4, 0, 0]} barSize={24} />
+                      <Bar dataKey="Swasta" name="Swasta" fill="#8b5cf6" radius={[4, 4, 0, 0]} barSize={24} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      )}
+
       {/* 4. AREA DATA UTAMA (NESTED HEADERS TABLE) */}
-      <div className="flex-1 overflow-hidden bg-white border border-gray-200 rounded-3xl shadow-sm flex flex-col">
-        <div className="flex-1 overflow-auto custom-scrollbar p-4">
+      <div className="bg-white border border-gray-200 rounded-3xl shadow-sm flex flex-col shrink-0">
+        <div className="overflow-x-auto custom-scrollbar p-4 max-h-[600px]">
           <table className="w-full text-center border-separate border-spacing-y-1.5">
             <thead className="sticky top-0 z-20 shadow-sm rounded-xl">
               
@@ -338,15 +489,12 @@ export default function TrendData() {
 
               {/* HEADER TINGKAT 2 (SUB-KOLOM) */}
               <tr className="text-[9px] uppercase tracking-wider text-gray-500 font-black bg-gray-50">
-                {/* 2024 */}
                 <th className="px-2 py-2 border-b border-gray-100 bg-blue-50/10">Negeri</th>
                 <th className="px-2 py-2 border-b border-gray-100 bg-blue-50/10">Swasta</th>
                 <th className="px-2 py-2 border-b border-gray-100 font-black text-blue-700 bg-blue-50/40">Total</th>
-                {/* 2025 */}
                 <th className="px-2 py-2 border-b border-gray-100 bg-emerald-50/10">Negeri</th>
                 <th className="px-2 py-2 border-b border-gray-100 bg-emerald-50/10">Swasta</th>
                 <th className="px-2 py-2 border-b border-gray-100 font-black text-emerald-700 bg-emerald-50/40">Total</th>
-                {/* 2026 */}
                 <th className="px-2 py-2 border-b border-gray-100 bg-purple-50/10">Negeri</th>
                 <th className="px-2 py-2 border-b border-gray-100 bg-purple-50/10">Swasta</th>
                 <th className="px-2 py-2 border-b border-gray-100 font-black text-purple-700 bg-purple-50/40">Total</th>
@@ -355,7 +503,6 @@ export default function TrendData() {
             <tbody className="text-sm">
               
               {loading ? (
-                // STATE LOADING
                 <tr>
                   <td colSpan="12" className="py-28 text-center bg-white rounded-2xl">
                     <div className="flex flex-col items-center justify-center text-gray-400">
@@ -365,7 +512,6 @@ export default function TrendData() {
                   </td>
                 </tr>
               ) : processedData.length === 0 ? (
-                // STATE KOSONG
                 <tr>
                   <td colSpan="12" className="py-28 text-center bg-white rounded-2xl">
                     <div className="flex flex-col items-center justify-center text-gray-400">
@@ -378,23 +524,19 @@ export default function TrendData() {
                   </td>
                 </tr>
               ) : (
-                // RENDER DATA ASLI
                 processedData.map((row, idx) => (
                   <tr key={row.kecamatan} className="bg-white shadow-sm hover:shadow-md hover:scale-[1.005] transition-all group text-gray-700">
                     <td className="p-3 text-center font-bold text-gray-400 rounded-l-xl border-y border-l">{idx + 1}</td>
                     <td className="p-3 font-black uppercase text-left border-y whitespace-nowrap">{row.kecamatan}</td>
                     
-                    {/* 2024 */}
                     <td className="p-3 border-y bg-blue-50/10">{row['2024_n'].toLocaleString('id-ID')}</td>
                     <td className="p-3 border-y bg-blue-50/10">{row['2024_s'].toLocaleString('id-ID')}</td>
                     <td className="p-3 font-black border-y bg-blue-50/30 text-blue-700">{(row['2024_n'] + row['2024_s']).toLocaleString('id-ID')}</td>
                     
-                    {/* 2025 */}
                     <td className="p-3 border-y bg-emerald-50/10">{row['2025_n'].toLocaleString('id-ID')}</td>
                     <td className="p-3 border-y bg-emerald-50/10">{row['2025_s'].toLocaleString('id-ID')}</td>
                     <td className="p-3 font-black border-y bg-emerald-50/30 text-emerald-700">{(row['2025_n'] + row['2025_s']).toLocaleString('id-ID')}</td>
                     
-                    {/* 2026 */}
                     <td className="p-3 border-y bg-purple-50/10">{row['2026_n'].toLocaleString('id-ID')}</td>
                     <td className="p-3 border-y bg-purple-50/10">{row['2026_s'].toLocaleString('id-ID')}</td>
                     <td className="p-3 font-black border-y bg-purple-50/30 text-purple-700">{(row['2026_n'] + row['2026_s']).toLocaleString('id-ID')}</td>
@@ -410,23 +552,19 @@ export default function TrendData() {
 
             </tbody>
             
-            {/* FOOTER: TOTAL SELURUH DATA */}
             {!loading && processedData.length > 0 && (
               <tfoot>
                 <tr className="bg-gray-800 text-white font-black text-xs uppercase tracking-wider">
                   <td colSpan="2" className="p-4 text-right rounded-bl-2xl">TOTAL KESELURUHAN :</td>
                   
-                  {/* Total 2024 */}
                   <td className="p-4 bg-blue-600/20 text-blue-200">{grandTotals['2024_n'].toLocaleString('id-ID')}</td>
                   <td className="p-4 bg-blue-600/20 text-blue-200">{grandTotals['2024_s'].toLocaleString('id-ID')}</td>
                   <td className="p-4 bg-blue-500 text-white">{(grandTotals['2024_n'] + grandTotals['2024_s']).toLocaleString('id-ID')}</td>
                   
-                  {/* Total 2025 */}
                   <td className="p-4 bg-emerald-600/20 text-emerald-200">{grandTotals['2025_n'].toLocaleString('id-ID')}</td>
                   <td className="p-4 bg-emerald-600/20 text-emerald-200">{grandTotals['2025_s'].toLocaleString('id-ID')}</td>
                   <td className="p-4 bg-emerald-500 text-white">{(grandTotals['2025_n'] + grandTotals['2025_s']).toLocaleString('id-ID')}</td>
                   
-                  {/* Total 2026 */}
                   <td className="p-4 bg-purple-600/20 text-purple-200">{grandTotals['2026_n'].toLocaleString('id-ID')}</td>
                   <td className="p-4 bg-purple-600/20 text-purple-200">{grandTotals['2026_s'].toLocaleString('id-ID')}</td>
                   <td className="p-4 bg-purple-500 text-white">{(grandTotals['2026_n'] + grandTotals['2026_s']).toLocaleString('id-ID')}</td>

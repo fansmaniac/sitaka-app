@@ -166,14 +166,144 @@ export default function AdminMesinKalkulasi({ onBack }) {
              newStatus[`akses_pd_${year}`] = 'Selesai';
           }
       }
-
     }
+
+    // Cek Status Trend Data Nasional (Lintas Tahun)
+    const trendSnap = await getDocs(query(collection(db, 'dapodik_agregasi'), where("__name__", "==", `trend_data_nasional`)));
+    if (!trendSnap.empty) {
+        const data = trendSnap.docs[0].data();
+        if (data.last_updated) {
+           const d = new Date(data.last_updated);
+           newStatus[`trend_data_nasional`] = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth()+1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        } else {
+           newStatus[`trend_data_nasional`] = 'Selesai';
+        }
+    }
+
     setCalcStatus(newStatus);
   };
 
   useEffect(() => { 
      checkCalcStatus(); 
   }, []);
+
+  // =====================================================================
+  // MESIN BARU: TREND DATA NASIONAL (MULTI-TAHUN)
+  // =====================================================================
+  const handleCalculateTrendNasional = async () => {
+    setUploading(true);
+    setProgressLabel(`Mengekstrak Data Trend (2024-2026)...`);
+    setUploadProgress(10);
+
+    try {
+      const yearsToProcess = ['2024', '2025', '2026'];
+      const mapAgregasi = new Map();
+
+      for (let i = 0; i < yearsToProcess.length; i++) {
+        const year = yearsToProcess[i];
+        
+        setProgressLabel(`Memproses Data Tahun ${year}...`);
+        
+        const qSekolah = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", year));
+        const snapSekolah = await getDocs(qSekolah);
+        
+        let allSekolahData = [];
+        snapSekolah.forEach(doc => { 
+            if (doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data); 
+        });
+
+        allSekolahData.forEach(item => {
+          const rawBentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
+          
+          // Presisi Mapping Sub-Tab sesuai di TrendData.jsx
+          let bentuk = rawBentuk;
+          if (rawBentuk === 'TK' || rawBentuk === 'KB' || rawBentuk === 'SPS' || rawBentuk === 'TPA' ||
+              rawBentuk === 'SD' || rawBentuk === 'SPK SD' || rawBentuk === 'SMP' || rawBentuk === 'SPK SMP' || 
+              rawBentuk === 'SMA' || rawBentuk === 'SPK SMA' || rawBentuk === 'SMK' || 
+              rawBentuk === 'PKBM' || rawBentuk === 'SKB') {
+              bentuk = rawBentuk;
+          } else if (rawBentuk.includes('SLB') || rawBentuk.includes('LB')) {
+              bentuk = 'SLB';
+          } else if (rawBentuk === 'KOBER') {
+              bentuk = 'KB';
+          }
+
+          const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+          const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+          const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
+          const status = isNegeri ? 'Negeri' : 'Swasta';
+
+          // Hitung Siswa Total
+          let pd = parseInt(getVal(item, 'pd_total'));
+          if (isNaN(pd)) {
+            const totalLaki = 
+              (parseInt(getVal(item, 'tka_l')) || 0) + (parseInt(getVal(item, 'tkb_l')) || 0) +
+              (parseInt(getVal(item, 't1_l')) || 0) + (parseInt(getVal(item, 't2_l')) || 0) +
+              (parseInt(getVal(item, 't3_l')) || 0) + (parseInt(getVal(item, 't4_l')) || 0) +
+              (parseInt(getVal(item, 't5_l')) || 0) + (parseInt(getVal(item, 't6_l')) || 0) +
+              (parseInt(getVal(item, 't7_l')) || 0) + (parseInt(getVal(item, 't8_l')) || 0) +
+              (parseInt(getVal(item, 't9_l')) || 0) + (parseInt(getVal(item, 't10_l')) || 0) +
+              (parseInt(getVal(item, 't11_l')) || 0) + (parseInt(getVal(item, 't12_l')) || 0) +
+              (parseInt(getVal(item, 't13_l')) || 0) + (parseInt(getVal(item, 'paket_a_l')) || 0) +
+              (parseInt(getVal(item, 'paket_b_l')) || 0) + (parseInt(getVal(item, 'paket_c_l')) || 0);
+            
+            const totalPerempuan = 
+              (parseInt(getVal(item, 'tka_p')) || 0) + (parseInt(getVal(item, 'tkb_p')) || 0) +
+              (parseInt(getVal(item, 't1_p')) || 0) + (parseInt(getVal(item, 't2_p')) || 0) +
+              (parseInt(getVal(item, 't3_p')) || 0) + (parseInt(getVal(item, 't4_p')) || 0) +
+              (parseInt(getVal(item, 't5_p')) || 0) + (parseInt(getVal(item, 't6_p')) || 0) +
+              (parseInt(getVal(item, 't7_p')) || 0) + (parseInt(getVal(item, 't8_p')) || 0) +
+              (parseInt(getVal(item, 't9_p')) || 0) + (parseInt(getVal(item, 't10_p')) || 0) +
+              (parseInt(getVal(item, 't11_p')) || 0) + (parseInt(getVal(item, 't12_p')) || 0) +
+              (parseInt(getVal(item, 't13_p')) || 0) + (parseInt(getVal(item, 'paket_a_p')) || 0) +
+              (parseInt(getVal(item, 'paket_b_p')) || 0) + (parseInt(getVal(item, 'paket_c_p')) || 0);
+
+            pd = totalLaki + totalPerempuan;
+          }
+
+          const mapKey = `${year}_${kabDb}_${keyKec}_${bentuk}_${status}`;
+          if (!mapAgregasi.has(mapKey)) {
+              mapAgregasi.set(mapKey, {
+                  tahun_data: year,
+                  kabupaten: kabDb,
+                  kecamatan: keyKec,
+                  bentuk_pendidikan: bentuk,
+                  status_sekolah: status,
+                  jumlah_sekolah: 0,
+                  jumlah_siswa: 0
+              });
+          }
+
+          const node = mapAgregasi.get(mapKey);
+          node.jumlah_sekolah += 1;
+          node.jumlah_siswa += pd;
+        });
+
+        // Update progress step by step based on array length
+        setUploadProgress(10 + Math.floor(((i + 1) / yearsToProcess.length) * 80));
+      }
+
+      setProgressLabel(`Menyimpan Agregasi Lintas Tahun...`);
+      const finalDataToSave = Array.from(mapAgregasi.values());
+
+      const docRef = doc(db, 'dapodik_agregasi', 'trend_data_nasional');
+      await setDoc(docRef, {
+        data: finalDataToSave, 
+        last_updated: new Date().toISOString()
+      });
+
+      setUploadProgress(100);
+      alert(`KALKULASI SUKSES!\n\nAnalisis Trend Data Siswa & Sekolah (2024, 2025, 2026) berhasil diproses.`);
+      checkCalcStatus();
+
+    } catch (error) {
+      console.error(error);
+      alert("Terjadi kesalahan saat melakukan kalkulasi Trend Data.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
 
   // =====================================================================
   // 8. MESIN BARU: SEKOLAH LEBIH SHIFT (JOIN NPSN)
@@ -1075,7 +1205,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
             (parseInt(getVal(item, 't11_l')) || 0) + (parseInt(getVal(item, 't12_l')) || 0) +
             (parseInt(getVal(item, 't13_l')) || 0) + (parseInt(getVal(item, 'paket_a_l')) || 0) +
             (parseInt(getVal(item, 'paket_b_l')) || 0) + (parseInt(getVal(item, 'paket_c_l')) || 0);
-
+          
           const totalPerempuan = 
             (parseInt(getVal(item, 'tka_p')) || 0) + (parseInt(getVal(item, 'tkb_p')) || 0) +
             (parseInt(getVal(item, 't1_p')) || 0) + (parseInt(getVal(item, 't2_p')) || 0) +
@@ -1307,6 +1437,20 @@ export default function AdminMesinKalkulasi({ onBack }) {
            </div>
 
            <div className="grid grid-cols-1 gap-6">
+
+             {/* MESIN BARU 3: TREND DATA (SISWA & SEKOLAH) */}
+             <div className="bg-yellow-50 p-6 rounded-3xl border border-yellow-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
+                <div>
+                  <h4 className="text-xl font-black text-yellow-900 uppercase">Trend Data Siswa & Sekolah</h4>
+                  <p className="text-sm font-medium text-yellow-700 mt-1">Mengagregasi data 3 tahun terakhir (2024, 2025, 2026) lintas wilayah secara instan.</p>
+                </div>
+                <div className="flex flex-col items-center gap-1">
+                  <button onClick={() => handleCalculateTrendNasional()} className="bg-white border-2 border-yellow-300 text-yellow-700 hover:bg-yellow-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm whitespace-nowrap">
+                    Hitung Trend (3 Tahun)
+                  </button>
+                  <span className="text-[9px] font-bold text-yellow-600/60">{calcStatus['trend_data_nasional'] || 'Belum'}</span>
+                </div>
+             </div>
 
              {/* MESIN BARU 2: AKSESIBILITAS PESERTA DIDIK */}
              <div className="bg-teal-50 p-6 rounded-3xl border border-teal-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">

@@ -59,7 +59,7 @@ function AppContent() {
       <div className="flex-1 overflow-hidden mx-4 md:mx-8 hidden md:block text-center">
         <div className="whitespace-nowrap animate-marquee">
           <span className="text-lg font-bold tracking-wide italic text-blue-100">
-            D-PENA KALBAR | Referensi Data Pendidikan BPMP Provinsi Kalbar — Monitoring Data Pendidikan Terpadu Se-Kalimantan Barat — Sinergi Menuju Pendidikan Berkualitas — 
+            SITAKA D-PENA KALBAR | Referensi Data Pendidikan BPMP Provinsi Kalbar — Monitoring Data Pendidikan Terpadu Se-Kalimantan Barat — Sinergi Menuju Pendidikan Berkualitas — 
           </span>
         </div>
       </div>
@@ -108,7 +108,7 @@ function AppContent() {
                 <School className="w-10 h-10 md:w-16 md:h-16 text-white" />
              </div>
              <h1 className="text-5xl sm:text-7xl md:text-8xl font-black text-gray-900 leading-none uppercase tracking-tighter">
-                D-PENA KALBAR
+                SITAKA D-PENA KALBAR
              </h1>
           </div>
           <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-blue-600 tracking-[0.1em] md:tracking-[0.2em] px-2">

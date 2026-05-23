@@ -21,7 +21,7 @@ const STANDAR_ROMBEL = {
   'PAUD': { min: 2, max: 16 },
   'SD': { min: 6, max: 24 },
   'SMP': { min: 3, max: 33 },
-  'SMA': { min: 3, max: 72 }, 
+  'SMA': { min: 3, max: 36 }, 
   'SMK': { min: 3, max: 72 }, 
   'SLB (Inklusif)': { min: 3, max: 30 },
   'NON FORMAL': { min: 3, max: 36 } 
@@ -451,7 +451,7 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500"></div> PAUD: Min 2 - Max 16 Rombel</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500"></div> SD: Min 6 - Max 24 Rombel</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500"></div> SMP: Min 3 - Max 33 Rombel</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500"></div> SMA: Min 3 - Max 72 Rombel</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500"></div> SMA: Min 3 - Max 36 Rombel</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500"></div> SMK: Min 3 - Max 72 Rombel</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500"></div> SLB: Min 3 - Max 30 Rombel</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500"></div> NON FORMAL: Min 3 - Max 36 Rombel</div>

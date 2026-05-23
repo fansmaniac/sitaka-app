@@ -73,7 +73,7 @@ const MENU_ITEMS = [
   { id: 'sekolah', label: 'Sekolah', icon: School },
   { id: 'guru', label: 'Guru', icon: Users },
   { id: 'peserta_didik', label: 'Peserta Didik', icon: GraduationCap },
-  { id: 'demografi_akses', label: 'Demografi & Aksesibilitas', icon: MapPin }, 
+  { id: 'demografi_akses', label: 'Aksesibilitas & Kelayakan PIP', icon: MapPin }, 
   { id: 'rasio', label: 'Rasio / Bandingkan Data', icon: LineChart },
   { id: 'rombel', label: 'Rombel', icon: Layers }, 
   { id: 'sarpras', label: 'Sarpras', icon: Building2 },

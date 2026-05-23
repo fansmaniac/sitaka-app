@@ -88,24 +88,39 @@ export default function AdminDatabaseMaster({ onBack }) {
     }
   };
 
-  // --- MESIN UPLOAD MICRO-BATCHING (HEMAT KUOTA) ---
+  // --- MESIN UPLOAD MICRO-BATCHING (MENDUKUNG MODE APPEND/SAMBUNG DATA) ---
   const handleFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file || !activeTarget) return;
 
+    let isAppendMode = false; // Flag untuk menentukan apakah ini menyambung data atau menimpa
+
     const statusKey = `${activeTarget.collection}_${activeTarget.year}`;
     if (dbStatus[statusKey]) {
-      const confirmOverwrite = window.confirm(
-        `PERHATIAN!\n\nData ${activeTarget.label} untuk tahun ${activeTarget.year} sudah ada.\nApakah Anda yakin ingin MENGHAPUS data lama dan MENIMPANYA dengan data baru ini?`
+      // PERUBAHAN LOGIKA POP-UP UNTUK MENDUKUNG FILE PART 1, 2, 3...
+      const askAppend = window.confirm(
+        `Data ${activeTarget.label} untuk tahun ${activeTarget.year} sudah ada di database.\n\nApakah ini file lanjutan (Misal: Part 2, 3, dst)?\n\nKlik [OK] untuk MENYAMBUNG data ini dengan data yang sudah ada.\nKlik [Cancel] untuk opsi menghapus/menimpa data lama.`
       );
-      if (!confirmOverwrite) {
-        e.target.value = null;
-        return;
+      
+      if (askAppend) {
+        isAppendMode = true; // Jika klik OK, nyalakan mode sambung data
+      } else {
+        const askOverwrite = window.confirm(
+          `PERINGATAN KERAS!\n\nAnda akan MENGHAPUS seluruh data lama tahun ${activeTarget.year} dan menggantinya dengan file ini saja.\n\nApakah Anda yakin ingin MENIMPA data?`
+        );
+        if (!askOverwrite) {
+          e.target.value = null; // Batalkan proses jika ragu
+          return;
+        }
       }
     }
 
     setUploading(true);
-    setProgressLabel(`Mengunggah Data ${activeTarget.year}...`);
+    if (isAppendMode) {
+        setProgressLabel(`Menyambung Data ${activeTarget.year} (Append Mode)...`);
+    } else {
+        setProgressLabel(`Mengunggah & Menimpa Data ${activeTarget.year}...`);
+    }
     setUploadProgress(0);
 
     try {
@@ -173,34 +188,40 @@ export default function AdminDatabaseMaster({ onBack }) {
       const collectionName = `${activeTarget.collection}_chunks`; 
       const cleanTahun = String(activeTarget.year);
       
-      // PEMBERSIHAN OTOMATIS SISA DOKUMEN LAMA (OVERWRITE)
-      setProgressLabel(`Membersihkan Sisa Dokumen Lama...`);
-      const q = query(collection(db, collectionName), where("tahun_data", "==", cleanTahun));
-      const snapshot = await getDocs(q);
-      if (!snapshot.empty) {
-        let delBatch = writeBatch(db);
-        let delCount = 0;
-        for (let i = 0; i < snapshot.docs.length; i++) {
-          delBatch.delete(snapshot.docs[i].ref);
-          delCount++;
-          if (delCount === 100 || i === snapshot.docs.length - 1) {
-            await delBatch.commit();
-            delBatch = writeBatch(db);
-            delCount = 0;
-            await new Promise(r => setTimeout(r, 100));
+      // PEMBERSIHAN OTOMATIS HANYA DIJALANKAN JIKA BUKAN MODE APPEND
+      if (!isAppendMode) {
+        setProgressLabel(`Membersihkan Sisa Dokumen Lama...`);
+        const q = query(collection(db, collectionName), where("tahun_data", "==", cleanTahun));
+        const snapshot = await getDocs(q);
+        if (!snapshot.empty) {
+          let delBatch = writeBatch(db);
+          let delCount = 0;
+          for (let i = 0; i < snapshot.docs.length; i++) {
+            delBatch.delete(snapshot.docs[i].ref);
+            delCount++;
+            if (delCount === 100 || i === snapshot.docs.length - 1) {
+              await delBatch.commit();
+              delBatch = writeBatch(db);
+              delCount = 0;
+              await new Promise(r => setTimeout(r, 100));
+            }
           }
         }
+      } else {
+        setProgressLabel(`Menyiapkan Mode Penyambungan Data...`);
       }
 
       const currentTime = new Date().toISOString();
 
       if (totalRowsInExcel === 0) {
-        const docRef = doc(collection(db, collectionName));
-        await setDoc(docRef, { 
-          tahun_data: cleanTahun, data: [], last_updated: currentTime, is_empty: true
-        });
+        if (!isAppendMode) {
+            const docRef = doc(collection(db, collectionName));
+            await setDoc(docRef, { 
+              tahun_data: cleanTahun, data: [], last_updated: currentTime, is_empty: true
+            });
+        }
         setUploadProgress(100);
-        alert(`UPLOAD SELESAI, TAPI DATA KOSONG.`);
+        alert(`UPLOAD SELESAI, TAPI DATA KOSONG DI FILE INI.`);
       } else {
         setProgressLabel(`Menyimpan ${totalRowsInExcel.toLocaleString('id-ID')} Baris Data...`);
         
@@ -257,7 +278,8 @@ export default function AdminDatabaseMaster({ onBack }) {
           setUploadProgress(Math.round(((i + 1) / totalChunks) * 100));
         }
 
-        alert(`SINKRONISASI BERHASIL!\n\nTotal ${totalRowsInExcel.toLocaleString('id-ID')} baris data telah diunggah dengan aman.`);
+        const modeText = isAppendMode ? "disambungkan" : "diunggah dan menimpa data lama";
+        alert(`SINKRONISASI BERHASIL!\n\nTotal ${totalRowsInExcel.toLocaleString('id-ID')} baris data telah ${modeText} dengan aman.`);
       }
       
       checkDatabaseStatus();

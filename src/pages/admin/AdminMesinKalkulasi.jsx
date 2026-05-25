@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Activity, ArrowLeft, Loader2 } from 'lucide-react';
 import { db } from '../../firebase/config';
-import { collection, doc, query, where, getDocs, setDoc } from 'firebase/firestore';
+import { collection, doc, query, where, getDocs, setDoc, writeBatch } from 'firebase/firestore';
 
 // =====================================================================
 // UTILITY & REFERENSI
@@ -150,7 +150,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
         }
       }
 
-      // Cek Status Sekolah Lebih Shift (di rombel_agregasi)
       const rombelSnap = await getDocs(query(collection(db, 'rombel_agregasi'), where("__name__", "==", `sekolah_lebih_shift_${year}`)));
       if (!rombelSnap.empty) {
           const data = rombelSnap.docs[0].data();
@@ -162,7 +161,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
           }
       }
 
-      // Cek Status Aksesibilitas & PIP PD (di akses_pd_agregasi)
       const aksesSnap = await getDocs(query(collection(db, 'akses_pd_agregasi'), where("__name__", "==", `jarak_waktu_${year}`)));
       if (!aksesSnap.empty) {
           const data = aksesSnap.docs[0].data();
@@ -175,7 +173,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
       }
     }
 
-    // Cek Status Trend Data Nasional (Lintas Tahun)
     const trendSnap = await getDocs(query(collection(db, 'dapodik_agregasi'), where("__name__", "==", `trend_data_nasional`)));
     if (!trendSnap.empty) {
         const data = trendSnap.docs[0].data();
@@ -215,8 +212,12 @@ export default function AdminMesinKalkulasi({ onBack }) {
         const snapSekolah = await getDocs(qSekolah);
         
         let allSekolahData = [];
+        // ANTI-MEMORY LEAK: Hindari .concat()
         snapSekolah.forEach(doc => { 
-            if (doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data); 
+            const arr = doc.data().data;
+            if (Array.isArray(arr)) {
+                for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]);
+            }
         });
 
         allSekolahData.forEach(item => {
@@ -309,11 +310,12 @@ export default function AdminMesinKalkulasi({ onBack }) {
   };
 
   // =====================================================================
-  // 9. MESIN BARU: AKSESIBILITAS & KELAYAKAN PIP PD ---> [UPDATE DATE]
+  // 9. MESIN BARU: AKSESIBILITAS & KELAYAKAN PIP PD ---> [UPDATE DATE & LOGIKA]
+  // CHUNK BY CHUNK PROCESSING MEMORY SAFE
   // =====================================================================
   const handleCalculateAksesDanPIP = async (year) => {
     setUploading(true);
-    setProgressLabel(`Menghitung Akses & PIP PD ${year}...`);
+    setProgressLabel(`Menyiapkan Mesin Kalkulasi PD ${year}...`);
     setUploadProgress(5);
 
     try {
@@ -325,14 +327,38 @@ export default function AdminMesinKalkulasi({ onBack }) {
         setUploading(false); return;
       }
 
-      let allAksesData = [];
-      snapAkses.forEach(doc => { 
-          if(doc.data().data) allAksesData = allAksesData.concat(doc.data().data); 
+      // --- AUTO-CLEAR STALE CHUNKS DENGAN BATCH SAFE-LIMIT ---
+      setProgressLabel(`Membersihkan Hasil Agregasi Lama Tahun ${year}...`);
+      const pfxAkses = `akses_${year}_chunk_`;
+      const pfxPip = `pip_${year}_chunk_`;
+      
+      const snapOld = await getDocs(collection(db, 'akses_pd_agregasi'));
+      const docsToDelete = [];
+      snapOld.forEach(doc => {
+         if (doc.id.startsWith(pfxAkses) || doc.id.startsWith(pfxPip) || doc.id === `jarak_waktu_${year}`) {
+            docsToDelete.push(doc.ref);
+         }
       });
 
-      setUploadProgress(30);
+      if (docsToDelete.length > 0) {
+          let delBatch = writeBatch(db);
+          let delCount = 0;
+          for (let i = 0; i < docsToDelete.length; i++) {
+              delBatch.delete(docsToDelete[i]);
+              delCount++;
+              // Batas Firestore WriteBatch adalah 500
+              if (delCount === 100 || i === docsToDelete.length - 1) {
+                  await delBatch.commit();
+                  delBatch = writeBatch(db);
+                  delCount = 0;
+                  await new Promise(r => setTimeout(r, 50)); 
+              }
+          }
+      }
 
-      // --- MAP AKSESIBILITAS ---
+      setUploadProgress(20);
+
+      // --- SETUP MAP PENAMPUNG ---
       const mapAkses = new Map();
       const getAksesNode = (kab, kec, jenjang, moda) => {
           if (!mapAkses.has(kab)) mapAkses.set(kab, new Map());
@@ -355,7 +381,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
           return jenjangNode.get(moda);
       };
 
-      // --- MAP KELAYAKAN PIP ---
       const mapPIP = new Map();
       const getPipNode = (kab, kec, jenjang) => {
           const key = `${kab}_${kec}_${jenjang}`;
@@ -366,73 +391,83 @@ export default function AdminMesinKalkulasi({ onBack }) {
                   jenjang: jenjang,
                   total_siswa: 0,
                   layak_pip: 0,
-                  layak_dan_menerima_kip: 0
+                  layak_dan_menerima_kip: 0,
+                  tidak_layak: 0
               });
           }
           return mapPIP.get(key);
       };
 
-      setUploadProgress(40);
+      // --- PROSES CHUNKS MENTAH SATU-PERSATU (MENCEGAH RAM JEBOL) ---
+      let processedChunksCount = 0;
+      const totalDocs = snapAkses.docs.length;
 
-      // --- LOOPING JUTAAN DATA SEKALI JALAN ---
-      allAksesData.forEach(item => {
-          // 1. FILTER SUPER KEBAL: Abaikan NISN kosong/0
-          const nisnVal = getVal(item, 'nisn');
-          const nisnStr = String(nisnVal).trim();
-          if (!nisnVal || nisnStr === '' || nisnStr === '0' || nisnStr.toLowerCase() === 'null' || nisnStr.toLowerCase() === 'undefined') {
-              return; 
+      for (const chunkDoc of snapAkses.docs) {
+          const arrData = chunkDoc.data().data;
+          if (Array.isArray(arrData)) {
+              arrData.forEach(item => {
+                  const nisnVal = getVal(item, 'nisn');
+                  const nisnStr = String(nisnVal).trim();
+                  if (!nisnVal || nisnStr === '' || nisnStr === '0' || nisnStr.toLowerCase() === 'null' || nisnStr.toLowerCase() === 'undefined') {
+                      return; 
+                  }
+
+                  const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
+                  const group = identifyJenjangGroup(bentuk);
+                  if (!group) return; 
+
+                  const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+                  const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+                  
+                  // A. KALKULASI KELAYAKAN PIP
+                  const pipNode = getPipNode(kabDb, keyKec, group);
+                  pipNode.total_siswa++;
+
+                  const layak = checkYa(getVal(item, 'layak_pip') || getVal(item, 'layak_PIP'));
+                  const menerimaKip = checkYa(getVal(item, 'penerima_kip') || getVal(item, 'penerima_KIP'));
+
+                  if (layak) {
+                      pipNode.layak_pip++;
+                      if (menerimaKip) {
+                          pipNode.layak_dan_menerima_kip++;
+                      }
+                  } else {
+                      pipNode.tidak_layak++;
+                  }
+
+                  // B. KALKULASI AKSESIBILITAS (JARAK & WAKTU)
+                  let modaRaw = String(getVal(item, 'alat_transportasi')).trim().toUpperCase();
+                  if (!modaRaw || modaRaw === 'UNDEFINED' || modaRaw === 'NULL') modaRaw = 'TIDAK DIKETAHUI';
+                  
+                  const jarak = getNum(item, 'jarak_rumah_ke_sekolah');
+                  const waktu = getNum(item, 'menit_tempuh_ke_sekolah');
+
+                  const aksesNode = getAksesNode(kabDb, keyKec, group, modaRaw);
+
+                  if (jarak < 1) { 
+                      if (waktu < 30) { aksesNode.jarak_kurang_1_waktu_kurang_30++; }
+                      else { aksesNode.jarak_kurang_1_waktu_lebih_30++; }
+                  } 
+                  else if (jarak >= 1 && jarak <= 2) { 
+                      if (waktu < 30) { aksesNode.jarak_1_2_waktu_kurang_30++; }
+                      else { aksesNode.jarak_1_2_waktu_lebih_30++; }
+                  } 
+                  else { 
+                      if (waktu < 30) { aksesNode.jarak_lebih_2_waktu_kurang_30++; }
+                      else { aksesNode.jarak_lebih_2_waktu_lebih_30++; }
+                  }
+              });
           }
-
-          const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
-          const group = identifyJenjangGroup(bentuk);
-          if (!group) return; 
-
-          const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
-          const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
           
-          // ===============================================
-          // A. KALKULASI KELAYAKAN PIP
-          // ===============================================
-          const pipNode = getPipNode(kabDb, keyKec, group);
-          pipNode.total_siswa++;
+          processedChunksCount++;
+          setProgressLabel(`Mengagregasi Chunks ${processedChunksCount} / ${totalDocs}...`);
+          setUploadProgress(20 + Math.floor((processedChunksCount / totalDocs) * 50));
+          // Jeda agar UI browser tidak Freeze
+          await new Promise(r => setTimeout(r, 10)); 
+      }
 
-          const layak = checkYa(getVal(item, 'layak_pip') || getVal(item, 'layak_PIP'));
-          const menerimaKip = checkYa(getVal(item, 'penerima_kip') || getVal(item, 'penerima_KIP'));
-
-          if (layak) {
-              pipNode.layak_pip++;
-              if (menerimaKip) {
-                  pipNode.layak_dan_menerima_kip++;
-              }
-          }
-
-          // ===============================================
-          // B. KALKULASI AKSESIBILITAS (JARAK & WAKTU)
-          // ===============================================
-          let modaRaw = String(getVal(item, 'alat_transportasi')).trim().toUpperCase();
-          if (!modaRaw || modaRaw === 'UNDEFINED' || modaRaw === 'NULL') modaRaw = 'TIDAK DIKETAHUI';
-          
-          const jarak = getNum(item, 'jarak_rumah_ke_sekolah');
-          const waktu = getNum(item, 'menit_tempuh_ke_sekolah');
-
-          const aksesNode = getAksesNode(kabDb, keyKec, group, modaRaw);
-
-          if (jarak < 1) { 
-              if (waktu < 30) aksesNode.jarak_kurang_1_waktu_kurang_30++;
-              else aksesNode.jarak_kurang_1_waktu_lebih_30++; 
-          } 
-          else if (jarak >= 1 && jarak <= 2) { 
-              if (waktu < 30) aksesNode.jarak_1_2_waktu_kurang_30++;
-              else aksesNode.jarak_1_2_waktu_lebih_30++; 
-          } 
-          else { 
-              if (waktu < 30) aksesNode.jarak_lebih_2_waktu_kurang_30++;
-              else aksesNode.jarak_lebih_2_waktu_lebih_30++; 
-          }
-      });
-
-      setUploadProgress(70);
-      setProgressLabel(`Memecah Data Menjadi Chunks...`);
+      setUploadProgress(75);
+      setProgressLabel(`Menyiapkan Data Simpanan...`);
 
       // Mengubah Map Akses menjadi Array Flat
       const finalAksesToSave = [];
@@ -458,7 +493,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
           selisih: item.layak_pip - item.layak_dan_menerima_kip
       }));
 
-      setUploadProgress(80);
+      setUploadProgress(85);
 
       // --- CHUNKING SYSTEM (Pemecah Dokumen Firestore max 1MB) ---
       const CHUNK_SIZE = 2000;
@@ -472,7 +507,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
           pipChunks.push(finalPipToSave.slice(i, i + CHUNK_SIZE));
       }
 
-      // WAKTU UPDATE UNTUK SEMUA DOKUMEN AGAR FRONTEND BISA MEMBACA
+      // WAKTU UPDATE SEKARANG DIINJEKSI KE SELURUH CHUNKS SECARA KONSISTEN
       const currentTime = new Date().toISOString(); 
 
       // Simpan Chunks Aksesibilitas
@@ -482,7 +517,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
               tipe: 'akses',
               chunk_index: i,
               data_agregasi: aksesChunks[i],
-              last_updated: currentTime // <--- INJEKSI TANGGAL DI SINI
+              last_updated: currentTime
           });
       }
 
@@ -493,7 +528,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
               tipe: 'pip',
               chunk_index: i,
               data_agregasi: pipChunks[i],
-              last_updated: currentTime // <--- INJEKSI TANGGAL DI SINI
+              last_updated: currentTime
           });
       }
 
@@ -510,7 +545,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
       });
 
       setUploadProgress(100);
-      alert(`KALKULASI SUKSES!\n\nAnalisis Aksesibilitas dan Kelayakan PIP tahun ${year} berhasil diproses ke dalam ${aksesChunks.length + pipChunks.length} chunks dokumen.`);
+      alert(`KALKULASI SUKSES!\n\nAnalisis Aksesibilitas dan Kelayakan PIP tahun ${year} berhasil diproses.`);
       checkCalcStatus();
     } catch (error) {
       console.error(error);
@@ -540,10 +575,18 @@ export default function AdminMesinKalkulasi({ onBack }) {
       }
 
       let allSekolahData = [];
-      snapSekolah.forEach(doc => { if (doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data); });
+      // ANTI-MEMORY LEAK: Hindari .concat()
+      snapSekolah.forEach(doc => { 
+          const arr = doc.data().data;
+          if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
+      });
       
       let allSarprasData = [];
-      snapSarpras.forEach(doc => { if (doc.data().data) allSarprasData = allSarprasData.concat(doc.data().data); });
+      // ANTI-MEMORY LEAK: Hindari .concat()
+      snapSarpras.forEach(doc => { 
+          const arr = doc.data().data;
+          if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSarprasData.push(arr[j]); }
+      });
 
       setUploadProgress(40);
 
@@ -601,12 +644,15 @@ export default function AdminMesinKalkulasi({ onBack }) {
             }
         });
 
+        // Safeguard (Jika nol, coba narik dari field default Rombel)
         if (rombelTotal === 0) {
             rombelTotal = getNum(item, 'rombel') || getNum(item, 'rombongan_belajar');
         }
 
+        // Penentuan Sekolah Lebih Shift
         const isDoubleShift = rombelTotal > kelasTotal;
 
+        // Agregasi Tab 1 (Per Jenjang)
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
         if (rowTab1) {
            rowTab1.sekolah_count++;
@@ -615,6 +661,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
            if (isDoubleShift) rowTab1.double_shift_count++;
         }
 
+        // Agregasi Tab 2 (Per Wilayah)
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
         const rowTab2 = initWilayah(kabDb, keyKec);
@@ -629,6 +676,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       const tab2DataRaw = Array.from(mapWilayah.values());
 
+      // 4. Simpan ke Collection 'rombel_agregasi'
       const docRef = doc(db, 'rombel_agregasi', `sekolah_lebih_shift_${year}`);
       await setDoc(docRef, {
         tahun_data: year,
@@ -666,8 +714,10 @@ export default function AdminMesinKalkulasi({ onBack }) {
       }
 
       let allSekolahData = [];
+      // ANTI-MEMORY LEAK: Hindari .concat()
       snapshot.forEach(doc => {
-        if(doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data);
+        const arr = doc.data().data;
+        if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
       });
 
       setUploadProgress(50);
@@ -782,13 +832,19 @@ export default function AdminMesinKalkulasi({ onBack }) {
       }
 
       let allSekolahData = [];
-      snapSek.forEach(doc => { if(doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data); });
+      // ANTI-MEMORY LEAK: Hindari .concat()
+      snapSek.forEach(doc => { 
+          const arr = doc.data().data;
+          if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
+      });
       
       let allPtkData = [];
+      // ANTI-MEMORY LEAK: Hindari .concat()
       snapPtk.forEach(doc => { 
         const d = doc.data();
         if(d.data && (String(d.tahun_data) === String(year) || !d.tahun_data)) {
-           allPtkData = allPtkData.concat(d.data); 
+           const arr = d.data;
+           if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allPtkData.push(arr[j]); }
         }
       });
 
@@ -904,11 +960,19 @@ export default function AdminMesinKalkulasi({ onBack }) {
       }
 
       let allSekolahData = [];
-      snapSek.forEach(doc => { if(doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data); });
+      // ANTI-MEMORY LEAK: Hindari .concat()
+      snapSek.forEach(doc => { 
+          const arr = doc.data().data;
+          if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
+      });
       let allPtkData = [];
+      // ANTI-MEMORY LEAK: Hindari .concat()
       snapPtk.forEach(doc => { 
         const d = doc.data();
-        if(d.data && (String(d.tahun_data) === String(year) || !d.tahun_data)) { allPtkData = allPtkData.concat(d.data); }
+        if(d.data && (String(d.tahun_data) === String(year) || !d.tahun_data)) { 
+            const arr = d.data;
+            if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allPtkData.push(arr[j]); }
+        }
       });
 
       setUploadProgress(40);
@@ -1029,7 +1093,11 @@ export default function AdminMesinKalkulasi({ onBack }) {
       }
 
       let allSekolahData = [];
-      snapSek.forEach(doc => { if(doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data); });
+      // ANTI-MEMORY LEAK: Hindari .concat()
+      snapSek.forEach(doc => { 
+          const arr = doc.data().data;
+          if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
+      });
 
       setUploadProgress(50);
 
@@ -1122,7 +1190,11 @@ export default function AdminMesinKalkulasi({ onBack }) {
       }
 
       let allSekolahData = [];
-      snapSek.forEach(doc => { if(doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data); });
+      // ANTI-MEMORY LEAK: Hindari .concat()
+      snapSek.forEach(doc => { 
+          const arr = doc.data().data;
+          if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
+      });
 
       setUploadProgress(40);
 
@@ -1250,10 +1322,18 @@ export default function AdminMesinKalkulasi({ onBack }) {
       }
 
       let allSekolahData = [];
-      snapSek.forEach(doc => { if(doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data); });
+      // ANTI-MEMORY LEAK: Hindari .concat()
+      snapSek.forEach(doc => { 
+          const arr = doc.data().data;
+          if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
+      });
       
       let allSarprasData = [];
-      snapSarpras.forEach(doc => { if(doc.data().data) allSarprasData = allSarprasData.concat(doc.data().data); });
+      // ANTI-MEMORY LEAK: Hindari .concat()
+      snapSarpras.forEach(doc => { 
+          const arr = doc.data().data;
+          if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSarprasData.push(arr[j]); }
+      });
 
       setUploadProgress(40);
 
@@ -1398,11 +1478,19 @@ export default function AdminMesinKalkulasi({ onBack }) {
       }
 
       let allSekolahData = [];
-      snapSek.forEach(doc => { if(doc.data().data) allSekolahData = allSekolahData.concat(doc.data().data); });
+      // ANTI-MEMORY LEAK: Hindari .concat()
+      snapSek.forEach(doc => { 
+          const arr = doc.data().data;
+          if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
+      });
       let allPtkData = [];
+      // ANTI-MEMORY LEAK: Hindari .concat()
       snapPtk.forEach(doc => { 
         const d = doc.data();
-        if(d.data && (String(d.tahun_data) === String(year) || !d.tahun_data)) { allPtkData = allPtkData.concat(d.data); }
+        if(d.data && (String(d.tahun_data) === String(year) || !d.tahun_data)) { 
+            const arr = d.data;
+            if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allPtkData.push(arr[j]); }
+        }
       });
 
       setUploadProgress(40);

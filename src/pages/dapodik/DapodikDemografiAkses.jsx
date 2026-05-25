@@ -132,7 +132,7 @@ export default function DapodikDemografiAkses({ selectedYear }) {
            j_kurang_1_w_kurang_30: 0, j_kurang_1_w_lebih_30: 0,
            j_1_2_w_kurang_30: 0, j_1_2_w_lebih_30: 0,
            j_lebih_2_w_kurang_30: 0, j_lebih_2_w_lebih_30: 0,
-           total_siswa: 0 // Inisialisasi total siswa per moda
+           total_siswa: 0
         });
       }
 
@@ -152,7 +152,6 @@ export default function DapodikDemografiAkses({ selectedYear }) {
       row.j_lebih_2_w_kurang_30 += v_jl2_wk30;
       row.j_lebih_2_w_lebih_30 += v_jl2_wl30;
 
-      // Akumulasi total siswa untuk moda ini
       row.total_siswa += (v_jk1_wk30 + v_jk1_wl30 + v_j12_wk30 + v_j12_wl30 + v_jl2_wk30 + v_jl2_wl30);
     });
 
@@ -201,6 +200,7 @@ export default function DapodikDemografiAkses({ selectedYear }) {
            total_siswa: 0,
            layak_pip: 0,
            layak_dan_menerima_kip: 0,
+           tidak_layak: 0
         });
       }
 
@@ -208,6 +208,7 @@ export default function DapodikDemografiAkses({ selectedYear }) {
       row.total_siswa += (item.total_siswa || item.pd_total || 0);
       row.layak_pip += (item.layak_pip || 0);
       row.layak_dan_menerima_kip += (item.layak_dan_menerima_kip || 0);
+      row.tidak_layak += (item.tidak_layak || 0); // Penambahan Data Tidak Layak PIP
     });
 
     return Array.from(mapKecamatan.values()).map(r => ({
@@ -221,10 +222,11 @@ export default function DapodikDemografiAkses({ selectedYear }) {
       acc.total_siswa += curr.total_siswa;
       acc.layak_pip += curr.layak_pip;
       acc.layak_dan_menerima_kip += curr.layak_dan_menerima_kip;
+      acc.tidak_layak += curr.tidak_layak;
       acc.selisih += curr.selisih;
       return acc;
     }, {
-      total_siswa: 0, layak_pip: 0, layak_dan_menerima_kip: 0, selisih: 0
+      total_siswa: 0, layak_pip: 0, layak_dan_menerima_kip: 0, tidak_layak: 0, selisih: 0
     });
   }, [aggregatedPipData]);
 
@@ -242,13 +244,13 @@ export default function DapodikDemografiAkses({ selectedYear }) {
       { key: 'jk1_wk30', width: 12 }, { key: 'jk1_wl30', width: 12 },
       { key: 'j12_wk30', width: 12 }, { key: 'j12_wl30', width: 12 },
       { key: 'jl2_wk30', width: 12 }, { key: 'jl2_wl30', width: 12 },
-      { key: 'total_siswa', width: 18 } // Tambahan Kolom Total Siswa
+      { key: 'total_siswa', width: 18 } 
     ];
 
     worksheet.mergeCells('A1:A3'); worksheet.mergeCells('B1:B3');
     worksheet.mergeCells('C1:H1'); worksheet.mergeCells('C2:D2');
     worksheet.mergeCells('E2:F2'); worksheet.mergeCells('G2:H2');
-    worksheet.mergeCells('I1:I3'); // Merge Total Siswa
+    worksheet.mergeCells('I1:I3'); 
 
     worksheet.getCell('A1').value = 'No';
     worksheet.getCell('B1').value = 'Moda Transportasi';
@@ -307,18 +309,18 @@ export default function DapodikDemografiAkses({ selectedYear }) {
     const safeJenjang = activeJenjang.replace(/\//g,'-').replace(/\s+/g, '_');
     const worksheet = workbook.addWorksheet(`PIP ${safeJenjang}`);
 
-    // Susunan kolom dipindahkan agar Total Siswa ada di akhir
     worksheet.columns = [
       { header: 'No', key: 'no', width: 5 },
       { header: 'Kecamatan', key: 'kecamatan', width: 30 },
+      { header: 'Siswa Tidak Layak PIP & Tidak Menerima KIP', key: 'tidak_layak', width: 40 },
       { header: 'LAYAK PIP (Rentan)', key: 'layak_pip', width: 25 },
       { header: 'Layak dan menerima KIP', key: 'menerima_kip', width: 30 },
-      { header: 'SELISIH', key: 'selisih', width: 15 },
+      { header: 'Selisih Layak PIP & Layak dan Menerima KIP', key: 'selisih', width: 45 },
       { header: 'Total Siswa', key: 'total_siswa', width: 20 },
     ];
 
     worksheet.getRow(1).eachCell(cell => { 
-        cell.alignment = { horizontal: 'center', vertical: 'middle' }; 
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; 
         cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; 
     });
     worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } }; 
@@ -327,6 +329,7 @@ export default function DapodikDemografiAkses({ selectedYear }) {
        worksheet.addRow({
           no: idx + 1,
           kecamatan: row.kecamatan,
+          tidak_layak: row.tidak_layak,
           layak_pip: row.layak_pip,
           menerima_kip: row.layak_dan_menerima_kip,
           selisih: row.selisih,
@@ -337,6 +340,7 @@ export default function DapodikDemografiAkses({ selectedYear }) {
     const totalRow = worksheet.addRow({
        no: '', 
        kecamatan: 'TOTAL KESELURUHAN',
+       tidak_layak: grandTotalsPip.tidak_layak,
        layak_pip: grandTotalsPip.layak_pip,
        menerima_kip: grandTotalsPip.layak_dan_menerima_kip,
        selisih: grandTotalsPip.selisih,
@@ -575,16 +579,17 @@ export default function DapodikDemografiAkses({ selectedYear }) {
                 <tr className="text-[10px] uppercase tracking-widest text-gray-700 font-black bg-gray-50">
                   <th className="p-4 w-12 border-b border-r border-gray-200 align-middle">No</th>
                   <th className="p-4 border-b border-r border-gray-200 align-middle text-left min-w-[200px]">Kecamatan</th>
+                  <th className="p-4 border-b border-r border-gray-200 align-middle text-gray-600">Tidak Layak PIP & Tidak Menerima KIP</th>
                   <th className="p-4 border-b border-r border-gray-200 align-middle text-blue-600">LAYAK PIP (Rentan)</th>
                   <th className="p-4 border-b border-r border-gray-200 align-middle text-emerald-600">Layak dan menerima KIP</th>
-                  <th className="p-4 border-b border-r border-gray-200 align-middle text-rose-600">Selisih</th>
+                  <th className="p-4 border-b border-r border-gray-200 align-middle text-rose-600">Selisih Layak PIP & Layak dan Menerima KIP</th>
                   <th className="p-4 border-b border-gray-200 align-middle bg-blue-50/50 text-blue-900">Total Siswa</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-sm">
                 {loading ? (
                    <tr>
-                     <td colSpan="6" className="py-24 text-center">
+                     <td colSpan="7" className="py-24 text-center">
                        <div className="flex flex-col items-center justify-center text-blue-600">
                          <Loader2 size={48} className="mb-4 animate-spin" />
                          <p className="font-bold italic text-base">Menarik data agregasi dari server...</p>
@@ -593,7 +598,7 @@ export default function DapodikDemografiAkses({ selectedYear }) {
                    </tr>
                 ) : aggregatedPipData.length === 0 ? (
                    <tr>
-                     <td colSpan="6" className="py-24 text-center">
+                     <td colSpan="7" className="py-24 text-center">
                        <div className="flex flex-col items-center justify-center text-gray-400">
                          <Search size={48} className="mb-4 opacity-50" />
                          <p className="font-bold italic text-base">Belum ada data untuk jenjang ini.</p>
@@ -607,6 +612,7 @@ export default function DapodikDemografiAkses({ selectedYear }) {
                       <tr key={idx} className="hover:bg-blue-50/50 transition-colors group text-gray-700">
                         <td className="p-3 text-center font-bold border-r border-gray-100">{idx + 1}</td>
                         <td className="p-3 font-black uppercase text-left border-r border-gray-100">{row.kecamatan}</td>
+                        <td className="p-3 text-center border-r border-gray-100 font-bold text-gray-500">{row.tidak_layak.toLocaleString()}</td>
                         <td className="p-3 text-center border-r border-gray-100 font-bold text-blue-700">{row.layak_pip.toLocaleString()}</td>
                         <td className="p-3 text-center border-r border-gray-100 font-bold text-emerald-700">{row.layak_dan_menerima_kip.toLocaleString()}</td>
                         <td className="p-3 text-center font-black border-r border-gray-100 text-rose-600 bg-rose-50/30">{row.selisih.toLocaleString()}</td>
@@ -621,6 +627,7 @@ export default function DapodikDemografiAkses({ selectedYear }) {
                 <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
                   <tr className="bg-gray-100 text-center font-black uppercase text-xs border-t-2 border-gray-300">
                     <td colSpan="2" className="p-4 text-left border-r border-gray-300 text-gray-900">TOTAL KESELURUHAN</td>
+                    <td className="p-4 text-gray-600 border-r border-gray-300">{grandTotalsPip.tidak_layak.toLocaleString()}</td>
                     <td className="p-4 text-blue-800 border-r border-gray-300">{grandTotalsPip.layak_pip.toLocaleString()}</td>
                     <td className="p-4 text-emerald-800 border-r border-gray-300">{grandTotalsPip.layak_dan_menerima_kip.toLocaleString()}</td>
                     <td className="p-4 text-rose-800 border-r border-gray-300 bg-rose-100/50">{grandTotalsPip.selisih.toLocaleString()}</td>

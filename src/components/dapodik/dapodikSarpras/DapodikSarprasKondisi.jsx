@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Loader2, AlertCircle, HardHat, FileSpreadsheet, Building2, MapPin } from 'lucide-react';
+import { Loader2, HardHat, FileSpreadsheet, Building2, MapPin } from 'lucide-react';
 import { db } from '../../../firebase/config';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import ExcelJS from 'exceljs';
@@ -27,7 +27,7 @@ export default function DapodikSarprasKondisi({ selectedYear = '2026' }) {
   const [filterWilayah, setFilterWilayah] = useState('SEMUA');
   const [filterStatus, setFilterStatus] = useState('SEMUA');
 
-  // Helper pencarian value key (SANGAT ROBUST: Mengatasi string, spasi, & case-insensitive)
+  // Helper pencarian value key untuk data Sarpras mentah
   const getVal = (obj, keyName) => {
     if (!obj) return 0;
     const searchKey = String(keyName).toLowerCase().trim();
@@ -38,17 +38,18 @@ export default function DapodikSarprasKondisi({ selectedYear = '2026' }) {
     const val = obj[key];
     if (typeof val === 'number') return val;
     if (typeof val === 'string') {
-      // Hilangkan semua karakter selain angka, lalu ubah ke Integer
       const parsed = parseInt(val.replace(/[^0-9]/g, ''), 10);
       return isNaN(parsed) ? 0 : parsed;
     }
     return 0;
   };
 
-  // Identifikasi Jenjang Sempurna (Termasuk SLB & Non Formal agar data tidak loss)
+  // PERBAIKAN: Identifikasi Jenjang Sempurna Khusus Rombel vs Kelas (Hanya TK yang dihitung)
   const getJenjang = (item) => {
     const j = String(item.bentuk_pendidikan || item.jenjang || '').toUpperCase().trim();
-    if (['TK', 'KB', 'TPA', 'SPS', 'PAUD'].includes(j)) return 'PAUD';
+    
+    // Strict match
+    if (j === 'TK') return 'TK';
     if (['SD', 'SPK SD'].includes(j)) return 'SD';
     if (['SMP', 'SPK SMP'].includes(j)) return 'SMP';
     if (['SMA', 'SPK SMA'].includes(j)) return 'SMA';
@@ -56,22 +57,23 @@ export default function DapodikSarprasKondisi({ selectedYear = '2026' }) {
     if (['SLB', 'SDLB', 'SMPLB', 'SMALB'].includes(j)) return 'SLB';
     if (['PKBM', 'SKB'].includes(j)) return 'NON FORMAL';
     
-    // Fallback jika format stringnya menyatu (misal "SEKOLAH DASAR (SD)")
-    if (j.includes('TK') || j.includes('KB') || j.includes('PAUD')) return 'PAUD';
+    // Fallback includes
+    if (j.includes('TK')) return 'TK';
     if (j.includes('SD') && !j.includes('SLB')) return 'SD';
     if (j.includes('SMP') && !j.includes('SLB')) return 'SMP';
     if (j.includes('SMA') && !j.includes('SLB')) return 'SMA';
     if (j.includes('SMK')) return 'SMK';
     
-    return 'LAINNYA'; // Agar sisa 10.295 sekolah yang formatnya aneh tetap terhitung
+    // KB, TPA, SPS, PAUD non-TK akan masuk ke LAINNYA
+    return 'LAINNYA'; 
   };
 
-  // 1. Ambil Data Mentah dari Firebase (Hanya Sekali di Awal)
+  // 1. Ambil Data dari Firebase (Sekolah Agregasi & Sarpras Raw)
   useEffect(() => {
     const fetchRawData = async () => {
       setLoading(true);
       try {
-        const sekolahRef = collection(db, 'dapodik_sekolah_chunks');
+        const sekolahRef = query(collection(db, 'sekolah_agregasi'), where("tahun_data", "==", selectedYear));
         const sarprasRef = query(collection(db, 'data_sarpras_chunks'), where("tahun_data", "==", selectedYear));
         
         const [sekolahSnap, sarprasSnap] = await Promise.all([
@@ -81,8 +83,10 @@ export default function DapodikSarprasKondisi({ selectedYear = '2026' }) {
 
         const sekolahList = [];
         sekolahSnap.forEach(doc => {
-          const chunk = doc.data().data || [];
-          sekolahList.push(...chunk);
+          if (doc.id.includes('_chunk_')) {
+             const chunk = doc.data().data_agregasi || [];
+             sekolahList.push(...chunk);
+          }
         });
 
         const sarprasList = [];
@@ -103,81 +107,67 @@ export default function DapodikSarprasKondisi({ selectedYear = '2026' }) {
     fetchRawData();
   }, [selectedYear]);
 
-  // 2. Engine Komputasi & Filter Dinamis via useMemo (TERPISAH TOTAL)
+  // 2. Engine Komputasi & Filter Dinamis via useMemo 
   const dataAggregated = useMemo(() => {
-    // Siapkan wadah agregasi utama
     const agg = {
-      'PAUD': { jenjang: 'PAUD (TK)', sekolah_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },
-      'SD': { jenjang: 'SD', sekolah_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },
-      'SMP': { jenjang: 'SMP', sekolah_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },
-      'SMA': { jenjang: 'SMA', sekolah_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },
-      'SMK': { jenjang: 'SMK', sekolah_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },
-      'SLB': { jenjang: 'SLB', sekolah_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },
-      'NON FORMAL': { jenjang: 'Non Formal (PKBM, SKB)', sekolah_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },
-      'LAINNYA': { jenjang: 'Jenjang Lainnya', sekolah_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 }
+      'TK': { jenjang: 'TK', kelas_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },
+      'SD': { jenjang: 'SD', kelas_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },
+      'SMP': { jenjang: 'SMP', kelas_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },
+      'SMA': { jenjang: 'SMA', kelas_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },
+      'SMK': { jenjang: 'SMK', kelas_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },
+      'SLB': { jenjang: 'SLB', kelas_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },
+      'NON FORMAL': { jenjang: 'Non Formal (PKBM, SKB)', kelas_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 },
+      'LAINNYA': { jenjang: 'Jenjang Lainnya', kelas_count: 0, rombel: 0, baik: 0, rr: 0, rs: 0, rb: 0 }
     };
 
     // =========================================================================
-    // LOOPING PERTAMA: Murni Dapodik Sekolah (Jumlah Sekolah & Jumlah Rombel)
+    // LOOPING PERTAMA: Data Sekolah Agregasi (Jumlah Rombel Super Akurat)
     // =========================================================================
     rawSekolah.forEach(sekolah => {
       const jenjang = getJenjang(sekolah);
       if (!agg[jenjang]) return;
 
-      // Filter Wilayah
       const kabSekolah = cleanKabupatenName(sekolah.kabupaten || sekolah['Kabupaten/Kota']);
       if (filterWilayah !== 'SEMUA' && kabSekolah !== filterWilayah) return;
 
-      // Filter Status (Negeri/Swasta)
       const statusSekolah = String(sekolah.status_sekolah || '').toUpperCase().trim();
       if (filterStatus !== 'SEMUA' && statusSekolah !== filterStatus) return;
 
-      let totalRombel = 0;
-
-      // --- KODE BARU: Perhitungan Rombel Menggunakan Regex Ketat & Dinamis ---
-      Object.keys(sekolah).forEach(k => {
-          const keyStr = k.trim().toLowerCase();
-          // Regex ini otomatis mencakup TKA, TKB, Kelas 1-13, dan Paket A/B/C 
-          // tanpa perlu di-hardcode per jenjang.
-          if (/^rombel_(tka|tkb|t?\d{1,2}|paket_[abc])$/.test(keyStr)) {
-              totalRombel += parseInt(sekolah[k]) || 0;
-          }
-      });
-
-      // Safeguard: Jika totalnya masih 0, ambil dari field 'rombel' umum (mencegah rombel kosong)
-      if (totalRombel === 0) {
-        totalRombel = getVal(sekolah, 'rombel') || getVal(sekolah, 'rombongan_belajar');
-      }
-
-      agg[jenjang].sekolah_count += 1;
+      // Panggil properti rombel_total langsung karena ini dari sekolah_agregasi
+      const totalRombel = parseInt(sekolah.rombel_total) || 0;
       agg[jenjang].rombel += totalRombel;
     });
 
     // =========================================================================
-    // LOOPING KEDUA: Murni Data Sarpras (Kondisi Ruang Kelas)
+    // LOOPING KEDUA: Data Sarpras Chunks (Kondisi Ruang Kelas & Total Kelas)
     // =========================================================================
     rawSarpras.forEach(sarpras => {
       const jenjang = getJenjang(sarpras);
       if (!agg[jenjang]) return;
 
-      // Filter Wilayah
       const kabSarpras = cleanKabupatenName(sarpras.kabupaten || sarpras['Kabupaten/Kota']);
       if (filterWilayah !== 'SEMUA' && kabSarpras !== filterWilayah) return;
 
-      // Filter Status
       const statusSarpras = String(sarpras.status_sekolah || '').toUpperCase().trim();
       if (filterStatus !== 'SEMUA' && statusSarpras !== filterStatus) return;
 
-      // Tambahkan kondisi ruang kelas ke jenjang yang sesuai
-      agg[jenjang].baik += getVal(sarpras, 'ruang_kelas_baik');
-      agg[jenjang].rr += getVal(sarpras, 'ruang_kelas_rusak_ringan');
-      agg[jenjang].rs += getVal(sarpras, 'ruang_kelas_rusak_sedang');
-      agg[jenjang].rb += getVal(sarpras, 'ruang_kelas_rusak_berat');
+      const baik = getVal(sarpras, 'ruang_kelas_baik');
+      const rr = getVal(sarpras, 'ruang_kelas_rusak_ringan');
+      const rs = getVal(sarpras, 'ruang_kelas_rusak_sedang');
+      const rb = getVal(sarpras, 'ruang_kelas_rusak_berat');
+
+      agg[jenjang].baik += baik;
+      agg[jenjang].rr += rr;
+      agg[jenjang].rs += rs;
+      agg[jenjang].rb += rb;
+      
+      // Total Kelas (Untuk Header Kolom Jumlah Kelas)
+      agg[jenjang].kelas_count += (baik + rr + rs + rb);
     });
 
-    // Filter out 'LAINNYA' jika sekolah count-nya 0 agar tabel tidak kotor
+    // Filter out 'LAINNYA' jika datanya 0 agar tabel tidak kotor
     let finalData = Object.values(agg);
-    if (agg['LAINNYA'].sekolah_count === 0) {
+    if (agg['LAINNYA'].kelas_count === 0 && agg['LAINNYA'].rombel === 0) {
       finalData = finalData.filter(d => d.jenjang !== 'Jenjang Lainnya');
     }
 
@@ -191,7 +181,7 @@ export default function DapodikSarprasKondisi({ selectedYear = '2026' }) {
 
     worksheet.columns = [
       { header: 'Jenjang', key: 'jenjang', width: 25 },
-      { header: 'Jumlah Sekolah', key: 'sekolah_count', width: 15 },
+      { header: 'Total Ruang Kelas', key: 'kelas_count', width: 20 },
       { header: 'Jumlah Rombel', key: 'rombel', width: 15 },
       { header: 'Kondisi Ruang Kelas', key: 'kondisi', width: 20 },
       { header: 'Jumlah Ruang Kelas', key: 'jumlah_kelas', width: 20 },
@@ -202,23 +192,23 @@ export default function DapodikSarprasKondisi({ selectedYear = '2026' }) {
     let currentRow = 2;
 
     dataAggregated.forEach((row) => {
-      // Lewati baris jika tidak ada sekolah sama sekali (menjaga Excel rapi)
-      if (row.sekolah_count === 0 && row.baik === 0 && row.rs === 0) return;
+      // Lewati baris jika tidak ada kelas dan rombel sama sekali
+      if (row.kelas_count === 0 && row.rombel === 0) return;
 
       const layak = row.baik + row.rr;
       const tidakLayak = row.rs + row.rb;
       const selisih = layak - row.rombel;
 
       worksheet.addRows([
-        { jenjang: row.jenjang, sekolah_count: row.sekolah_count, rombel: row.rombel, kondisi: 'Baik', jumlah_kelas: row.baik, sub_jumlah: layak, selisih: selisih },
-        { jenjang: row.jenjang, sekolah_count: row.sekolah_count, rombel: row.rombel, kondisi: 'Rusak Ringan', jumlah_kelas: row.rr, sub_jumlah: layak, selisih: selisih },
-        { jenjang: row.jenjang, sekolah_count: row.sekolah_count, rombel: row.rombel, kondisi: 'Rusak Sedang', jumlah_kelas: row.rs, sub_jumlah: tidakLayak, selisih: selisih },
-        { jenjang: row.jenjang, sekolah_count: row.sekolah_count, rombel: row.rombel, kondisi: 'Rusak Berat', jumlah_kelas: row.rb, sub_jumlah: tidakLayak, selisih: selisih }
+        { jenjang: row.jenjang, kelas_count: row.kelas_count, rombel: row.rombel, kondisi: 'Baik', jumlah_kelas: row.baik, sub_jumlah: layak, selisih: selisih },
+        { jenjang: row.jenjang, kelas_count: row.kelas_count, rombel: row.rombel, kondisi: 'Rusak Ringan', jumlah_kelas: row.rr, sub_jumlah: layak, selisih: selisih },
+        { jenjang: row.jenjang, kelas_count: row.kelas_count, rombel: row.rombel, kondisi: 'Rusak Sedang', jumlah_kelas: row.rs, sub_jumlah: tidakLayak, selisih: selisih },
+        { jenjang: row.jenjang, kelas_count: row.kelas_count, rombel: row.rombel, kondisi: 'Rusak Berat', jumlah_kelas: row.rb, sub_jumlah: tidakLayak, selisih: selisih }
       ]);
 
       // Gabungkan (Merge) Cell vertikal agar persis tampilan tabel komponen
       worksheet.mergeCells(`A${currentRow}:A${currentRow + 3}`); // Jenjang
-      worksheet.mergeCells(`B${currentRow}:B${currentRow + 3}`); // Jumlah Sekolah
+      worksheet.mergeCells(`B${currentRow}:B${currentRow + 3}`); // Jumlah Kelas
       worksheet.mergeCells(`C${currentRow}:C${currentRow + 3}`); // Jumlah Rombel
       worksheet.mergeCells(`F${currentRow}:F${currentRow + 1}`); // Sub Jumlah (Layak)
       worksheet.mergeCells(`F${currentRow + 2}:F${currentRow + 3}`); // Sub Jumlah (Tidak Layak)
@@ -253,8 +243,8 @@ export default function DapodikSarprasKondisi({ selectedYear = '2026' }) {
     );
   }
 
-  // Hitung Total Validasi (Agar kamu bisa melihat angkanya sesuai dengan database)
-  const totalSekolahDashboard = dataAggregated.reduce((acc, curr) => acc + curr.sekolah_count, 0);
+  // Hitung Total Validasi
+  const totalRombelDashboard = dataAggregated.reduce((acc, curr) => acc + curr.rombel, 0);
 
   return (
     <div className="bg-white rounded-3xl shadow-sm border border-gray-100 flex-1 flex flex-col overflow-hidden relative animate-in fade-in duration-300">
@@ -267,8 +257,8 @@ export default function DapodikSarprasKondisi({ selectedYear = '2026' }) {
           </div>
           <div>
             <h3 className="font-black text-gray-800 uppercase tracking-tight text-sm">Kalkulasi Ketersediaan Ruang Kelas</h3>
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-              Total Validasi: {totalSekolahDashboard.toLocaleString()} Sekolah
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">
+              Total Rombel Valid: {totalRombelDashboard.toLocaleString()}
             </p>
           </div>
         </div>
@@ -323,7 +313,7 @@ export default function DapodikSarprasKondisi({ selectedYear = '2026' }) {
           <thead className="bg-gray-100 sticky top-0 z-10 shadow-sm">
             <tr className="text-[10px] md:text-xs font-black uppercase text-gray-600">
               <th className="border border-gray-200 p-3 w-[15%]">Jenjang</th>
-              <th className="border border-gray-200 p-3 w-[10%]">Jumlah Sekolah</th>
+              <th className="border border-gray-200 p-3 w-[10%]">Jumlah Kelas</th>
               <th className="border border-gray-200 p-3 w-[15%]">Jumlah Rombel</th>
               <th className="border border-gray-200 p-3 w-[15%]">Kondisi Ruang Kelas</th>
               <th className="border border-gray-200 p-3 w-[15%]">Jumlah Ruang Kelas</th>
@@ -334,7 +324,7 @@ export default function DapodikSarprasKondisi({ selectedYear = '2026' }) {
           <tbody className="text-xs md:text-sm text-gray-700">
             {dataAggregated.map((row, idx) => {
               // Jika data di jenjang tertentu sama sekali tidak ada, lewati render barisnya
-              if (row.sekolah_count === 0 && row.baik === 0 && row.rs === 0) return null;
+              if (row.kelas_count === 0 && row.rombel === 0) return null;
 
               const layakPakai = row.baik + row.rr;
               const tidakLayak = row.rs + row.rb;
@@ -347,7 +337,7 @@ export default function DapodikSarprasKondisi({ selectedYear = '2026' }) {
                   {/* BARIS 1: BAIK */}
                   <tr className={`${bgRow} hover:bg-cyan-50/30 transition-colors`}>
                     <td className="border border-gray-200 p-3 font-black uppercase text-cyan-800" rowSpan={4}>{row.jenjang}</td>
-                    <td className="border border-gray-200 p-3 font-bold text-lg text-gray-600" rowSpan={4}>{row.sekolah_count.toLocaleString()}</td>
+                    <td className="border border-gray-200 p-3 font-bold text-lg text-indigo-600 bg-indigo-50/30" rowSpan={4}>{row.kelas_count.toLocaleString()}</td>
                     <td className="border border-gray-200 p-3 font-bold text-lg text-gray-800" rowSpan={4}>{row.rombel.toLocaleString()}</td>
                     
                     <td className="border border-gray-200 p-2 text-left pl-4 font-semibold text-emerald-600">Baik</td>
@@ -365,11 +355,11 @@ export default function DapodikSarprasKondisi({ selectedYear = '2026' }) {
                         {selisih.toLocaleString()}
                         {selisih < 0 ? (
                           <span className="text-[10px] bg-red-100 text-red-600 px-2.5 py-1 rounded-full uppercase tracking-wider font-black shadow-sm">
-                            Kekurangan Kelas
+                            Kekurangan Ruang
                           </span>
                         ) : (
                           <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-full uppercase tracking-wider font-black shadow-sm">
-                            Kelas Memadai
+                            Ruang Kelas Memadai
                           </span>
                         )}
                       </div>

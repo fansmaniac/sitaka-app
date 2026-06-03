@@ -1,48 +1,70 @@
 import React, { useState, useMemo, useEffect } from 'react';
-// TAMBAHAN: Import useSearchParams dari react-router-dom
 import { useSearchParams } from 'react-router-dom';
 import { 
   Download, Users, MapPin, Eye, FileSpreadsheet, 
   Search, X, ChevronLeft, ChevronRight, Building2, 
-  BookOpen, Library, GraduationCap, Tent, Shapes
+  BookOpen, Library, GraduationCap, Tent, Shapes, Loader2
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
-
-// --- PERBAIKAN IMPORT PATH FIREBASE ---
 import { db } from '../../firebase/config';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 
-// --- PERBAIKAN IMPORT KOMPONEN MODAL RINCIAN ---
+// IMPORT KOMPONEN MODAL RINCIAN
 import RincianPDStatusSekolah from '../../components/dapodik/dapodikPesertaDidik/RincianPDStatusSekolah';
 import RincianPDJenjangPAUD from '../../components/dapodik/dapodikPesertaDidik/RincianPDJenjangPAUD';
 import RincianPDJenjangSD from '../../components/dapodik/dapodikPesertaDidik/RincianPDJenjangSD';
 import RincianPDJenjangSMP from '../../components/dapodik/dapodikPesertaDidik/RincianPDJenjangSMP';
 import RincianPDJenjangSMA from '../../components/dapodik/dapodikPesertaDidik/RincianPDJenjangSMA';
-import RincianPDJenjangSMK from '../../components/dapodik/dapodikPesertaDidik/RincianPDJenjangSMK'; // <-- IMPORT SMK DITAMBAHKAN
+import RincianPDJenjangSMK from '../../components/dapodik/dapodikPesertaDidik/RincianPDJenjangSMK';
 import RincianPDJenjangNonFormal from '../../components/dapodik/dapodikPesertaDidik/RincianPDJenjangNonFormal';
+
+// =====================================================================
+// UTILITY: CACHING LOKAL (BRANKAS BROWSER)
+// =====================================================================
+const DB_NAME = "SitakaCacheDB_SiswaModul_Agregasi";
+const STORE_NAME = "siswaDataAgg";
+
+const initDB = () => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = (e) => e.target.result.createObjectStore(STORE_NAME);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+};
+
+const saveToCache = async (key, data, firestoreLastUpdated) => {
+  try {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      tx.objectStore(STORE_NAME).put({ data, firestoreLastUpdated, timestamp: Date.now() }, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) { console.warn("Gagal menyimpan ke cache lokal", err); }
+};
+
+const getFromCache = async (key) => {
+  try {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const req = tx.objectStore(STORE_NAME).get(key);
+      req.onsuccess = () => resolve(req.result ? req.result : null);
+      req.onerror = () => resolve(null);
+    });
+  } catch (err) { return null; }
+};
 
 // =====================================================================
 // UTILITY FUNCTIONS
 // =====================================================================
-const getVal = (obj, keyName) => {
-  if (!obj) return '';
-  const key = Object.keys(obj).find(k => k.trim().toLowerCase() === keyName.toLowerCase());
-  return key ? obj[key] : '';
-};
-
 const KABUPATEN_LIST = [
   "BENGKAYANG", "KAPUAS HULU", "KAYONG UTARA", "KETAPANG", 
   "KUBU RAYA", "LANDAK", "MELAWI", "MEMPAWAH", "PONTIANAK", 
   "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
 ];
-
-const cleanKabupatenName = (rawName) => {
-  if (!rawName) return "TIDAK DIKETAHUI";
-  let name = String(rawName).toUpperCase().replace(/^(KAB\.|KABUPATEN|KOTA)\s+/i, '').trim();
-  const found = KABUPATEN_LIST.find(kab => name.includes(kab));
-  if (found) return found;
-  return name; 
-};
 
 const getKabupatenRank = (kabName) => {
   const name = String(kabName).toUpperCase();
@@ -64,7 +86,7 @@ const getKabupatenRank = (kabName) => {
 };
 
 // =====================================================================
-// PENGELOMPOKAN JENJANG (SUDAH DIPISAH SMA DAN SMK)
+// PENGELOMPOKAN JENJANG (SUPER KEBAL)
 // =====================================================================
 const JENJANG_GROUPS = {
   'SEMUA': [],
@@ -84,25 +106,33 @@ const identifyJenjangGroup = (jenjangDb) => {
   for (const group of JENJANG_KEYS) {
     if (JENJANG_GROUPS[group].includes(j)) return group;
   }
+  
+  if (j.includes('TK') || j.includes('KB') || j.includes('PAUD') || j.includes('SPS') || j.includes('TPA')) return 'PAUD';
+  if (j.includes('SD') && !j.includes('SLB')) return 'SD';
+  if (j.includes('SMP') && !j.includes('SLB')) return 'SMP';
+  if (j.includes('SMA') && !j.includes('SLB')) return 'SMA';
+  if (j.includes('SMK')) return 'SMK';
+  if (j.includes('SLB') || j.includes('SDLB') || j.includes('SMPLB') || j.includes('SMALB')) return 'SLB (Inklusif)';
+  if (j.includes('PKBM') || j.includes('SKB')) return 'NON FORMAL';
+
   return null;
 };
 
 // =====================================================================
 // MAIN COMPONENT: DAPODIK PESERTA DIDIK
 // =====================================================================
-export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', lastUpdatedDate }) {
+export default function DapodikPesertaDidik({ selectedYear = '2026' }) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const [dataSiswa, setDataSiswa] = useState([]);
+  const [loading, setLoading] = useState(true);
   
-  // Memastikan bahwa parameter URL selalu sinkron dengan state komponen
-  // Gunakan optional chaining dan default value yang solid
+  // URL Params State
   const activeView = (searchParams.get('tab') || 'STATUS').toUpperCase(); 
   const activeJenjang = (searchParams.get('jenjang') || 'SEMUA').toUpperCase(); 
   
-  // Fungsi handler untuk memperbarui URL Params yang aman
   const handleTabClick = (viewId) => {
     setSearchParams(prev => {
       prev.set('tab', viewId);
-      // Jika yang diklik bukan tab STATUS, paksa reset jenjang ke SEMUA
       if (viewId !== 'STATUS') {
         prev.set('jenjang', 'SEMUA');
       }
@@ -121,34 +151,83 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
   const [selectedWilayah, setSelectedWilayah] = useState('SEMUA');
   const [fetchedDate, setFetchedDate] = useState('');
 
-  // Tarik tanggal update langsung dari dapodik_sekolah_chunks karena data siswa menyatu di sana
+  // -------------------------------------------------------------------------
+  // MENGAMBIL DATA DENGAN SMART CACHE BUSTER SINKRON FIRESTORE
+  // -------------------------------------------------------------------------
   useEffect(() => {
-    const getUpdateDate = async () => {
+    const fetchDataAgregasi = async () => {
+      setLoading(true);
+      const cacheKey = `siswa_agregasi_v1_${selectedYear}`;
+      
       try {
-        const qSek = query(collection(db, 'dapodik_sekolah_chunks'), where('tahun_data', '==', selectedYear), limit(1));
-        const snapSek = await getDocs(qSek);
-        
-        if (!snapSek.empty) {
-           const docData = snapSek.docs[0].data();
-           if (docData.last_updated) {
-             const d = new Date(docData.last_updated);
-             const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
-             setFetchedDate(`${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()} Pukul ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+        // 1. Cek Last Updated dari Firestore Dulu (Supaya Tahu Apakah Data Baru Di-Kalkulasi)
+        const summarySnap = await getDocs(query(collection(db, 'siswa_agregasi'), where('__name__', '==', `summary_${selectedYear}`)));
+        let firestoreLastUpdated = null;
+        let displayDateStr = '';
+
+        if (!summarySnap.empty) {
+          const docData = summarySnap.docs[0].data();
+          if (docData.last_updated) {
+            firestoreLastUpdated = docData.last_updated; // ISO String dari Admin
+            const d = new Date(docData.last_updated);
+            const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+            displayDateStr = `${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()} Pukul ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+            setFetchedDate(displayDateStr);
+          }
+        }
+
+        // 2. Cek Local Cache
+        const cachedData = await getFromCache(cacheKey);
+        let isCacheValid = false;
+
+        // Validasi: Apakah Cache Punya Data? Dan Apakah Versi Tanggal Cachenya Sama Dengan Firestore?
+        if (cachedData && cachedData.data && cachedData.data.length > 0) {
+           if (!firestoreLastUpdated) {
+               isCacheValid = true; 
+           } else if (cachedData.firestoreLastUpdated === firestoreLastUpdated) {
+               isCacheValid = true;
            }
         }
+
+        // Jika cache masih relevan dan valid
+        if (isCacheValid) {
+          setDataSiswa(cachedData.data);
+          setLoading(false);
+          return;
+        }
+
+        // 3. JIKA CACHE TIDAK VALID / KOSONG -> TARIK ULANG DARI FIRESTORE
+        const qChunks = query(collection(db, 'siswa_agregasi'), where('tahun_data', '==', selectedYear));
+        const snapChunks = await getDocs(qChunks);
+        
+        let allData = [];
+        snapChunks.forEach(doc => {
+          if (doc.id.includes('_chunk_')) {
+             const chunkArr = doc.data().data_agregasi || [];
+             allData.push(...chunkArr);
+          }
+        });
+
+        setDataSiswa(allData);
+        // Save cache baru beserta timestamp unik dari Firestore
+        await saveToCache(cacheKey, allData, firestoreLastUpdated);
+
       } catch (e) {
-        console.error("Gagal menarik tanggal update", e);
+        console.error("Gagal menarik data siswa agregasi", e);
+      } finally {
+        setLoading(false);
       }
     };
-    getUpdateDate();
+    
+    fetchDataAgregasi();
   }, [selectedYear]);
 
-  const displayLastUpdated = fetchedDate || lastUpdatedDate || 'Sesuai Database Terkini';
+  const displayLastUpdated = fetchedDate || 'Belum Di-Kalkulasi oleh Admin';
 
   const listKabupaten = useMemo(() => {
-    const unik = [...new Set(data.map(item => cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'))))];
-    return unik.filter(k => k !== 'TIDAK DIKETAHUI').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
-  }, [data]);
+    const unik = [...new Set(dataSiswa.map(item => item.kabupaten))];
+    return unik.filter(k => k && k !== 'TIDAK DIKETAHUI').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
+  }, [dataSiswa]);
 
   // ENGINE AGREGASI PESERTA DIDIK
   const aggregatedData = useMemo(() => {
@@ -167,19 +246,19 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
       });
     });
 
-    data.forEach(item => {
-       const kab = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+    dataSiswa.forEach(item => {
+       const kab = item.kabupaten;
        if (!mapAgg.has(kab)) return; 
        
        const row = mapAgg.get(kab);
-       const bentukDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+       const bentukDb = String(item.bentuk_pendidikan || '').trim().toUpperCase();
        const group = identifyJenjangGroup(bentukDb);
        if (!group) return;
 
-       const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
-       const pd_l = parseInt(getVal(item, 'pd_l')) || 0;
-       const pd_p = parseInt(getVal(item, 'pd_p')) || 0;
-       const pd_total = parseInt(getVal(item, 'pd_total')) || (pd_l + pd_p);
+       const isNegeri = item.status_sekolah === 'NEGERI';
+       const pd_l = item.pd_l || 0;
+       const pd_p = item.pd_p || 0;
+       const pd_total = item.pd_total || (pd_l + pd_p);
 
        if (activeView === 'STATUS') {
           const validJenjangList = JENJANG_GROUPS[activeJenjang] || [];
@@ -194,36 +273,36 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
           row.total += pd_total;
        } 
        else if (activeView === 'SD' && group === 'SD') {
-          const t1 = (parseInt(getVal(item, 't1_l')) || 0) + (parseInt(getVal(item, 't1_p')) || 0);
-          const t2 = (parseInt(getVal(item, 't2_l')) || 0) + (parseInt(getVal(item, 't2_p')) || 0);
-          const t3 = (parseInt(getVal(item, 't3_l')) || 0) + (parseInt(getVal(item, 't3_p')) || 0);
-          const t4 = (parseInt(getVal(item, 't4_l')) || 0) + (parseInt(getVal(item, 't4_p')) || 0);
-          const t5 = (parseInt(getVal(item, 't5_l')) || 0) + (parseInt(getVal(item, 't5_p')) || 0);
-          const t6 = (parseInt(getVal(item, 't6_l')) || 0) + (parseInt(getVal(item, 't6_p')) || 0);
+          const t1 = (item.t1_l || 0) + (item.t1_p || 0);
+          const t2 = (item.t2_l || 0) + (item.t2_p || 0);
+          const t3 = (item.t3_l || 0) + (item.t3_p || 0);
+          const t4 = (item.t4_l || 0) + (item.t4_p || 0);
+          const t5 = (item.t5_l || 0) + (item.t5_p || 0);
+          const t6 = (item.t6_l || 0) + (item.t6_p || 0);
           
           row.sd_1 += t1; row.sd_2 += t2; row.sd_3 += t3; row.sd_4 += t4; row.sd_5 += t5; row.sd_6 += t6;
           row.total += (t1+t2+t3+t4+t5+t6);
        } 
        else if (activeView === 'SMP' && group === 'SMP') {
-          const t7 = (parseInt(getVal(item, 't7_l')) || 0) + (parseInt(getVal(item, 't7_p')) || 0);
-          const t8 = (parseInt(getVal(item, 't8_l')) || 0) + (parseInt(getVal(item, 't8_p')) || 0);
-          const t9 = (parseInt(getVal(item, 't9_l')) || 0) + (parseInt(getVal(item, 't9_p')) || 0);
+          const t7 = (item.t7_l || 0) + (item.t7_p || 0);
+          const t8 = (item.t8_l || 0) + (item.t8_p || 0);
+          const t9 = (item.t9_l || 0) + (item.t9_p || 0);
           
           row.smp_7 += t7; row.smp_8 += t8; row.smp_9 += t9;
           row.total += (t7+t8+t9);
        } 
        else if (activeView === 'SMA' && group === 'SMA') {
-          const t10 = (parseInt(getVal(item, 't10_l')) || 0) + (parseInt(getVal(item, 't10_p')) || 0);
-          const t11 = (parseInt(getVal(item, 't11_l')) || 0) + (parseInt(getVal(item, 't11_p')) || 0);
-          const t12 = (parseInt(getVal(item, 't12_l')) || 0) + (parseInt(getVal(item, 't12_p')) || 0);
+          const t10 = (item.t10_l || 0) + (item.t10_p || 0);
+          const t11 = (item.t11_l || 0) + (item.t11_p || 0);
+          const t12 = (item.t12_l || 0) + (item.t12_p || 0);
           
           row.sma_10 += t10; row.sma_11 += t11; row.sma_12 += t12;
           row.total += (t10+t11+t12);
        } 
        else if (activeView === 'SMK' && group === 'SMK') {
-          const t10 = (parseInt(getVal(item, 't10_l')) || 0) + (parseInt(getVal(item, 't10_p')) || 0);
-          const t11 = (parseInt(getVal(item, 't11_l')) || 0) + (parseInt(getVal(item, 't11_p')) || 0);
-          const t12 = (parseInt(getVal(item, 't12_l')) || 0) + (parseInt(getVal(item, 't12_p')) || 0);
+          const t10 = (item.t10_l || 0) + (item.t10_p || 0);
+          const t11 = (item.t11_l || 0) + (item.t11_p || 0);
+          const t12 = (item.t12_l || 0) + (item.t12_p || 0);
           
           row.smk_10 += t10; row.smk_11 += t11; row.smk_12 += t12;
           row.total += (t10+t11+t12);
@@ -236,7 +315,7 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
     });
 
     return Array.from(mapAgg.values()).sort((a, b) => getKabupatenRank(a.wilayah) - getKabupatenRank(b.wilayah));
-  }, [data, activeView, activeJenjang, listKabupaten]);
+  }, [dataSiswa, activeView, activeJenjang, listKabupaten]);
 
   const grandTotals = useMemo(() => {
     return aggregatedData.reduce((acc, curr) => {
@@ -309,6 +388,15 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
     { id: 'SMK', label: 'Jenjang SMK', icon: GraduationCap, color: 'text-purple-600' },
     { id: 'NON_FORMAL', label: 'Non Formal', icon: Tent, color: 'text-teal-600' },
   ];
+
+  if (loading) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center italic font-black uppercase tracking-widest text-sky-300">
+        <Loader2 className="animate-spin text-sky-600 mb-4" size={64} />
+        Memuat Agregasi Data Peserta Didik...
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col animate-in fade-in duration-500">
@@ -461,7 +549,7 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
         <RincianPDStatusSekolah 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={data}
+          data={dataSiswa}
           initialWilayah={selectedWilayah}
           activeJenjang={activeJenjang}
           displayLastUpdated={displayLastUpdated}
@@ -472,7 +560,7 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
         <RincianPDJenjangPAUD 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={data}
+          data={dataSiswa}
           initialWilayah={selectedWilayah}
           displayLastUpdated={displayLastUpdated}
         />
@@ -482,7 +570,7 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
         <RincianPDJenjangSD 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={data}
+          data={dataSiswa}
           initialWilayah={selectedWilayah}
           displayLastUpdated={displayLastUpdated}
         />
@@ -492,7 +580,7 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
         <RincianPDJenjangSMP 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={data}
+          data={dataSiswa}
           initialWilayah={selectedWilayah}
           displayLastUpdated={displayLastUpdated}
         />
@@ -502,7 +590,7 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
         <RincianPDJenjangSMA 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={data}
+          data={dataSiswa}
           initialWilayah={selectedWilayah}
           displayLastUpdated={displayLastUpdated}
         />
@@ -512,7 +600,7 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
         <RincianPDJenjangSMK 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={data}
+          data={dataSiswa}
           initialWilayah={selectedWilayah}
           displayLastUpdated={displayLastUpdated}
         />
@@ -522,7 +610,7 @@ export default function DapodikPesertaDidik({ data = [], selectedYear = '2026', 
         <RincianPDJenjangNonFormal 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={data}
+          data={dataSiswa}
           initialWilayah={selectedWilayah}
           displayLastUpdated={displayLastUpdated}
         />

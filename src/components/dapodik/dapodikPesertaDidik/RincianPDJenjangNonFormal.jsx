@@ -9,12 +9,6 @@ import ExcelJS from 'exceljs';
 // =====================================================================
 // UTILITY FUNCTIONS
 // =====================================================================
-const getVal = (obj, keyName) => {
-  if (!obj) return '';
-  const key = Object.keys(obj).find(k => k.trim().toLowerCase() === keyName.toLowerCase());
-  return key ? obj[key] : '';
-};
-
 const KABUPATEN_LIST = [
   "BENGKAYANG", "KAPUAS HULU", "KAYONG UTARA", "KETAPANG", 
   "KUBU RAYA", "LANDAK", "MELAWI", "MEMPAWAH", "PONTIANAK", 
@@ -73,8 +67,9 @@ export default function RincianPDJenjangNonFormal({
 
   // STATE FILTERS
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterWilayah, setFilterWilayah] = useState(initialWilayah); // Untuk Tab Kecamatan
-  const [filterWilayahSekolah, setFilterWilayahSekolah] = useState('SEMUA'); // Untuk Tab Sekolah
+  // PERBAIKAN BUG: Selalu inisialisasi dengan 'SEMUA' agar daftar kecamatan tidak kosong
+  const [filterWilayah, setFilterWilayah] = useState('SEMUA'); 
+  const [filterWilayahSekolah, setFilterWilayahSekolah] = useState('SEMUA'); 
   const [filterStatus, setFilterStatus] = useState('SEMUA'); 
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -87,7 +82,7 @@ export default function RincianPDJenjangNonFormal({
     if (isOpen) {
       setActiveModalTab('KECAMATAN');
       setSearchTerm('');
-      setFilterWilayah('SEMUA');
+      setFilterWilayah('SEMUA'); // Kunci perbaikan bug
       setFilterWilayahSekolah('SEMUA');
       setFilterStatus('SEMUA');
       setCurrentPage(1);
@@ -110,13 +105,13 @@ export default function RincianPDJenjangNonFormal({
   const listWilayahFilter = useMemo(() => {
     const validData = data.filter(item => {
       if (isModeSemua) return true;
-      return cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) === initialWilayah;
+      return cleanKabupatenName(item.kabupaten) === initialWilayah;
     });
 
     const list = validData.map(item => {
       return isModeSemua 
-        ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'))
-        : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+        ? cleanKabupatenName(item.kabupaten)
+        : String(item.kecamatan || 'TIDAK DIKETAHUI').trim().toUpperCase();
     });
 
     return [...new Set(list)].sort();
@@ -130,16 +125,16 @@ export default function RincianPDJenjangNonFormal({
 
     const baseData = data.filter(item => {
       // Filter Wilayah
-      const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+      const kabDb = cleanKabupatenName(item.kabupaten);
       if (!isModeSemua && kabDb !== initialWilayah) return false;
 
       // Filter khusus Non Formal
-      const group = identifyJenjangGroup(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'));
+      const group = identifyJenjangGroup(item.bentuk_pendidikan);
       if (group !== 'NON FORMAL') return false;
 
       // Filter Status Sekolah
       if (filterStatus !== 'SEMUA') {
-        const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
+        const statusDb = String(item.status_sekolah || '').toUpperCase();
         if (statusDb !== filterStatus) return false;
       }
       return true;
@@ -149,8 +144,8 @@ export default function RincianPDJenjangNonFormal({
 
     baseData.forEach(item => {
       let keyId = isModeSemua 
-          ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) 
-          : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+          ? cleanKabupatenName(item.kabupaten) 
+          : String(item.kecamatan || 'TIDAK DIKETAHUI').trim().toUpperCase();
 
       if (filterWilayah !== 'SEMUA' && keyId !== filterWilayah) return;
 
@@ -160,9 +155,9 @@ export default function RincianPDJenjangNonFormal({
 
       const row = mapAgg.get(keyId);
       
-      const pd_l = parseInt(getVal(item, 'pd_l')) || parseInt(getVal(item, 'l')) || 0;
-      const pd_p = parseInt(getVal(item, 'pd_p')) || parseInt(getVal(item, 'p')) || 0;
-      const pd_total = parseInt(getVal(item, 'pd_total')) || (pd_l + pd_p);
+      const pd_l = item.pd_l || 0;
+      const pd_p = item.pd_p || 0;
+      const pd_total = item.pd_total || (pd_l + pd_p);
 
       row.nf_l += pd_l;
       row.nf_p += pd_p;
@@ -196,31 +191,31 @@ export default function RincianPDJenjangNonFormal({
     if (!data) return [];
     
     let validData = data.filter(item => {
-      const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+      const kabDb = cleanKabupatenName(item.kabupaten);
       if (!isModeSemua && kabDb !== initialWilayah) return false;
 
       // Filter khusus Non Formal
-      const group = identifyJenjangGroup(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'));
+      const group = identifyJenjangGroup(item.bentuk_pendidikan);
       if (group !== 'NON FORMAL') return false;
 
       // Filter Status Sekolah
       if (filterStatus !== 'SEMUA') {
-        const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
+        const statusDb = String(item.status_sekolah || '').toUpperCase();
         if (statusDb !== filterStatus) return false;
       }
 
       // Filter Wilayah Khusus Tab Sekolah (Kecamatan/Kabupaten)
       if (filterWilayahSekolah !== 'SEMUA') {
         let keyId = isModeSemua 
-          ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) 
-          : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+          ? cleanKabupatenName(item.kabupaten) 
+          : String(item.kecamatan || 'TIDAK DIKETAHUI').trim().toUpperCase();
         if (keyId !== filterWilayahSekolah) return false;
       }
 
       // Filter Pencarian
       if (searchTerm) {
-        const nama = String(getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '').toLowerCase();
-        const npsn = String(getVal(item, 'npsn') || '').toLowerCase();
+        const nama = String(item.nama || '-').toLowerCase();
+        const npsn = String(item.npsn || '').toLowerCase();
         const q = searchTerm.toLowerCase();
         if (!nama.includes(q) && !npsn.includes(q)) return false;
       }
@@ -229,16 +224,16 @@ export default function RincianPDJenjangNonFormal({
     });
 
     return validData.map(item => {
-      const nf_l = parseInt(getVal(item, 'pd_l')) || parseInt(getVal(item, 'l')) || 0;
-      const nf_p = parseInt(getVal(item, 'pd_p')) || parseInt(getVal(item, 'p')) || 0;
-      const pd_total = parseInt(getVal(item, 'pd_total')) || (nf_l + nf_p);
+      const nf_l = item.pd_l || 0;
+      const nf_p = item.pd_p || 0;
+      const pd_total = item.pd_total || (nf_l + nf_p);
 
       return {
-        npsn: getVal(item, 'npsn'),
-        nama_sekolah: getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '-',
-        jenjang: getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'),
-        status: String(getVal(item, 'status_sekolah')).toUpperCase(),
-        kecamatan: String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase(),
+        npsn: item.npsn || '-',
+        nama_sekolah: String(item.nama || '-').toUpperCase(),
+        jenjang: String(item.bentuk_pendidikan || '').toUpperCase(),
+        status: String(item.status_sekolah || '').toUpperCase(),
+        kecamatan: String(item.kecamatan || 'TIDAK DIKETAHUI').trim().toUpperCase(),
         nf_l,
         nf_p,
         total: pd_total

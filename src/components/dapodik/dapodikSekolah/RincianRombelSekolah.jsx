@@ -15,14 +15,27 @@ const getVal = (obj, keyName) => {
   return key ? obj[key] : '';
 };
 
-// Fungsi Agresif Lama yang Kebal untuk Mengekstrak Total Rombel
+// =====================================================================
+// FUNGSI SAKTI UPDATE: MEMBACA CHUNKS AGREGASI BARU TAHAP 1
+// =====================================================================
 const getTotalRombel = (item) => {
+  // Prioritas 1: Baca langsung hasil Pre-Kalkulasi AdminMesinKalkulasi (Sangat Cepat)
+  if (item.rombel_total !== undefined && item.rombel_total !== null) {
+      return parseInt(item.rombel_total) || 0;
+  }
+
+  // Prioritas 2: Fallback jika data mentah belum ter-agregasi (Safe-guard lambat)
   let rombelTotal = 0;
   Object.keys(item).forEach(k => {
-      if(k.toLowerCase().includes('rombel_')) {
+      const keyStr = k.toLowerCase().trim();
+      if(keyStr.includes('rombel_') && keyStr !== 'rombel_total') {
           rombelTotal += parseInt(item[k]) || 0;
       }
   });
+
+  if (rombelTotal === 0) {
+      rombelTotal = parseInt(getVal(item, 'rombel')) || parseInt(getVal(item, 'rombongan_belajar')) || 0;
+  }
   return rombelTotal;
 };
 
@@ -63,19 +76,27 @@ const getKabupatenRank = (kabName) => {
 // MAPPING STRUKTUR JENJANG BARU (SINKRON DENGAN DASHBOARD)
 // =====================================================================
 const KATEGORI_MAPPING = {
-  'PAUD': ['TK', 'KB', 'PAUD'],
+  'PAUD': ['TK', 'KB', 'PAUD', 'TPA', 'SPS'],
   'DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
   'MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
   'INKLUSIF': ['SLB'],
-  'NON FORMAL': ['PKBM', 'TPA', 'SPS', 'SKB']
+  'NON FORMAL': ['PKBM', 'SKB']
 };
 
-const isJenjangValid = (jenjangDb, targetJenjang) => {
-  if (targetJenjang === 'SEMUA') return true;
-  if (KATEGORI_MAPPING[targetJenjang]) {
-      return KATEGORI_MAPPING[targetJenjang].includes(jenjangDb);
+const isJenjangValid = (jenjangDb, targetTab) => {
+  if (targetTab === 'SEMUA' || targetTab === 'SEMUA JENJANG') return true;
+
+  // Jika Target memiliki Prefix CAT_ (Berarti dia minta Kategori Gabungan)
+  if (targetTab.startsWith('CAT_')) {
+      const kat = targetTab.replace('CAT_', '');
+      if (KATEGORI_MAPPING[kat]) {
+          return KATEGORI_MAPPING[kat].includes(jenjangDb);
+      }
+      return jenjangDb === kat;
   }
-  return jenjangDb === targetJenjang;
+
+  // Jika tidak, maka lakukan Pencocokan Strict (Misal: Hanya SD, Bukan SPK SD)
+  return jenjangDb === targetTab;
 };
 
 // =====================================================================
@@ -91,14 +112,20 @@ export default function RincianRombelSekolah({
 }) {
   const mappedJenjang = activeJenjang === 'SLB (Inklusif)' ? 'INKLUSIF' : activeJenjang;
 
+  // State inisialisasi cerdas untuk Tab Jenjang
+  const defaultJenjangTab = (mappedJenjang === 'SEMUA' || mappedJenjang === 'SEMUA JENJANG') 
+      ? 'SEMUA' 
+      : `CAT_${mappedJenjang}`;
+
   // STATE MODAL TABS
   const [activeModalTab, setActiveModalTab] = useState('KECAMATAN'); // 'KECAMATAN' | 'SEKOLAH'
   
   // STATE FILTERS
   const [searchTerm, setSearchTerm] = useState('');
   const [filterWilayah, setFilterWilayah] = useState('SEMUA'); // Tab Kecamatan
+  const [filterWilayahSekolah, setFilterWilayahSekolah] = useState('SEMUA'); // Tab Sekolah
   const [filterStatus, setFilterStatus] = useState('SEMUA'); // Tab Kecamatan & Sekolah
-  const [activeJenjangTab, setActiveJenjangTab] = useState('SEMUA'); // Tab Menu Jenjang (Khusus Tab Sekolah)
+  const [activeJenjangTab, setActiveJenjangTab] = useState(defaultJenjangTab); // Tab Menu Jenjang (Khusus Tab Sekolah)
 
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 15;
@@ -111,16 +138,17 @@ export default function RincianRombelSekolah({
       setActiveModalTab('KECAMATAN');
       setSearchTerm('');
       setFilterWilayah('SEMUA');
+      setFilterWilayahSekolah('SEMUA');
       setFilterStatus('SEMUA');
-      setActiveJenjangTab(mappedJenjang); 
+      setActiveJenjangTab(defaultJenjangTab); 
       setCurrentPage(1);
     }
-  }, [isOpen, mappedJenjang]);
+  }, [isOpen, defaultJenjangTab]);
 
   // Reset pagination saat pencarian atau filter berubah
   useEffect(() => { 
     setCurrentPage(1); 
-  }, [searchTerm, filterWilayah, filterStatus, activeJenjangTab, activeModalTab]);
+  }, [searchTerm, filterWilayah, filterWilayahSekolah, filterStatus, activeJenjangTab, activeModalTab]);
 
   // Handle ESC key
   useEffect(() => {
@@ -131,7 +159,9 @@ export default function RincianRombelSekolah({
 
   // Dinamika Tab Jenjang di dalam Modal
   const availableTabs = useMemo(() => {
-    if (mappedJenjang === 'SEMUA') return Object.keys(KATEGORI_MAPPING);
+    if (mappedJenjang === 'SEMUA' || mappedJenjang === 'SEMUA JENJANG') {
+        return ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'].map(k => `CAT_${k}`);
+    }
     if (KATEGORI_MAPPING[mappedJenjang]) return KATEGORI_MAPPING[mappedJenjang];
     
     for (const [kat, arr] of Object.entries(KATEGORI_MAPPING)) {
@@ -144,16 +174,16 @@ export default function RincianRombelSekolah({
   const listWilayahFilter = useMemo(() => {
     const validData = data.filter(item => {
       if (isModeSemua) return true;
-      return cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) === initialWilayah;
+      return cleanKabupatenName(item.kabupaten || getVal(item, 'Kabupaten/Kota')) === initialWilayah;
     });
 
     const list = validData.map(item => {
       return isModeSemua 
-        ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'))
-        : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+        ? cleanKabupatenName(item.kabupaten || getVal(item, 'Kabupaten/Kota'))
+        : String(item.kecamatan || getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
     });
 
-    return [...new Set(list)].sort();
+    return [...new Set(list)].filter(Boolean).sort();
   }, [data, isModeSemua, initialWilayah]);
 
   // =====================================================================
@@ -162,16 +192,18 @@ export default function RincianRombelSekolah({
   const dataKecamatan = useMemo(() => {
     if (!data) return [];
     
-    // Filter Base
+    // Untuk rekap kecamatan, kita harus pastikan menggabungkan semua sub-jenjang sesuai filter utama
+    const parentTarget = (mappedJenjang === 'SEMUA' || mappedJenjang === 'SEMUA JENJANG') ? 'SEMUA' : `CAT_${mappedJenjang}`;
+
     const baseData = data.filter(item => {
-      const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+      const kabDb = cleanKabupatenName(item.kabupaten || getVal(item, 'Kabupaten/Kota'));
       if (!isModeSemua && kabDb !== initialWilayah) return false;
 
-      const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
-      if (!isJenjangValid(jenjangDb, mappedJenjang)) return false;
+      const jenjangDb = String(item.bentuk_pendidikan || getVal(item, 'jenjang') || '').trim().toUpperCase();
+      if (!isJenjangValid(jenjangDb, parentTarget)) return false;
 
       if (filterStatus !== 'SEMUA') {
-        const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
+        const statusDb = String(item.status_sekolah || getVal(item, 'status_sekolah')).toUpperCase();
         if (statusDb !== filterStatus) return false;
       }
       return true;
@@ -181,8 +213,8 @@ export default function RincianRombelSekolah({
 
     baseData.forEach(item => {
       let keyId = isModeSemua 
-          ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) 
-          : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+          ? cleanKabupatenName(item.kabupaten || getVal(item, 'Kabupaten/Kota')) 
+          : String(item.kecamatan || getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
 
       if (filterWilayah !== 'SEMUA' && keyId !== filterWilayah) return;
 
@@ -191,9 +223,8 @@ export default function RincianRombelSekolah({
       }
 
       const row = mapAgg.get(keyId);
-      const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
+      const isNegeri = String(item.status_sekolah || getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
       
-      // PANGGIL FUNGSI SAKTI
       const rombelTotal = getTotalRombel(item);
 
       if (isNegeri) row.negeri += rombelTotal;
@@ -230,20 +261,25 @@ export default function RincianRombelSekolah({
     if (!data) return [];
     
     let validData = data.filter(item => {
-      const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+      const kabDb = cleanKabupatenName(item.kabupaten || getVal(item, 'Kabupaten/Kota'));
       if (!isModeSemua && kabDb !== initialWilayah) return false;
 
       if (filterStatus !== 'SEMUA') {
-        const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
+        const statusDb = String(item.status_sekolah || getVal(item, 'status_sekolah')).toUpperCase();
         if (statusDb !== filterStatus) return false;
       }
 
-      const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+      const jenjangDb = String(item.bentuk_pendidikan || getVal(item, 'jenjang') || '').trim().toUpperCase();
       if (!isJenjangValid(jenjangDb, activeJenjangTab)) return false;
 
+      if (filterWilayahSekolah !== 'SEMUA') {
+        let keyId = isModeSemua ? kabDb : String(item.kecamatan || getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+        if (keyId !== filterWilayahSekolah) return false;
+      }
+
       if (searchTerm) {
-        const nama = String(getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '').toLowerCase();
-        const npsn = String(getVal(item, 'npsn') || '').toLowerCase();
+        const nama = String(item.nama || getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '').toLowerCase();
+        const npsn = String(item.npsn || getVal(item, 'npsn') || '').toLowerCase();
         const q = searchTerm.toLowerCase();
         if (!nama.includes(q) && !npsn.includes(q)) return false;
       }
@@ -252,15 +288,15 @@ export default function RincianRombelSekolah({
     });
 
     return validData.map(item => ({
-      npsn: getVal(item, 'npsn'),
-      nama_sekolah: getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '-',
-      jenjang: getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'),
-      status: getVal(item, 'status_sekolah'),
-      kecamatan: getVal(item, 'kecamatan'),
-      rombel: getTotalRombel(item) // PANGGIL FUNGSI SAKTI
+      npsn: item.npsn || getVal(item, 'npsn') || '-',
+      nama_sekolah: String(item.nama || getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '-').toUpperCase(),
+      jenjang: String(item.bentuk_pendidikan || getVal(item, 'jenjang') || '-').toUpperCase(),
+      status: String(item.status_sekolah || getVal(item, 'status_sekolah') || '-').toUpperCase(),
+      kecamatan: String(item.kecamatan || getVal(item, 'kecamatan') || '-').toUpperCase(),
+      rombel: getTotalRombel(item) 
     })).sort((a, b) => String(a.nama_sekolah).localeCompare(String(b.nama_sekolah)));
 
-  }, [data, isModeSemua, initialWilayah, filterStatus, activeJenjangTab, searchTerm]);
+  }, [data, isModeSemua, initialWilayah, filterStatus, activeJenjangTab, filterWilayahSekolah, searchTerm]);
 
   const totalRombelSekolah = useMemo(() => {
     return dataSekolah.reduce((acc, curr) => acc + curr.rombel, 0);
@@ -272,6 +308,8 @@ export default function RincianRombelSekolah({
   // =====================================================================
   const downloadExcelRincian = async () => {
     const workbook = new ExcelJS.Workbook();
+    const safeJenjang = activeJenjang.replace(/\//g, '-');
+    const safeActiveTab = activeJenjangTab.replace('CAT_', '').replace(/\//g, '-');
     
     if (activeModalTab === 'KECAMATAN') {
       const sheetName = isModeSemua ? 'Rekap Provinsi' : `Rekap ${initialWilayah}`;
@@ -294,7 +332,7 @@ export default function RincianRombelSekolah({
       });
 
       worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } }; // Indigo 600
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } }; 
       totalRow.font = { bold: true, color: { argb: 'FF312E81' } }; 
       totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E7FF' } }; 
 
@@ -302,10 +340,9 @@ export default function RincianRombelSekolah({
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `Rincian_Rombel_Kecamatan_${initialWilayah}.xlsx`;
+      link.download = `Rincian_Rombel_Kecamatan_${initialWilayah}_${safeJenjang}.xlsx`;
       link.click();
     } else {
-      // Tab SEKOLAH
       const worksheet = workbook.addWorksheet('Daftar Sekolah');
 
       worksheet.columns = [
@@ -320,18 +357,17 @@ export default function RincianRombelSekolah({
       dataSekolah.forEach(item => worksheet.addRow(item));
 
       worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } }; // Indigo 600
+      worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } }; 
 
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `Daftar_Sekolah_Rombel_${initialWilayah}_${activeJenjangTab.replace(/\//g,'-')}.xlsx`;
+      link.download = `Daftar_Sekolah_Rombel_${initialWilayah}_${safeActiveTab}.xlsx`;
       link.click();
     }
   };
 
-  // Pagination Logic
   const activeData = activeModalTab === 'KECAMATAN' ? dataKecamatan : dataSekolah;
   const totalPages = Math.ceil(activeData.length / rowsPerPage) || 1;
   const startIndex = (currentPage - 1) * rowsPerPage;
@@ -357,12 +393,14 @@ export default function RincianRombelSekolah({
               </h2>
               <p className="text-indigo-200 text-sm font-bold uppercase tracking-widest mt-1 flex gap-2">
                 <span>{isModeSemua ? 'Provinsi Kalimantan Barat' : `Kabupaten ${initialWilayah}`}</span>
+                <span className="opacity-50">|</span>
+                <span className="text-amber-300">Jenjang: {activeJenjang}</span>
               </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <button onClick={downloadExcelRincian} className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl font-black text-xs uppercase shadow-md transition-all active:scale-95 border border-emerald-400">
-              <Download size={14} /> Unduh Excel
+              <Download size={14} /> Unduh
             </button>
             <button onClick={onClose} className="p-2 bg-white/10 hover:bg-red-500 text-white rounded-xl transition-colors">
               <X size={24} />
@@ -390,20 +428,24 @@ export default function RincianRombelSekolah({
         {activeModalTab === 'SEKOLAH' && (
           <div className="bg-white px-6 pt-4 pb-0 flex gap-2 overflow-x-auto scrollbar-hide shrink-0 z-10 relative">
             <button 
-              onClick={() => setActiveJenjangTab(mappedJenjang)}
-              className={`px-5 py-2 rounded-xl font-black uppercase text-[10px] md:text-xs transition-all whitespace-nowrap border ${activeJenjangTab === mappedJenjang ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
+              onClick={() => setActiveJenjangTab(defaultJenjangTab)}
+              className={`px-5 py-2 rounded-xl font-black uppercase text-[10px] md:text-xs transition-all whitespace-nowrap border ${activeJenjangTab === defaultJenjangTab ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
             >
-              {mappedJenjang === 'SEMUA' ? 'Semua Jenjang' : `SEMUA ${mappedJenjang}`}
+              {mappedJenjang === 'SEMUA' || mappedJenjang === 'SEMUA JENJANG' ? 'Semua Jenjang' : `SEMUA ${mappedJenjang}`}
             </button>
-            {availableTabs.map(j => (
-              <button 
-                key={j}
-                onClick={() => setActiveJenjangTab(j)}
-                className={`px-5 py-2 rounded-xl font-black uppercase text-[10px] md:text-xs transition-all whitespace-nowrap border ${activeJenjangTab === j ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
-              >
-                {j}
-              </button>
-            ))}
+            {availableTabs.map(j => {
+               // Hapus prefix CAT_ untuk tampilan tombol
+               const label = j.startsWith('CAT_') ? j.replace('CAT_', '') : j;
+               return (
+                 <button 
+                   key={j}
+                   onClick={() => setActiveJenjangTab(j)}
+                   className={`px-5 py-2 rounded-xl font-black uppercase text-[10px] md:text-xs transition-all whitespace-nowrap border ${activeJenjangTab === j ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
+                 >
+                   {label}
+                 </button>
+               );
+            })}
           </div>
         )}
 
@@ -413,7 +455,7 @@ export default function RincianRombelSekolah({
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input 
               type="text" 
-              placeholder={activeModalTab === 'KECAMATAN' ? `Cari ${isModeSemua ? 'Kabupaten' : 'Kecamatan'}...` : "Cari Nama Sekolah atau NPSN..."} 
+              placeholder={activeModalTab === 'KECAMATAN' ? `Cari Nama ${isModeSemua ? 'Kabupaten' : 'Kecamatan'}...` : "Cari Nama Sekolah atau NPSN..."} 
               value={searchTerm} 
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-gray-200 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 font-bold text-gray-700"
@@ -427,6 +469,21 @@ export default function RincianRombelSekolah({
               <select 
                 value={filterWilayah} 
                 onChange={(e) => setFilterWilayah(e.target.value)} 
+                className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[200px]"
+              >
+                <option value="SEMUA">{isModeSemua ? 'SEMUA KABUPATEN' : 'SEMUA KECAMATAN'}</option>
+                {listWilayahFilter.map(w => <option key={w} value={w}>{w}</option>)}
+              </select>
+            </div>
+          )}
+
+          {/* FILTER TAB SEKOLAH */}
+          {activeModalTab === 'SEKOLAH' && (
+            <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
+              <MapPin size={16} className="text-gray-400 mr-2" />
+              <select 
+                value={filterWilayahSekolah} 
+                onChange={(e) => setFilterWilayahSekolah(e.target.value)} 
                 className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[200px]"
               >
                 <option value="SEMUA">{isModeSemua ? 'SEMUA KABUPATEN' : 'SEMUA KECAMATAN'}</option>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, ArrowLeft, Loader2 } from 'lucide-react';
+import { Activity, ArrowLeft, Loader2, School, Users, GraduationCap } from 'lucide-react';
 import { db } from '../../firebase/config';
 import { collection, doc, query, where, getDocs, setDoc, writeBatch } from 'firebase/firestore';
 
@@ -137,6 +137,42 @@ export default function AdminMesinKalkulasi({ onBack }) {
     let newStatus = {};
     
     for (const year of years) {
+      // Cek Status Modul Dashboard Sekolah Ter-Kalkulasi (TAHAP 1)
+      const sekolahDoc = await getDocs(query(collection(db, 'sekolah_agregasi'), where("__name__", "==", `summary_${year}`)));
+      if (!sekolahDoc.empty) {
+          const data = sekolahDoc.docs[0].data();
+          if (data.last_updated) {
+             const d = new Date(data.last_updated);
+             newStatus[`sekolah_dashboard_${year}`] = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth()+1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+          } else {
+             newStatus[`sekolah_dashboard_${year}`] = 'Selesai';
+          }
+      }
+
+      // Cek Status Modul Dashboard Guru Ter-Kalkulasi (TAHAP 2)
+      const guruDoc = await getDocs(query(collection(db, 'guru_agregasi'), where("__name__", "==", `summary_${year}`)));
+      if (!guruDoc.empty) {
+          const data = guruDoc.docs[0].data();
+          if (data.last_updated) {
+             const d = new Date(data.last_updated);
+             newStatus[`guru_dashboard_${year}`] = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth()+1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+          } else {
+             newStatus[`guru_dashboard_${year}`] = 'Selesai';
+          }
+      }
+
+      // Cek Status Modul Dashboard Siswa Ter-Kalkulasi (TAHAP 3)
+      const siswaDoc = await getDocs(query(collection(db, 'siswa_agregasi'), where("__name__", "==", `summary_${year}`)));
+      if (!siswaDoc.empty) {
+          const data = siswaDoc.docs[0].data();
+          if (data.last_updated) {
+             const d = new Date(data.last_updated);
+             newStatus[`siswa_dashboard_${year}`] = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth()+1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+          } else {
+             newStatus[`siswa_dashboard_${year}`] = 'Selesai';
+          }
+      }
+
       for (const type of calcTypes) {
         const docSnap = await getDocs(query(collection(db, 'dapodik_agregasi'), where("__name__", "==", `${type}_${year}`)));
         if (!docSnap.empty) {
@@ -190,6 +226,434 @@ export default function AdminMesinKalkulasi({ onBack }) {
   useEffect(() => { 
      checkCalcStatus(); 
   }, []);
+
+  // =====================================================================
+  // TAHAP 1: PRE-KALKULASI DATA SEKOLAH (DAPODIKSEKOLAH.JSX & RINCIAN MODALS)
+  // CHUNKING SYSTEM SYSTEM MEMORY SAFE & LIGHT-WEIGHT PUBLIC CALL
+  // =====================================================================
+  const handleCalculateDashboardSekolah = async (year) => {
+    setUploading(true);
+    setProgressLabel(`Menyiapkan Ringkasan Dashboard Sekolah ${year}...`);
+    setUploadProgress(5);
+
+    try {
+      const q = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", year));
+      const snap = await getDocs(q);
+
+      if (snap.empty) {
+        alert("Database Sekolah Chunks Kosong! Silakan upload file data sekolah di Database Master terlebih dahulu.");
+        setUploading(false); return;
+      }
+
+      let allSekolahData = [];
+      // ANTI-MEMORY LEAK
+      snap.forEach(doc => { 
+          const arr = doc.data().data;
+          if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
+      });
+
+      setUploadProgress(30);
+      setProgressLabel(`Memproses & Membersihkan Sisa Dokumen Lama...`);
+
+      // Bersihkan agregasi lama tahun tertentu agar data overwrite total bersih 100%
+      const snapOld = await getDocs(collection(db, 'sekolah_agregasi'));
+      let batchDel = writeBatch(db);
+      let delCount = 0;
+      
+      for (const d of snapOld.docs) {
+        if (d.id.startsWith(`sekolah_${year}_chunk_`) || d.id === `summary_${year}`) {
+          batchDel.delete(d.ref);
+          delCount++;
+          if (delCount === 100) {
+            await batchDel.commit();
+            batchDel = writeBatch(db);
+            delCount = 0;
+          }
+        }
+      }
+      if (delCount > 0) await batchDel.commit();
+
+      setUploadProgress(50);
+      setProgressLabel(`Meringkas Atribut Esensial ${allSekolahData.length.toLocaleString('id-ID')} Sekolah...`);
+
+      const compactSekolahList = [];
+
+      allSekolahData.forEach(item => {
+        const npsn = cleanNpsn(getVal(item, 'npsn'));
+        if (!npsn) return;
+
+        const nama = String(getVal(item, 'nama_satuan_pendidikan') || getVal(item, 'nama_sekolah') || 'TANPA NAMA').trim().toUpperCase();
+        const kabupaten = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+        const kecamatan = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+        const status = String(getVal(item, 'status_sekolah') || getVal(item, 'status')).trim().toUpperCase() === 'NEGERI' ? 'NEGERI' : 'SWASTA';
+        const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+        const akreditasi = String(getVal(item, 'akreditasi')).trim().toUpperCase();
+
+        // Hitung akumulasi rombel komparatif dengan Dynamic Field Scanning
+        let rombel = 0;
+        Object.keys(item).forEach(k => {
+          if (k.toLowerCase().includes('rombel_')) {
+            rombel += parseInt(item[k]) || 0;
+          }
+        });
+        if (rombel === 0) {
+          rombel = parseInt(getVal(item, 'rombel')) || parseInt(getVal(item, 'rombongan_belajar')) || 0;
+        }
+
+        // Simpan objek yang telah dikompresi (Vastly lighter payload)
+        compactSekolahList.push({
+          npsn,
+          nama,
+          kabupaten,
+          kecamatan,
+          status_sekolah: status,
+          bentuk_pendidikan: bentuk,
+          akreditasi: ['A', 'B', 'C', 'TT'].includes(akreditasi) ? akreditasi : 'BELUM',
+          rombel_total: rombel
+        });
+      });
+
+      setUploadProgress(70);
+      setProgressLabel(`Menyimpan Dokumen Agregasi Ter-Kalkulasi...`);
+
+      // Simpan Chunks Optimal (Mencegah Firestore Payload Limit 1MB)
+      const CHUNK_SIZE = 1500;
+      const totalChunks = Math.ceil(compactSekolahList.length / CHUNK_SIZE);
+      const currentTime = new Date().toISOString();
+
+      for (let i = 0; i < totalChunks; i++) {
+        const chunkData = compactSekolahList.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+        await setDoc(doc(db, 'sekolah_agregasi', `sekolah_${year}_chunk_${i}`), {
+          tahun_data: year,
+          chunk_index: i,
+          data_agregasi: chunkData,
+          last_updated: currentTime
+        });
+      }
+
+      // Dokumen Master Summary untuk public tracking
+      await setDoc(doc(db, 'sekolah_agregasi', `summary_${year}`), {
+        tahun_data: year,
+        total_chunks: totalChunks,
+        total_sekolah: compactSekolahList.length,
+        last_updated: currentTime
+      });
+
+      setUploadProgress(100);
+      alert(`KALKULASI SUKSES!\n\nPre-Kalkulasi Ringkasan Sekolah tahun ${year} berhasil diproses.\nBrowser publik sekarang dijamin super ringan.`);
+      checkCalcStatus();
+
+    } catch (error) {
+      console.error(error);
+      alert("Terjadi kesalahan sistem saat memproses kalkulasi Sekolah.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+
+  // =====================================================================
+  // TAHAP 2: PRE-KALKULASI DATA GURU (DAPODIKGURU.JSX & RINCIAN MODALS)
+  // MENGKOMPRESI DAN JOIN RELASI ANTARA SEKOLAH & GURU
+  // =====================================================================
+  const handleCalculateDashboardGuru = async (year) => {
+    setUploading(true);
+    setProgressLabel(`Menyiapkan Ringkasan Dashboard Guru ${year}...`);
+    setUploadProgress(5);
+
+    try {
+      // 1. Tarik Data Sekolah untuk Referensi Relasi (Kecamatan, Status, dll)
+      const qSekolah = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", year));
+      const snapSekolah = await getDocs(qSekolah);
+
+      if (snapSekolah.empty) {
+        alert("Data Sekolah Kosong! Data Sekolah dibutuhkan untuk menyambungkan relasi wilayah dengan data Guru.");
+        setUploading(false); return;
+      }
+
+      const mapSekolah = new Map();
+      snapSekolah.forEach(doc => {
+          const arr = doc.data().data;
+          if (Array.isArray(arr)) {
+              for (let j = 0; j < arr.length; j++) {
+                  const s = arr[j];
+                  const npsn = cleanNpsn(getVal(s, 'npsn'));
+                  if (npsn) mapSekolah.set(npsn, s);
+              }
+          }
+      });
+
+      setUploadProgress(20);
+      setProgressLabel(`Menarik Data PTK Mentah ${year}...`);
+
+      const qPtk = query(collection(db, 'dapodik_ptk_chunks'));
+      const snapPtk = await getDocs(qPtk);
+      
+      if (snapPtk.empty) {
+        alert("Database PTK Chunks Kosong! Silakan upload file data PTK/Guru di Database Master terlebih dahulu.");
+        setUploading(false); return;
+      }
+
+      let allPtkData = [];
+      snapPtk.forEach(doc => {
+        const d = doc.data();
+        if (d.data && (String(d.tahun_data) === String(year) || !d.tahun_data)) {
+           const arr = d.data;
+           if (Array.isArray(arr)) {
+               for (let j = 0; j < arr.length; j++) allPtkData.push(arr[j]);
+           }
+        }
+      });
+
+      setUploadProgress(40);
+      setProgressLabel(`Membersihkan Agregasi Guru Lama...`);
+
+      // Bersihkan agregasi guru lama tahun terkait
+      const snapOld = await getDocs(collection(db, 'guru_agregasi'));
+      const docsToDelete = [];
+      snapOld.forEach(d => {
+         if (d.id.startsWith(`guru_${year}_chunk_`) || d.id === `summary_${year}`) {
+            docsToDelete.push(d.ref);
+         }
+      });
+
+      if (docsToDelete.length > 0) {
+          let delBatch = writeBatch(db);
+          let delCount = 0;
+          for (let i = 0; i < docsToDelete.length; i++) {
+              delBatch.delete(docsToDelete[i]);
+              delCount++;
+              if (delCount === 100 || i === docsToDelete.length - 1) {
+                  await delBatch.commit();
+                  delBatch = writeBatch(db);
+                  delCount = 0;
+                  await new Promise(r => setTimeout(r, 50)); 
+              }
+          }
+      }
+
+      setUploadProgress(50);
+      setProgressLabel(`Memfilter & Mengompresi Data Guru Induk...`);
+
+      const compactGuruList = [];
+
+      allPtkData.forEach(p => {
+         // Deteksi khusus Guru dan status Induk
+         const jenisPtk = String(p.jenis_ptk || p['Jenis PTK'] || p.jenisptk || '').toUpperCase();
+         const isGuru = jenisPtk.includes('GURU');
+         
+         const statusTugas = String(p.status_tugas || p.ptk_induk || p.statustugas || '').trim().toUpperCase();
+         const isInduk = statusTugas === 'INDUK' || statusTugas === '1' || statusTugas === 'YA' || statusTugas === 'Y' || statusTugas.includes('INDUK');
+         
+         if(isGuru && isInduk) {
+            const npsnRaw = cleanNpsn(p.npsn || p.NPSN || '');
+            const s = mapSekolah.get(npsnRaw) || {}; // Ambil relasi dari map sekolah
+            
+            const kabupaten = cleanKabupatenName(getVal(p, 'kabupaten') || getVal(s, 'kabupaten') || getVal(s, 'Kabupaten/Kota'));
+            const kecamatan = String(getVal(p, 'kecamatan') || getVal(s, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+            const nama_sekolah = String(getVal(s, 'nama_sekolah') || getVal(s, 'nama_satuan_pendidikan') || getVal(p, 'nama_sekolah') || '-').toUpperCase();
+            const bentuk_pendidikan = String(getVal(s, 'bentuk_pendidikan') || getVal(s, 'jenjang') || getVal(p, 'bentuk_pendidikan') || '').toUpperCase();
+            const status_sekolah = String(getVal(s, 'status_sekolah') || getVal(p, 'status_sekolah')).toUpperCase() === 'NEGERI' ? 'NEGERI' : 'SWASTA';
+            const nama_guru = String(getVal(p, 'nama') || getVal(p, 'nama_ptk') || '-').toUpperCase();
+
+            // PUSH DATA TERKECIL YANG DIBUTUHKAN DAPODIKGURU.JSX SAJA
+            compactGuruList.push({
+              npsn: npsnRaw,
+              nama: nama_guru,
+              kabupaten,
+              kecamatan,
+              nama_sekolah,
+              bentuk_pendidikan,
+              status_sekolah,
+              gender: String(getVal(p, 'gender') || getVal(p, 'jenis_kelamin')),
+              pendidikan: String(getVal(p, 'pendidikan')),
+              status_kepegawaian: String(getVal(p, 'status_kepegawaian')),
+              bidang_studi_sertifikasi: String(getVal(p, 'bidang_studi_sertifikasi')),
+              tanggal_lahir: String(getVal(p, 'tanggal_lahir'))
+            });
+         }
+      });
+
+      setUploadProgress(70);
+      setProgressLabel(`Menyimpan ${compactGuruList.length.toLocaleString('id-ID')} Data Guru Terkompresi...`);
+
+      // Simpan Chunks Optimal (Mencegah Firestore Payload Limit)
+      // Limit diperbesar sedikit ke 2500 karena objek Guru ini sangat ramping
+      const CHUNK_SIZE = 2500;
+      const totalChunks = Math.ceil(compactGuruList.length / CHUNK_SIZE);
+      const currentTime = new Date().toISOString();
+
+      for (let i = 0; i < totalChunks; i++) {
+        const chunkData = compactGuruList.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+        await setDoc(doc(db, 'guru_agregasi', `guru_${year}_chunk_${i}`), {
+          tahun_data: year,
+          chunk_index: i,
+          data_agregasi: chunkData,
+          last_updated: currentTime
+        });
+      }
+
+      // Dokumen Master Summary untuk public tracking
+      await setDoc(doc(db, 'guru_agregasi', `summary_${year}`), {
+        tahun_data: year,
+        total_chunks: totalChunks,
+        total_guru: compactGuruList.length,
+        last_updated: currentTime
+      });
+
+      setUploadProgress(100);
+      alert(`KALKULASI SUKSES!\n\nPre-Kalkulasi Ringkasan Guru (Tahap 2) tahun ${year} berhasil diproses.\nBrowser publik sekarang siap mengakses rincian data guru dengan super ringan.`);
+      checkCalcStatus();
+
+    } catch (error) {
+      console.error(error);
+      alert("Terjadi kesalahan sistem saat memproses kalkulasi Guru.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+
+  // =====================================================================
+  // TAHAP 3: PRE-KALKULASI DATA PESERTA DIDIK (DAPODIKPESERTADIDIK.JSX & RINCIAN)
+  // MENGAMBIL DATA SISWA DARI DAPODIK SEKOLAH
+  // =====================================================================
+  const handleCalculateDashboardSiswa = async (year) => {
+    setUploading(true);
+    setProgressLabel(`Menyiapkan Ringkasan Dashboard Peserta Didik ${year}...`);
+    setUploadProgress(5);
+
+    try {
+      const q = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", year));
+      const snap = await getDocs(q);
+
+      if (snap.empty) {
+        alert("Database Sekolah Chunks Kosong! Tidak dapat memproses data Siswa.");
+        setUploading(false); return;
+      }
+
+      let allSekolahData = [];
+      snap.forEach(doc => { 
+          const arr = doc.data().data;
+          if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
+      });
+
+      setUploadProgress(30);
+      setProgressLabel(`Memproses & Membersihkan Sisa Dokumen Lama...`);
+
+      // Bersihkan agregasi siswa lama tahun tertentu
+      const snapOld = await getDocs(collection(db, 'siswa_agregasi'));
+      let batchDel = writeBatch(db);
+      let delCount = 0;
+      
+      for (const d of snapOld.docs) {
+        if (d.id.startsWith(`siswa_${year}_chunk_`) || d.id === `summary_${year}`) {
+          batchDel.delete(d.ref);
+          delCount++;
+          if (delCount === 100) {
+            await batchDel.commit();
+            batchDel = writeBatch(db);
+            delCount = 0;
+          }
+        }
+      }
+      if (delCount > 0) await batchDel.commit();
+
+      setUploadProgress(50);
+      setProgressLabel(`Mengompresi Atribut Esensial ${allSekolahData.length.toLocaleString('id-ID')} Sekolah...`);
+
+      const compactSiswaList = [];
+
+      allSekolahData.forEach(item => {
+        const npsn = cleanNpsn(getVal(item, 'npsn'));
+        if (!npsn) return;
+
+        const nama = String(getVal(item, 'nama_satuan_pendidikan') || getVal(item, 'nama_sekolah') || 'TANPA NAMA').trim().toUpperCase();
+        const kabupaten = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+        const kecamatan = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+        const status = String(getVal(item, 'status_sekolah') || getVal(item, 'status')).trim().toUpperCase() === 'NEGERI' ? 'NEGERI' : 'SWASTA';
+        const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+
+        // Helper Ekstraktor Siswa Super Kebal (Mencari semua variasi l, p, pd_l, pd_p, lk, pr)
+        const getNumSafe = (key) => parseInt(getVal(item, key)) || 0;
+
+        let pd_l = getNumSafe('pd_l') || getNumSafe('l') || getNumSafe('lk') || 0;
+        let pd_p = getNumSafe('pd_p') || getNumSafe('p') || getNumSafe('pr') || 0;
+        
+        // Coba akumulasi manual jika pd_l dan pd_p kosong (Biasa terjadi di PAUD/TK)
+        if (pd_l === 0 && pd_p === 0) {
+           pd_l = getNumSafe('tka_l') + getNumSafe('tkb_l') + getNumSafe('t1_l') + getNumSafe('t2_l') + getNumSafe('t3_l') + getNumSafe('t4_l') + getNumSafe('t5_l') + getNumSafe('t6_l') + getNumSafe('t7_l') + getNumSafe('t8_l') + getNumSafe('t9_l') + getNumSafe('t10_l') + getNumSafe('t11_l') + getNumSafe('t12_l') + getNumSafe('t13_l') + getNumSafe('paket_a_l') + getNumSafe('paket_b_l') + getNumSafe('paket_c_l');
+           
+           pd_p = getNumSafe('tka_p') + getNumSafe('tkb_p') + getNumSafe('t1_p') + getNumSafe('t2_p') + getNumSafe('t3_p') + getNumSafe('t4_p') + getNumSafe('t5_p') + getNumSafe('t6_p') + getNumSafe('t7_p') + getNumSafe('t8_p') + getNumSafe('t9_p') + getNumSafe('t10_p') + getNumSafe('t11_p') + getNumSafe('t12_p') + getNumSafe('t13_p') + getNumSafe('paket_a_p') + getNumSafe('paket_b_p') + getNumSafe('paket_c_p');
+        }
+
+        let pd_total = getNumSafe('pd_total') || (pd_l + pd_p);
+
+        // Jika pd_total masih 0, kalkulasi ulang total 
+        if (pd_total === 0) pd_total = pd_l + pd_p;
+
+        // PUSH DATA TERKECIL YANG DIBUTUHKAN DAPODIKPESERTADIDIK.JSX SAJA
+        compactSiswaList.push({
+          npsn,
+          nama,
+          kabupaten,
+          kecamatan,
+          status_sekolah: status,
+          bentuk_pendidikan: bentuk,
+          pd_l,
+          pd_p,
+          pd_total,
+          t1_l: getNumSafe('t1_l'), t1_p: getNumSafe('t1_p'),
+          t2_l: getNumSafe('t2_l'), t2_p: getNumSafe('t2_p'),
+          t3_l: getNumSafe('t3_l'), t3_p: getNumSafe('t3_p'),
+          t4_l: getNumSafe('t4_l'), t4_p: getNumSafe('t4_p'),
+          t5_l: getNumSafe('t5_l'), t5_p: getNumSafe('t5_p'),
+          t6_l: getNumSafe('t6_l'), t6_p: getNumSafe('t6_p'),
+          t7_l: getNumSafe('t7_l'), t7_p: getNumSafe('t7_p'),
+          t8_l: getNumSafe('t8_l'), t8_p: getNumSafe('t8_p'),
+          t9_l: getNumSafe('t9_l'), t9_p: getNumSafe('t9_p'),
+          t10_l: getNumSafe('t10_l'), t10_p: getNumSafe('t10_p'),
+          t11_l: getNumSafe('t11_l'), t11_p: getNumSafe('t11_p'),
+          t12_l: getNumSafe('t12_l'), t12_p: getNumSafe('t12_p')
+        });
+      });
+
+      setUploadProgress(70);
+      setProgressLabel(`Menyimpan Dokumen Agregasi Ter-Kalkulasi...`);
+
+      const CHUNK_SIZE = 1500;
+      const totalChunks = Math.ceil(compactSiswaList.length / CHUNK_SIZE);
+      const currentTime = new Date().toISOString();
+
+      for (let i = 0; i < totalChunks; i++) {
+        const chunkData = compactSiswaList.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+        await setDoc(doc(db, 'siswa_agregasi', `siswa_${year}_chunk_${i}`), {
+          tahun_data: year,
+          chunk_index: i,
+          data_agregasi: chunkData,
+          last_updated: currentTime
+        });
+      }
+
+      await setDoc(doc(db, 'siswa_agregasi', `summary_${year}`), {
+        tahun_data: year,
+        total_chunks: totalChunks,
+        total_sekolah: compactSiswaList.length,
+        last_updated: currentTime
+      });
+
+      setUploadProgress(100);
+      alert(`KALKULASI SUKSES!\n\nPre-Kalkulasi Ringkasan Siswa (Tahap 3) tahun ${year} berhasil diproses.\nBrowser publik sekarang dijamin super ringan.`);
+      checkCalcStatus();
+
+    } catch (error) {
+      console.error(error);
+      alert("Terjadi kesalahan sistem saat memproses kalkulasi Siswa.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
 
   // =====================================================================
   // MESIN BARU: TREND DATA NASIONAL (MULTI-TAHUN)
@@ -1645,8 +2109,80 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
            <div className="grid grid-cols-1 gap-6">
 
+             {/* ========================================================================= */}
+             {/* SLOT TERBARU TAHAP 1: PRE-KALKULASI DASHBOARD SEKOLAH (BRANDING INDIGO) */}
+             {/* ========================================================================= */}
+             <div className="bg-indigo-50 p-6 rounded-3xl border border-indigo-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
+                <div>
+                  <h4 className="text-xl font-black text-indigo-900 uppercase flex items-center gap-2">
+                    <School size={20} className="text-indigo-600" /> Ringkasan Dashboard Sekolah (Tahap 1)
+                  </h4>
+                  <p className="text-sm font-medium text-indigo-700 mt-1">
+                    Kompres data profil sekolah, status, akreditasi, & rombel untuk modul rincian utama agar rendering halaman public instant & ringan.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                   {['2024', '2025', '2026'].map(year => (
+                     <div key={year} className="flex flex-col items-center gap-1">
+                       <button onClick={() => handleCalculateDashboardSekolah(year)} className="bg-white border-2 border-indigo-200 text-indigo-600 hover:bg-indigo-600 hover:text-white font-black uppercase px-5 py-3 rounded-xl transition-all active:scale-95 shadow-sm text-xs">
+                         Hitung {year}
+                       </button>
+                       <span className="text-[9px] font-bold text-indigo-600/60">{calcStatus[`sekolah_dashboard_${year}`] || 'Belum'}</span>
+                     </div>
+                   ))}
+                </div>
+             </div>
+
+             {/* ========================================================================= */}
+             {/* SLOT TERBARU TAHAP 2: PRE-KALKULASI DASHBOARD GURU (BRANDING TEAL) */}
+             {/* ========================================================================= */}
+             <div className="bg-teal-50 p-6 rounded-3xl border border-teal-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
+                <div>
+                  <h4 className="text-xl font-black text-teal-900 uppercase flex items-center gap-2">
+                    <Users size={20} className="text-teal-600" /> Ringkasan Dashboard Guru (Tahap 2)
+                  </h4>
+                  <p className="text-sm font-medium text-teal-700 mt-1">
+                    Kompres data PTK (Filter Guru Induk), melengkapi relasi wilayah sekolah, profil gender, kualifikasi, kepegawaian, dll.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                   {['2024', '2025', '2026'].map(year => (
+                     <div key={year} className="flex flex-col items-center gap-1">
+                       <button onClick={() => handleCalculateDashboardGuru(year)} className="bg-white border-2 border-teal-200 text-teal-600 hover:bg-teal-600 hover:text-white font-black uppercase px-5 py-3 rounded-xl transition-all active:scale-95 shadow-sm text-xs">
+                         Hitung {year}
+                       </button>
+                       <span className="text-[9px] font-bold text-teal-600/60">{calcStatus[`guru_dashboard_${year}`] || 'Belum'}</span>
+                     </div>
+                   ))}
+                </div>
+             </div>
+
+             {/* ========================================================================= */}
+             {/* SLOT TERBARU TAHAP 3: PRE-KALKULASI DASHBOARD PESERTA DIDIK (BRANDING SKY) */}
+             {/* ========================================================================= */}
+             <div className="bg-sky-50 p-6 rounded-3xl border border-sky-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
+                <div>
+                  <h4 className="text-xl font-black text-sky-900 uppercase flex items-center gap-2">
+                    <GraduationCap size={20} className="text-sky-600" /> Ringkasan Peserta Didik (Tahap 3)
+                  </h4>
+                  <p className="text-sm font-medium text-sky-700 mt-1">
+                    Kompres data siswa, total PD, gender, dan ekstraksi rincian siswa per kelas untuk semua tingkat pendidikan.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                   {['2024', '2025', '2026'].map(year => (
+                     <div key={year} className="flex flex-col items-center gap-1">
+                       <button onClick={() => handleCalculateDashboardSiswa(year)} className="bg-white border-2 border-sky-200 text-sky-600 hover:bg-sky-600 hover:text-white font-black uppercase px-5 py-3 rounded-xl transition-all active:scale-95 shadow-sm text-xs">
+                         Hitung {year}
+                       </button>
+                       <span className="text-[9px] font-bold text-sky-600/60">{calcStatus[`siswa_dashboard_${year}`] || 'Belum'}</span>
+                     </div>
+                   ))}
+                </div>
+             </div>
+
              {/* MESIN BARU 3: TREND DATA (SISWA & SEKOLAH) */}
-             <div className="bg-yellow-50 p-6 rounded-3xl border border-yellow-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
+             <div className="bg-yellow-50 p-6 rounded-3xl border border-yellow-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm mt-4">
                 <div>
                   <h4 className="text-xl font-black text-yellow-900 uppercase">Trend Data Siswa & Sekolah</h4>
                   <p className="text-sm font-medium text-yellow-700 mt-1">Mengagregasi data 3 tahun terakhir (2024, 2025, 2026) lintas wilayah secara instan.</p>
@@ -1660,18 +2196,18 @@ export default function AdminMesinKalkulasi({ onBack }) {
              </div>
 
              {/* MESIN BARU 2: AKSESIBILITAS & PIP PESERTA DIDIK */}
-             <div className="bg-teal-50 p-6 rounded-3xl border border-teal-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
+             <div className="bg-cyan-50 p-6 rounded-3xl border border-cyan-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
                 <div>
-                  <h4 className="text-xl font-black text-teal-900 uppercase">Aksesibilitas & Kelayakan PIP</h4>
-                  <p className="text-sm font-medium text-teal-700 mt-1">Mengkalkulasi Jarak & Waktu Tempuh sekaligus Status Kelayakan KIP Peserta Didik per wilayah.</p>
+                  <h4 className="text-xl font-black text-cyan-900 uppercase">Aksesibilitas & Kelayakan PIP</h4>
+                  <p className="text-sm font-medium text-cyan-700 mt-1">Mengkalkulasi Jarak & Waktu Tempuh sekaligus Status Kelayakan KIP Peserta Didik per wilayah.</p>
                 </div>
                 <div className="flex gap-2">
                    {['2024', '2025', '2026'].map(year => (
                      <div key={year} className="flex flex-col items-center gap-1">
-                       <button onClick={() => handleCalculateAksesDanPIP(year)} className="bg-white border-2 border-teal-300 text-teal-700 hover:bg-teal-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
+                       <button onClick={() => handleCalculateAksesDanPIP(year)} className="bg-white border-2 border-cyan-300 text-cyan-700 hover:bg-cyan-600 hover:text-white font-black uppercase px-6 py-3 rounded-xl transition-all active:scale-95 shadow-sm">
                          Hitung {year}
                        </button>
-                       <span className="text-[9px] font-bold text-teal-600/60">{calcStatus[`akses_pd_${year}`] || 'Belum'}</span>
+                       <span className="text-[9px] font-bold text-cyan-600/60">{calcStatus[`akses_pd_${year}`] || 'Belum'}</span>
                      </div>
                    ))}
                 </div>

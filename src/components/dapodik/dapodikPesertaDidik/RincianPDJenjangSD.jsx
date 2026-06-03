@@ -9,12 +9,6 @@ import ExcelJS from 'exceljs';
 // =====================================================================
 // UTILITY FUNCTIONS
 // =====================================================================
-const getVal = (obj, keyName) => {
-  if (!obj) return '';
-  const key = Object.keys(obj).find(k => k.trim().toLowerCase() === keyName.toLowerCase());
-  return key ? obj[key] : '';
-};
-
 const KABUPATEN_LIST = [
   "BENGKAYANG", "KAPUAS HULU", "KAYONG UTARA", "KETAPANG", 
   "KUBU RAYA", "LANDAK", "MELAWI", "MEMPAWAH", "PONTIANAK", 
@@ -73,8 +67,9 @@ export default function RincianPDJenjangSD({
 
   // STATE FILTERS
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterWilayah, setFilterWilayah] = useState(initialWilayah); // Untuk Tab Kecamatan
-  const [filterWilayahSekolah, setFilterWilayahSekolah] = useState('SEMUA'); // Untuk Tab Sekolah
+  // PERBAIKAN BUG: Harus selalu diinisialisasi dengan 'SEMUA' agar kecamatan tidak hilang
+  const [filterWilayah, setFilterWilayah] = useState('SEMUA'); 
+  const [filterWilayahSekolah, setFilterWilayahSekolah] = useState('SEMUA'); 
   const [filterStatus, setFilterStatus] = useState('SEMUA'); 
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -87,7 +82,7 @@ export default function RincianPDJenjangSD({
     if (isOpen) {
       setActiveModalTab('KECAMATAN');
       setSearchTerm('');
-      setFilterWilayah('SEMUA');
+      setFilterWilayah('SEMUA'); // Kunci perbaikan
       setFilterWilayahSekolah('SEMUA');
       setFilterStatus('SEMUA');
       setCurrentPage(1);
@@ -110,13 +105,13 @@ export default function RincianPDJenjangSD({
   const listWilayahFilter = useMemo(() => {
     const validData = data.filter(item => {
       if (isModeSemua) return true;
-      return cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) === initialWilayah;
+      return cleanKabupatenName(item.kabupaten) === initialWilayah;
     });
 
     const list = validData.map(item => {
       return isModeSemua 
-        ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'))
-        : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+        ? cleanKabupatenName(item.kabupaten)
+        : String(item.kecamatan || 'TIDAK DIKETAHUI').trim().toUpperCase();
     });
 
     return [...new Set(list)].sort();
@@ -130,16 +125,16 @@ export default function RincianPDJenjangSD({
 
     const baseData = data.filter(item => {
       // 1. Filter Wilayah Base
-      const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+      const kabDb = cleanKabupatenName(item.kabupaten);
       if (!isModeSemua && kabDb !== initialWilayah) return false;
 
       // 2. Filter khusus SD
-      const group = identifyJenjangGroup(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'));
+      const group = identifyJenjangGroup(item.bentuk_pendidikan);
       if (group !== 'SD') return false;
 
       // 3. Filter Status Sekolah
       if (filterStatus !== 'SEMUA') {
-        const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
+        const statusDb = String(item.status_sekolah || '').toUpperCase();
         if (statusDb !== filterStatus) return false;
       }
       return true;
@@ -149,8 +144,8 @@ export default function RincianPDJenjangSD({
 
     baseData.forEach(item => {
       let keyId = isModeSemua 
-          ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) 
-          : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+          ? cleanKabupatenName(item.kabupaten) 
+          : String(item.kecamatan || 'TIDAK DIKETAHUI').trim().toUpperCase();
 
       if (filterWilayah !== 'SEMUA' && keyId !== filterWilayah) return;
 
@@ -164,12 +159,13 @@ export default function RincianPDJenjangSD({
 
       const row = mapAgg.get(keyId);
       
-      const t1 = (parseInt(getVal(item, 't1_l')) || 0) + (parseInt(getVal(item, 't1_p')) || 0);
-      const t2 = (parseInt(getVal(item, 't2_l')) || 0) + (parseInt(getVal(item, 't2_p')) || 0);
-      const t3 = (parseInt(getVal(item, 't3_l')) || 0) + (parseInt(getVal(item, 't3_p')) || 0);
-      const t4 = (parseInt(getVal(item, 't4_l')) || 0) + (parseInt(getVal(item, 't4_p')) || 0);
-      const t5 = (parseInt(getVal(item, 't5_l')) || 0) + (parseInt(getVal(item, 't5_p')) || 0);
-      const t6 = (parseInt(getVal(item, 't6_l')) || 0) + (parseInt(getVal(item, 't6_p')) || 0);
+      // Ambil properti yang sudah bersih dari Tahap 3
+      const t1 = (item.t1_l || 0) + (item.t1_p || 0);
+      const t2 = (item.t2_l || 0) + (item.t2_p || 0);
+      const t3 = (item.t3_l || 0) + (item.t3_p || 0);
+      const t4 = (item.t4_l || 0) + (item.t4_p || 0);
+      const t5 = (item.t5_l || 0) + (item.t5_p || 0);
+      const t6 = (item.t6_l || 0) + (item.t6_p || 0);
 
       row.sd_1 += t1; row.sd_2 += t2; row.sd_3 += t3;
       row.sd_4 += t4; row.sd_5 += t5; row.sd_6 += t6;
@@ -203,31 +199,31 @@ export default function RincianPDJenjangSD({
     if (!data) return [];
     
     let validData = data.filter(item => {
-      const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+      const kabDb = cleanKabupatenName(item.kabupaten);
       if (!isModeSemua && kabDb !== initialWilayah) return false;
 
       // Filter khusus SD
-      const group = identifyJenjangGroup(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'));
+      const group = identifyJenjangGroup(item.bentuk_pendidikan);
       if (group !== 'SD') return false;
 
       // Filter Status Sekolah
       if (filterStatus !== 'SEMUA') {
-        const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
+        const statusDb = String(item.status_sekolah || '').toUpperCase();
         if (statusDb !== filterStatus) return false;
       }
 
       // Filter Wilayah Khusus Tab Sekolah (Kecamatan/Kabupaten)
       if (filterWilayahSekolah !== 'SEMUA') {
         let keyId = isModeSemua 
-          ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) 
-          : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+          ? cleanKabupatenName(item.kabupaten) 
+          : String(item.kecamatan || 'TIDAK DIKETAHUI').trim().toUpperCase();
         if (keyId !== filterWilayahSekolah) return false;
       }
 
       // Filter Pencarian
       if (searchTerm) {
-        const nama = String(getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '').toLowerCase();
-        const npsn = String(getVal(item, 'npsn') || '').toLowerCase();
+        const nama = String(item.nama || '-').toLowerCase();
+        const npsn = String(item.npsn || '').toLowerCase();
         const q = searchTerm.toLowerCase();
         if (!nama.includes(q) && !npsn.includes(q)) return false;
       }
@@ -236,18 +232,18 @@ export default function RincianPDJenjangSD({
     });
 
     return validData.map(item => {
-      const t1 = (parseInt(getVal(item, 't1_l')) || 0) + (parseInt(getVal(item, 't1_p')) || 0);
-      const t2 = (parseInt(getVal(item, 't2_l')) || 0) + (parseInt(getVal(item, 't2_p')) || 0);
-      const t3 = (parseInt(getVal(item, 't3_l')) || 0) + (parseInt(getVal(item, 't3_p')) || 0);
-      const t4 = (parseInt(getVal(item, 't4_l')) || 0) + (parseInt(getVal(item, 't4_p')) || 0);
-      const t5 = (parseInt(getVal(item, 't5_l')) || 0) + (parseInt(getVal(item, 't5_p')) || 0);
-      const t6 = (parseInt(getVal(item, 't6_l')) || 0) + (parseInt(getVal(item, 't6_p')) || 0);
+      const t1 = (item.t1_l || 0) + (item.t1_p || 0);
+      const t2 = (item.t2_l || 0) + (item.t2_p || 0);
+      const t3 = (item.t3_l || 0) + (item.t3_p || 0);
+      const t4 = (item.t4_l || 0) + (item.t4_p || 0);
+      const t5 = (item.t5_l || 0) + (item.t5_p || 0);
+      const t6 = (item.t6_l || 0) + (item.t6_p || 0);
 
       return {
-        npsn: getVal(item, 'npsn'),
-        nama_sekolah: getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '-',
-        status: String(getVal(item, 'status_sekolah')).toUpperCase(),
-        kecamatan: String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase(),
+        npsn: item.npsn || '-',
+        nama_sekolah: String(item.nama || '-').toUpperCase(),
+        status: String(item.status_sekolah || '').toUpperCase(),
+        kecamatan: String(item.kecamatan || 'TIDAK DIKETAHUI').trim().toUpperCase(),
         sd_1: t1,
         sd_2: t2,
         sd_3: t3,

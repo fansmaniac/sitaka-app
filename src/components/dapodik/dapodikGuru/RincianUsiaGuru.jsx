@@ -5,21 +5,13 @@ import {
   Building2, School
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
-import { db } from '../../../firebase/config';
-import { collection, query, getDocs } from 'firebase/firestore';
 
 // =====================================================================
 // UTILITY FUNCTIONS
 // =====================================================================
-const getVal = (obj, keyName) => {
-  if (!obj) return '';
-  const key = Object.keys(obj).find(k => k.trim().toLowerCase() === keyName.toLowerCase());
-  return key ? obj[key] : '';
-};
-
 // Fungsi Hitung Umur Real-time
 const calculateAge = (birthDateString) => {
-  if (!birthDateString) return null;
+  if (!birthDateString || birthDateString === '-') return null;
   const today = new Date();
   const birthDate = new Date(birthDateString);
   if (isNaN(birthDate)) return null;
@@ -105,7 +97,7 @@ export default function RincianUsiaGuru({
   onClose, 
   data = [], 
   initialWilayah = 'SEMUA', 
-  activeJenjang = 'SEMUA', // Context Header dari Dashboard
+  activeJenjang = 'SEMUA',
   displayLastUpdated 
 }) {
   let mappedJenjang = activeJenjang;
@@ -121,44 +113,10 @@ export default function RincianUsiaGuru({
   const [filterStatus, setFilterStatus] = useState('SEMUA'); 
   const [activeJenjangTab, setActiveJenjangTab] = useState('SEMUA'); 
 
-  // STATE MAPPING NAMA SEKOLAH (NPSN -> Nama Sekolah)
-  const [mapNamaSekolah, setMapNamaSekolah] = useState(new Map());
-
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 15;
 
   const isModeSemua = initialWilayah === 'SEMUA';
-
-  // --- FETCH MAPPING NAMA SEKOLAH SECARA MANDIRI ---
-  useEffect(() => {
-    const fetchNamaSekolah = async () => {
-      try {
-        const q = query(collection(db, 'dapodik_sekolah_chunks'));
-        const snap = await getDocs(q);
-        const newMap = new Map();
-        
-        snap.forEach(doc => {
-          const chunk = doc.data();
-          if (chunk && Array.isArray(chunk.data)) {
-            chunk.data.forEach(s => {
-              const npsn = String(s.npsn || '').trim();
-              const nama = s.nama_satuan_pendidikan || s.nama_sekolah || '';
-              if (npsn && nama) {
-                newMap.set(npsn, nama);
-              }
-            });
-          }
-        });
-        setMapNamaSekolah(newMap);
-      } catch (err) {
-        console.error("Gagal menarik mapping nama sekolah:", err);
-      }
-    };
-
-    if (isOpen) {
-      fetchNamaSekolah();
-    }
-  }, [isOpen]);
 
   // Sinkronisasi saat modal dibuka
   useEffect(() => {
@@ -201,13 +159,13 @@ export default function RincianUsiaGuru({
   const listWilayahFilter = useMemo(() => {
     const validData = data.filter(item => {
       if (isModeSemua) return true;
-      return cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) === initialWilayah;
+      return cleanKabupatenName(item.kabupaten) === initialWilayah;
     });
 
     const list = validData.map(item => {
       return isModeSemua 
-        ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'))
-        : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+        ? cleanKabupatenName(item.kabupaten)
+        : String(item.kecamatan || 'TIDAK DIKETAHUI').trim().toUpperCase();
     });
 
     return [...new Set(list)].sort();
@@ -220,14 +178,14 @@ export default function RincianUsiaGuru({
     if (!data) return [];
     
     const baseData = data.filter(item => {
-      const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+      const kabDb = cleanKabupatenName(item.kabupaten);
       if (!isModeSemua && kabDb !== initialWilayah) return false;
 
-      const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+      const jenjangDb = String(item.bentuk_pendidikan || '').trim().toUpperCase();
       if (!isJenjangValid(jenjangDb, mappedJenjang)) return false;
 
       if (filterStatus !== 'SEMUA') {
-        const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
+        const statusDb = String(item.status_sekolah || '').toUpperCase();
         if (statusDb !== filterStatus) return false;
       }
       return true;
@@ -237,8 +195,8 @@ export default function RincianUsiaGuru({
 
     baseData.forEach(item => {
       let keyId = isModeSemua 
-          ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) 
-          : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+          ? cleanKabupatenName(item.kabupaten) 
+          : String(item.kecamatan || 'TIDAK DIKETAHUI').trim().toUpperCase();
 
       if (filterWilayah !== 'SEMUA' && keyId !== filterWilayah) return;
 
@@ -247,7 +205,7 @@ export default function RincianUsiaGuru({
       }
 
       const row = mapAgg.get(keyId);
-      const tglLahir = getVal(item, 'tanggal_lahir');
+      const tglLahir = item.tanggal_lahir;
       const age = calculateAge(tglLahir);
 
       if (age !== null) {
@@ -283,7 +241,7 @@ export default function RincianUsiaGuru({
   }, [dataKecamatan]);
 
   // =====================================================================
-  // AGREGASI DATA TAB "PER SEKOLAH" DENGAN MAPPING NAMA SINKRON
+  // AGREGASI DATA TAB "PER SEKOLAH"
   // =====================================================================
   const dataSekolah = useMemo(() => {
     if (!data) return [];
@@ -291,30 +249,25 @@ export default function RincianUsiaGuru({
     const mapSekolah = new Map();
 
     data.forEach(item => {
-      const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+      const kabDb = cleanKabupatenName(item.kabupaten);
       if (!isModeSemua && kabDb !== initialWilayah) return;
 
       if (filterStatus !== 'SEMUA') {
-        const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
+        const statusDb = String(item.status_sekolah || '').toUpperCase();
         if (statusDb !== filterStatus) return;
       }
 
-      const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+      const jenjangDb = String(item.bentuk_pendidikan || '').trim().toUpperCase();
       if (!isJenjangValid(jenjangDb, activeJenjangTab)) return;
 
-      const kecDb = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+      const kecDb = String(item.kecamatan || 'TIDAK DIKETAHUI').trim().toUpperCase();
       if (filterWilayahSekolah !== 'SEMUA') {
         let keyId = isModeSemua ? kabDb : kecDb;
         if (keyId !== filterWilayahSekolah) return;
       }
 
-      const npsn = getVal(item, 'npsn') || '-';
-      let namaSekolah = getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '';
-      
-      // SUNTIKAN KECERDASAN: Ambil dari mapping jika kosong
-      if (!namaSekolah || namaSekolah === '-') {
-         namaSekolah = mapNamaSekolah.get(String(npsn).trim()) || '-';
-      }
+      const npsn = item.npsn || '-';
+      const namaSekolah = String(item.nama_sekolah || '-').toUpperCase();
 
       if (searchTerm) {
         const q = searchTerm.toLowerCase();
@@ -328,7 +281,7 @@ export default function RincianUsiaGuru({
           nama_sekolah: namaSekolah,
           kecamatan: kecDb,
           jenjang: jenjangDb,
-          status: String(getVal(item, 'status_sekolah')).toUpperCase(),
+          status: String(item.status_sekolah || '').toUpperCase(),
           usia_30: 0,
           usia_40: 0,
           usia_50: 0,
@@ -338,7 +291,7 @@ export default function RincianUsiaGuru({
       }
       
       const row = mapSekolah.get(uniqueKey);
-      const tglLahir = getVal(item, 'tanggal_lahir');
+      const tglLahir = item.tanggal_lahir;
       const age = calculateAge(tglLahir);
 
       if (age !== null) {
@@ -352,7 +305,7 @@ export default function RincianUsiaGuru({
     });
 
     return Array.from(mapSekolah.values()).sort((a, b) => a.nama_sekolah.localeCompare(b.nama_sekolah));
-  }, [data, isModeSemua, initialWilayah, filterStatus, activeJenjangTab, filterWilayahSekolah, searchTerm, mapNamaSekolah]);
+  }, [data, isModeSemua, initialWilayah, filterStatus, activeJenjangTab, filterWilayahSekolah, searchTerm]);
 
   const totalGuruSekolah = useMemo(() => {
     return dataSekolah.reduce((acc, curr) => {

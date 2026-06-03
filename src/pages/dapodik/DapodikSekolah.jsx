@@ -1,30 +1,69 @@
-import React, { useState, useMemo, useEffect } from 'react';
-// TAMBAHAN: Import useSearchParams dari react-router-dom
+import React, { useState, useMemo, useEffect, useTransition } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { 
-  Download, School, MapPin, Eye, FileSpreadsheet, 
-  Search, X, ChevronLeft, ChevronRight, Building2, Layers, Award, GraduationCap
+  School, MapPin, Eye, FileSpreadsheet, 
+  Search, X, ChevronLeft, ChevronRight, Building2, Layers, Award, GraduationCap, Loader2
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
-
-// --- PERBAIKAN IMPORT PATH FIREBASE ---
 import { db } from '../../firebase/config';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 
-// --- PERBAIKAN IMPORT KOMPONEN MODAL RINCIAN ---
+// IMPORT KOMPONEN MODAL RINCIAN
 import RincianStatusSekolah from '../../components/dapodik/dapodikSekolah/RincianStatusSekolah';
 import RincianAkreditasiSekolah from '../../components/dapodik/dapodikSekolah/RincianAkreditasiSekolah';
 import RincianRombelSekolah from '../../components/dapodik/dapodikSekolah/RincianRombelSekolah';
 
 // =====================================================================
-// UTILITY FUNCTIONS
+// UTILITY: CACHING LOKAL (BRANKAS BROWSER)
+// Menggunakan database baru khusus agregasi
 // =====================================================================
-const getVal = (obj, keyName) => {
-  if (!obj) return '';
-  const key = Object.keys(obj).find(k => k.trim().toLowerCase() === keyName.toLowerCase());
-  return key ? obj[key] : '';
+const DB_NAME = "SitakaCacheDB_SekolahModul_Agregasi";
+const STORE_NAME = "sekolahDataAgg";
+const CACHE_EXPIRY_HOURS = 12;
+
+const initDB = () => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = (e) => e.target.result.createObjectStore(STORE_NAME);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
 };
 
+const saveToCache = async (key, data) => {
+  try {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      tx.objectStore(STORE_NAME).put({ data, timestamp: Date.now() }, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) { console.warn("Gagal menyimpan ke cache lokal", err); }
+};
+
+const getFromCache = async (key) => {
+  try {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const req = tx.objectStore(STORE_NAME).get(key);
+      req.onsuccess = () => {
+        const result = req.result;
+        if (result) {
+          const hoursOld = (Date.now() - result.timestamp) / (1000 * 60 * 60);
+          if (hoursOld < CACHE_EXPIRY_HOURS) return resolve(result.data);
+        }
+        resolve(null);
+      };
+      req.onerror = () => resolve(null);
+    });
+  } catch (err) { return null; }
+};
+
+// =====================================================================
+// UTILITY FUNCTIONS
+// =====================================================================
 const getKabupatenRank = (kabName) => {
   const name = String(kabName).toUpperCase();
   if (name.includes("BENGKAYANG")) return 1;
@@ -42,19 +81,6 @@ const getKabupatenRank = (kabName) => {
   if (name.includes("PONTIANAK")) return 13;
   if (name.includes("SINGKAWANG")) return 14;
   return 99;
-};
-
-const cleanKabupatenName = (rawName) => {
-  if (!rawName) return "TIDAK DIKETAHUI";
-  let name = String(rawName).toUpperCase().replace(/^(KAB\.|KABUPATEN|KOTA)\s+/i, '').trim();
-  const KABUPATEN_LIST = [
-    "BENGKAYANG", "KAPUAS HULU", "KAYONG UTARA", "KETAPANG", 
-    "KUBU RAYA", "LANDAK", "MELAWI", "MEMPAWAH", "PONTIANAK", 
-    "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
-  ];
-  const found = KABUPATEN_LIST.find(kab => name.includes(kab));
-  if (found) return found;
-  return name; 
 };
 
 // =====================================================================
@@ -85,8 +111,8 @@ const KATEGORI_BENTUK = {
 const TABS_MAPPING = {
   'SEMUA': ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'],
   'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
-  'DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
-  'MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
+  'DASAR': ['SD', 'SMP'], // Update: Menghilangkan SPK dari List Tab Karena sudah digabung
+  'MENENGAH': ['SMA', 'SMK'], // Update: Menghilangkan SPK dari List Tab Karena sudah digabung
   'INKLUSIF': ['SLB'],
   'NON FORMAL': ['PKBM', 'SKB']
 };
@@ -224,84 +250,100 @@ const PremiumPieChart = ({ segments, total }) => {
 
 
 // =====================================================================
-// MAIN COMPONENT: DAPODIK SEKOLAH
+// MAIN COMPONENT: DAPODIK SEKOLAH (VERSI AGREGASI SUPER RINGAN)
 // =====================================================================
-export default function DapodikSekolah({ data = [], selectedYear = '2026', lastUpdatedDate }) {
-  // --- PERUBAHAN UTAMA: Validasi Parameter URL yang kebal Error ---
+export default function DapodikSekolah({ selectedYear = '2026' }) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const [dataSekolah, setDataSekolah] = useState([]);
+  const [loading, setLoading] = useState(true);
   
-  // Baca parameter, jika kotor/salah otomatis reset ke default yang aman
+  // Baca parameter dari URL, jika kotor reset ke default
   const rawView = searchParams.get('view') ? searchParams.get('view').toUpperCase() : 'STATUS';
   const activeView = ['STATUS', 'AKREDITASI', 'ROMBEL'].includes(rawView) ? rawView : 'STATUS';
 
   const rawKategori = searchParams.get('kategori') ? searchParams.get('kategori').toUpperCase() : 'SEMUA';
   const activeKategori = Object.keys(TABS_MAPPING).includes(rawKategori) ? rawKategori : 'SEMUA'; 
 
-  // Mengubah dari 'tab' menjadi 'jenjang' agar tidak disabotase modul Guru
   const rawTab = searchParams.get('jenjang') ? searchParams.get('jenjang').toUpperCase() : 'SEMUA';
   const validTabs = TABS_MAPPING[activeKategori] || [];
   const activeTab = (rawTab === 'SEMUA' || validTabs.includes(rawTab)) ? rawTab : 'SEMUA';
 
-  // Fungsi pengubah URL state yang sinkron
-  const setActiveView = (val) => {
-    setSearchParams(prev => {
-      prev.set('view', val);
-      return prev;
-    });
-  };
-
-  const setActiveKategori = (val) => {
-    setSearchParams(prev => {
-      prev.set('kategori', val);
-      prev.set('jenjang', 'SEMUA'); // Reset jenjang otomatis ke SEMUA
-      return prev;
-    });
-  };
-
-  const setActiveTab = (val) => {
-    setSearchParams(prev => {
-      prev.set('jenjang', val);
-      return prev;
-    });
-  };
-  // -------------------------------------------------------------------------
-
+  const [isPending, startTransition] = useTransition();
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedWilayah, setSelectedWilayah] = useState('SEMUA');
   const [fetchedDate, setFetchedDate] = useState('');
 
-  // FETCH TANGGAL UPDATE LANGSUNG DARI FIREBASE
+  // Fungsi pengubah URL state yang sinkron
+  const setActiveView = (val) => setSearchParams(prev => { prev.set('view', val); return prev; });
+  const setActiveKategori = (val) => setSearchParams(prev => { prev.set('kategori', val); prev.set('jenjang', 'SEMUA'); return prev; });
+  const setActiveTab = (val) => setSearchParams(prev => { prev.set('jenjang', val); return prev; });
+
+  // -------------------------------------------------------------------------
+  // MENGAMBIL DATA DARI KOLEKSI "sekolah_agregasi" YANG SUDAH DI-COMPRESS
+  // -------------------------------------------------------------------------
   useEffect(() => {
-    const getUpdateDate = async () => {
+    const fetchDataAgregasi = async () => {
+      setLoading(true);
+      const cacheKey = `sekolah_agregasi_v1_${selectedYear}`;
+      
       try {
-        const q = query(collection(db, 'dapodik_sekolah_chunks'), where('tahun_data', '==', selectedYear), limit(1));
-        const snap = await getDocs(q);
-        if (!snap.empty) {
-          const docData = snap.docs[0].data();
+        const cachedData = await getFromCache(cacheKey);
+        if (cachedData) {
+          setDataSekolah(cachedData.data);
+          setFetchedDate(cachedData.date);
+          setLoading(false);
+          return;
+        }
+
+        // Ambil info master summary untuk tracking tanggal update
+        const summarySnap = await getDocs(query(collection(db, 'sekolah_agregasi'), where('__name__', '==', `summary_${selectedYear}`)));
+        let lastUpdatedStr = '';
+        if (!summarySnap.empty) {
+          const docData = summarySnap.docs[0].data();
           if (docData.last_updated) {
             const d = new Date(docData.last_updated);
             const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
-            setFetchedDate(`${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()} Pukul ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+            lastUpdatedStr = `${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()} Pukul ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+            setFetchedDate(lastUpdatedStr);
           }
         }
+
+        // Fetch semua chunks agregasi
+        const qChunks = query(collection(db, 'sekolah_agregasi'), where('tahun_data', '==', selectedYear));
+        const snapChunks = await getDocs(qChunks);
+        
+        let allData = [];
+        snapChunks.forEach(doc => {
+          if (doc.id.includes('_chunk_')) {
+             const chunkArr = doc.data().data_agregasi || [];
+             allData.push(...chunkArr);
+          }
+        });
+
+        setDataSekolah(allData);
+        await saveToCache(cacheKey, { data: allData, date: lastUpdatedStr });
+
       } catch (e) {
-        console.error("Gagal menarik tanggal update", e);
+        console.error("Gagal menarik data sekolah agregasi", e);
+      } finally {
+        setLoading(false);
       }
     };
-    getUpdateDate();
+    
+    fetchDataAgregasi();
   }, [selectedYear]);
 
-  const displayLastUpdated = fetchedDate || lastUpdatedDate || 'Sesuai Database Terkini';
+  const displayLastUpdated = fetchedDate || 'Belum Di-Kalkulasi oleh Admin';
 
   const listKabupaten = useMemo(() => {
-    const unik = [...new Set(data.map(item => cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'))))];
-    return unik.filter(k => k !== 'TIDAK DIKETAHUI').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
-  }, [data]);
+    const unik = [...new Set(dataSekolah.map(item => item.kabupaten))];
+    return unik.filter(Boolean).sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
+  }, [dataSekolah]);
 
-  // ENGINE AGREGASI MASTER UNTUK KETIGA TAB
+  // ENGINE AGREGASI UNTUK KETIGA VIEW BERDASARKAN FILTER TAB & KATEGORI
   const aggregatedData = useMemo(() => {
-    const filteredData = data.filter(item => {
-      const bentukDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+    const filteredData = dataSekolah.filter(item => {
+      const bentukDb = String(item.bentuk_pendidikan || '').trim().toUpperCase();
       
       // LOGIKA FILTER BERDASARKAN KATEGORI & TAB
       if (activeKategori === 'SEMUA') {
@@ -313,6 +355,9 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
             const allowed = KATEGORI_BENTUK[activeKategori] || [];
             return allowed.includes(bentukDb);
          } else {
+            // PERBAIKAN: Jika pengguna memilih tab spesifik (misal 'SD', pastikan SPK SD juga masuk)
+            const allowed = JENJANG_GROUPS[activeTab] || [];
+            if (allowed.length > 0) return allowed.includes(bentukDb);
             return bentukDb === activeTab;
          }
       }
@@ -330,19 +375,13 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
     });
 
     filteredData.forEach(item => {
-       const kab = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+       const kab = item.kabupaten;
        if (!mapAgg.has(kab)) return; 
 
        const row = mapAgg.get(kab);
-       const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
-       const akr = String(getVal(item, 'akreditasi')).trim().toUpperCase();
-       
-       let rombelTotal = 0;
-       Object.keys(item).forEach(k => {
-           if(k.toLowerCase().includes('rombel_')) {
-               rombelTotal += parseInt(item[k]) || 0;
-           }
-       });
+       const isNegeri = item.status_sekolah === 'NEGERI';
+       const akr = item.akreditasi;
+       const rombelTotal = item.rombel_total || 0;
 
        // 1. STATUS SEKOLAH
        if (isNegeri) row.status_n++; else row.status_s++;
@@ -351,7 +390,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
        if (akr === 'A') row.akr_a++;
        else if (akr === 'B') row.akr_b++;
        else if (akr === 'C') row.akr_c++;
-       else if (akr === 'TT' || akr === 'TIDAK TERAKREDITASI') row.akr_tt++;
+       else if (akr === 'TT') row.akr_tt++;
        else row.akr_belum++; 
 
        // 3. ROMBEL
@@ -362,7 +401,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
     });
 
     return Array.from(mapAgg.values()).sort((a, b) => getKabupatenRank(a.wilayah) - getKabupatenRank(b.wilayah));
-  }, [data, activeKategori, activeTab, listKabupaten]);
+  }, [dataSekolah, activeKategori, activeTab, listKabupaten]);
 
   const grandTotals = useMemo(() => {
     return aggregatedData.reduce((acc, curr) => {
@@ -387,9 +426,9 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
   // PENENTUAN LABEL UNTUK EKSPOR DAN JUDUL PIE CHART
   let activeLabel = 'SEMUA';
   if (activeKategori === 'SEMUA') {
-      activeLabel = activeTab; // 'SEMUA', 'PAUD', 'SD', dll
+      activeLabel = activeTab;
   } else {
-      activeLabel = activeTab === 'SEMUA' ? activeKategori : activeTab; // 'DASAR', 'TK', 'SPK SD', dll
+      activeLabel = activeTab === 'SEMUA' ? activeKategori : activeTab;
   }
 
   // DINAMIKA PIE CHART BERDASARKAN MODE
@@ -508,6 +547,15 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
     red: { bg: 'bg-red-50', border: 'border-red-100', hover: 'hover:bg-red-100', dot: 'bg-red-500', textMain: 'text-red-900', textVal: 'text-red-600', textPct: 'text-red-500' },
     slate: { bg: 'bg-slate-50', border: 'border-slate-200', hover: 'hover:bg-slate-100', dot: 'bg-slate-500', textMain: 'text-slate-700', textVal: 'text-slate-600', textPct: 'text-slate-500' }
   };
+
+  if (loading) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center italic font-black uppercase tracking-widest text-indigo-300">
+        <Loader2 className="animate-spin text-indigo-600 mb-4" size={64} />
+        Memuat Agregasi Data Sekolah...
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col animate-in fade-in duration-500">
@@ -721,7 +769,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
         <RincianStatusSekolah 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={data}
+          data={dataSekolah}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
@@ -732,7 +780,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
         <RincianAkreditasiSekolah 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={data}
+          data={dataSekolah}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
@@ -743,7 +791,7 @@ export default function DapodikSekolah({ data = [], selectedYear = '2026', lastU
         <RincianRombelSekolah 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={data}
+          data={dataSekolah}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}

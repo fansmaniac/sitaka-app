@@ -4,7 +4,7 @@ import {
   MapPin, Filter, Download, Briefcase, Eye, School, BookOpen
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
-import RincianStatusKepegawaianModal from './RincianStatusKepegawaianModal';
+import RincianStatusKepegawaianModal from '../components/dapodik/RincianStatusKepegawaianModal';
 
 // Utility akses properti object yang aman
 const getVal = (obj, keyName) => {

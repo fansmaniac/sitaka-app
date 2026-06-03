@@ -1,14 +1,13 @@
-import React, { useState, useMemo, useEffect } from 'react';
-// TAMBAHAN: Import useSearchParams dari react-router-dom
+import React, { useState, useMemo, useEffect, useTransition } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { 
   Download, Users, MapPin, Eye, FileSpreadsheet, 
   Search, X, ChevronLeft, ChevronRight, Building2, 
-  Award, Briefcase, GraduationCap, Clock, CalendarDays
+  Award, Briefcase, GraduationCap, Clock, CalendarDays, Loader2
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import { db } from '../../firebase/config';
-import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 
 // IMPORT SELURUH KOMPONEN MODAL RINCIAN
 import RincianStatusSekolahGuru from '../../components/dapodik/dapodikGuru/RincianStatusSekolahGuru';
@@ -20,28 +19,55 @@ import RincianUsiaGuru from '../../components/dapodik/dapodikGuru/RincianUsiaGur
 import RincianProyeksiPensiunGuru from '../../components/dapodik/dapodikGuru/RincianProyeksiPensiunGuru';
 
 // =====================================================================
+// UTILITY: CACHING LOKAL (BRANKAS BROWSER)
+// =====================================================================
+const DB_NAME = "SitakaCacheDB_GuruModul_Agregasi";
+const STORE_NAME = "guruDataAgg";
+const CACHE_EXPIRY_HOURS = 12;
+
+const initDB = () => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = (e) => e.target.result.createObjectStore(STORE_NAME);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+};
+
+const saveToCache = async (key, data) => {
+  try {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      tx.objectStore(STORE_NAME).put({ data, timestamp: Date.now() }, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) { console.warn("Gagal menyimpan ke cache lokal", err); }
+};
+
+const getFromCache = async (key) => {
+  try {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const req = tx.objectStore(STORE_NAME).get(key);
+      req.onsuccess = () => {
+        const result = req.result;
+        if (result) {
+          const hoursOld = (Date.now() - result.timestamp) / (1000 * 60 * 60);
+          if (hoursOld < CACHE_EXPIRY_HOURS) return resolve(result.data);
+        }
+        resolve(null);
+      };
+      req.onerror = () => resolve(null);
+    });
+  } catch (err) { return null; }
+};
+
+// =====================================================================
 // UTILITY FUNCTIONS
 // =====================================================================
-const getVal = (obj, keyName) => {
-  if (!obj) return '';
-  const key = Object.keys(obj).find(k => k.trim().toLowerCase() === keyName.toLowerCase());
-  return key ? obj[key] : '';
-};
-
-const KABUPATEN_LIST = [
-  "BENGKAYANG", "KAPUAS HULU", "KAYONG UTARA", "KETAPANG", 
-  "KUBU RAYA", "LANDAK", "MELAWI", "MEMPAWAH", "PONTIANAK", 
-  "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
-];
-
-const cleanKabupatenName = (rawName) => {
-  if (!rawName) return "TIDAK DIKETAHUI";
-  let name = String(rawName).toUpperCase().replace(/^(KAB\.|KABUPATEN|KOTA)\s+/i, '').trim();
-  const found = KABUPATEN_LIST.find(kab => name.includes(kab));
-  if (found) return found;
-  return name; 
-};
-
 const getKabupatenRank = (kabName) => {
   const name = String(kabName).toUpperCase();
   if (name.includes("BENGKAYANG")) return 1;
@@ -63,7 +89,7 @@ const getKabupatenRank = (kabName) => {
 
 // Hitung Umur Real-time
 const calculateAge = (birthDateString) => {
-  if (!birthDateString) return null;
+  if (!birthDateString || birthDateString === '-') return null;
   const today = new Date();
   const birthDate = new Date(birthDateString);
   if (isNaN(birthDate)) return null;
@@ -76,7 +102,7 @@ const calculateAge = (birthDateString) => {
 };
 
 // =====================================================================
-// PENGELOMPOKAN KATEGORI DROPDOWN SINKRON DENGAN DAPODIK SEKOLAH
+// PENGELOMPOKAN KATEGORI DROPDOWN
 // =====================================================================
 const KATEGORI_MAPPING = {
   'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
@@ -192,21 +218,18 @@ const PremiumPieChart = ({ segments, total }) => {
 // =====================================================================
 // MAIN COMPONENT: DAPODIK GURU
 // =====================================================================
-export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpdatedDate }) {
-  // --- PERUBAHAN UTAMA: Mengganti useState menjadi URL Parameters ---
+export default function DapodikGuru({ selectedYear = '2026' }) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const [dataGuru, setDataGuru] = useState([]);
+  const [loading, setLoading] = useState(true);
   
-  // Membaca parameter 'tab' dari URL, jika kosong default ke 'STATUS'
   const activeView = searchParams.get('tab')?.toUpperCase() || 'STATUS';
-  
-  // Fungsi untuk mengubah URL saat tab diklik (misal menjadi ?tab=gender)
   const setActiveView = (viewId) => {
     setSearchParams(prev => {
       prev.set('tab', viewId.toLowerCase());
       return prev;
     });
   };
-  // ------------------------------------------------------------------
   
   const [activeKategori, setActiveKategori] = useState('SEMUA'); 
   const [activeBentuk, setActiveBentuk] = useState('SEMUA'); 
@@ -215,51 +238,73 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
   const [selectedWilayah, setSelectedWilayah] = useState('SEMUA');
   const [fetchedDate, setFetchedDate] = useState('');
 
+  // -------------------------------------------------------------------------
+  // MENGAMBIL DATA DARI KOLEKSI "guru_agregasi" YANG SUDAH DI-COMPRESS
+  // -------------------------------------------------------------------------
   useEffect(() => {
-    const getUpdateDate = async () => {
+    const fetchDataAgregasi = async () => {
+      setLoading(true);
+      const cacheKey = `guru_agregasi_v1_${selectedYear}`;
+      
       try {
-        const qPtk = query(collection(db, 'dapodik_ptk_chunks'), where('tahun_data', '==', selectedYear), limit(1));
-        const snapPtk = await getDocs(qPtk);
-        let dateString = null;
-        
-        if (!snapPtk.empty) {
-          const docData = snapPtk.docs[0].data();
-          if (docData.last_updated && typeof docData.last_updated === 'string') dateString = docData.last_updated;
+        const cachedData = await getFromCache(cacheKey);
+        if (cachedData) {
+          setDataGuru(cachedData.data);
+          setFetchedDate(cachedData.date);
+          setLoading(false);
+          return;
         }
-        
-        if (!dateString) {
-           const qSek = query(collection(db, 'dapodik_sekolah_chunks'), where('tahun_data', '==', selectedYear), limit(1));
-           const snapSek = await getDocs(qSek);
-           if (!snapSek.empty) {
-              const docData = snapSek.docs[0].data();
-              if (docData.last_updated && typeof docData.last_updated === 'string') dateString = docData.last_updated;
-           }
+
+        // Ambil info master summary untuk tracking tanggal update
+        const summarySnap = await getDocs(query(collection(db, 'guru_agregasi'), where('__name__', '==', `summary_${selectedYear}`)));
+        let lastUpdatedStr = '';
+        if (!summarySnap.empty) {
+          const docData = summarySnap.docs[0].data();
+          if (docData.last_updated) {
+            const d = new Date(docData.last_updated);
+            const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+            lastUpdatedStr = `${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()} Pukul ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+            setFetchedDate(lastUpdatedStr);
+          }
         }
+
+        // Fetch semua chunks agregasi
+        const qChunks = query(collection(db, 'guru_agregasi'), where('tahun_data', '==', selectedYear));
+        const snapChunks = await getDocs(qChunks);
         
-        if (dateString) {
-          const d = new Date(dateString);
-          const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
-          setFetchedDate(`${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()} Pukul ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
-        }
+        let allData = [];
+        snapChunks.forEach(doc => {
+          if (doc.id.includes('_chunk_')) {
+             const chunkArr = doc.data().data_agregasi || [];
+             allData.push(...chunkArr);
+          }
+        });
+
+        setDataGuru(allData);
+        await saveToCache(cacheKey, { data: allData, date: lastUpdatedStr });
+
       } catch (e) {
-        console.error("Gagal menarik tanggal update", e);
+        console.error("Gagal menarik data guru agregasi", e);
+      } finally {
+        setLoading(false);
       }
     };
-    getUpdateDate();
+    
+    fetchDataAgregasi();
   }, [selectedYear]);
 
-  const displayLastUpdated = fetchedDate || lastUpdatedDate || 'Sesuai Database Terkini';
+  const displayLastUpdated = fetchedDate || 'Belum Di-Kalkulasi oleh Admin';
 
   const listKabupaten = useMemo(() => {
-    const unik = [...new Set(data.map(item => cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'))))];
-    return unik.filter(k => k !== 'TIDAK DIKETAHUI').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
-  }, [data]);
+    const unik = [...new Set(dataGuru.map(item => item.kabupaten))];
+    return unik.filter(k => k && k !== 'TIDAK DIKETAHUI').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
+  }, [dataGuru]);
 
   const activeLabel = activeKategori === 'SEMUA' ? (activeBentuk === 'SEMUA' ? 'SEMUA JENJANG' : activeBentuk) : (activeBentuk === 'SEMUA' ? activeKategori : activeBentuk);
 
   const aggregatedData = useMemo(() => {
-    const filteredData = data.filter(item => {
-      const bentukDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+    const filteredData = dataGuru.filter(item => {
+      const bentukDb = String(item.bentuk_pendidikan || '').trim().toUpperCase();
       
       if (activeKategori === 'SEMUA') {
          if (activeBentuk !== 'SEMUA') {
@@ -293,35 +338,35 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
     });
 
     filteredData.forEach(item => {
-       const kab = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
+       const kab = item.kabupaten;
        if (!mapAgg.has(kab)) return; 
        const row = mapAgg.get(kab);
 
-       const isNegeri = String(getVal(item, 'status_sekolah')).toUpperCase() === 'NEGERI';
+       const isNegeri = String(item.status_sekolah).toUpperCase() === 'NEGERI';
        if (isNegeri) row.status_n++; else row.status_s++;
 
-       const gender = String(getVal(item, 'gender') || getVal(item, 'jenis_kelamin')).trim().toUpperCase();
+       const gender = String(item.gender).trim().toUpperCase();
        if (gender === 'L' || gender === 'LAKI-LAKI') row.gen_l++;
        else if (gender === 'P' || gender === 'PEREMPUAN') row.gen_p++;
 
-       const pend = String(getVal(item, 'pendidikan') || '').toUpperCase();
+       const pend = String(item.pendidikan || '').toUpperCase();
        if (pend.includes('S1') || pend.includes('D4')) row.kual_s1++;
        else if (pend.includes('S2') || pend.includes('S3')) row.kual_s2++;
        else if (pend.includes('D1') || pend.includes('D2') || pend.includes('D3') || pend.includes('SMA') || pend.includes('SMK')) row.kual_kurang++;
        else row.kual_lain++;
 
-       const peg = String(getVal(item, 'status_kepegawaian') || '').toUpperCase();
+       const peg = String(item.status_kepegawaian || '').toUpperCase();
        if (peg === 'PNS') row.peg_pns++;
        else if (peg === 'PPPK') row.peg_pppk++;
        else if (peg.includes('GTY') || peg.includes('PTY')) row.peg_gty++;
        else if (peg.includes('HONOR')) row.peg_honor++;
        else row.peg_lain++;
 
-       const sert = String(getVal(item, 'bidang_studi_sertifikasi') || '').trim();
+       const sert = String(item.bidang_studi_sertifikasi || '').trim();
        if (sert && sert !== '-' && sert !== '0') row.sert_sudah++;
        else row.sert_belum++;
 
-       const tglLahir = getVal(item, 'tanggal_lahir');
+       const tglLahir = item.tanggal_lahir;
        const age = calculateAge(tglLahir);
        if (age !== null) {
           if (age <= 30) row.usia_30++;
@@ -340,7 +385,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
     });
 
     return Array.from(mapAgg.values()).sort((a, b) => getKabupatenRank(a.wilayah) - getKabupatenRank(b.wilayah));
-  }, [data, activeKategori, activeBentuk, listKabupaten]);
+  }, [dataGuru, activeKategori, activeBentuk, listKabupaten]);
 
   const grandTotals = useMemo(() => {
     return aggregatedData.reduce((acc, curr) => {
@@ -495,6 +540,15 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
     { id: 'USIA', label: 'Usia', icon: Clock, color: 'text-rose-700' },
     { id: 'PENSIUN', label: 'Proyeksi Pensiun', icon: CalendarDays, color: 'text-slate-700' },
   ];
+
+  if (loading) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center italic font-black uppercase tracking-widest text-teal-300">
+        <Loader2 className="animate-spin text-teal-600 mb-4" size={64} />
+        Memuat Agregasi Data Guru...
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col animate-in fade-in duration-500">
@@ -783,7 +837,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
         <RincianStatusSekolahGuru 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={data}
+          data={dataGuru}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
@@ -794,7 +848,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
         <RincianGenderGuru 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={data}
+          data={dataGuru}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
@@ -805,7 +859,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
         <RincianKualifikasiGuru 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={data}
+          data={dataGuru}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
@@ -816,7 +870,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
         <RincianKepegawaianGuru 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={data}
+          data={dataGuru}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
@@ -827,7 +881,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
         <RincianProfesiGuru 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={data}
+          data={dataGuru}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
@@ -838,7 +892,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
         <RincianUsiaGuru 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={data}
+          data={dataGuru}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
@@ -849,7 +903,7 @@ export default function DapodikGuru({ data = [], selectedYear = '2026', lastUpda
         <RincianProyeksiPensiunGuru 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={data}
+          data={dataGuru}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}

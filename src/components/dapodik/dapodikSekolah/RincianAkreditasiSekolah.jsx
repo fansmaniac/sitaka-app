@@ -9,26 +9,6 @@ import ExcelJS from 'exceljs';
 // =====================================================================
 // UTILITY FUNCTIONS
 // =====================================================================
-const getVal = (obj, keyName) => {
-  if (!obj) return '';
-  const key = Object.keys(obj).find(k => k.trim().toLowerCase() === keyName.toLowerCase());
-  return key ? obj[key] : '';
-};
-
-const KABUPATEN_LIST = [
-  "BENGKAYANG", "KAPUAS HULU", "KAYONG UTARA", "KETAPANG", 
-  "KUBU RAYA", "LANDAK", "MELAWI", "MEMPAWAH", "PONTIANAK", 
-  "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
-];
-
-const cleanKabupatenName = (rawName) => {
-  if (!rawName) return "TIDAK DIKETAHUI";
-  let name = String(rawName).toUpperCase().replace(/^(KAB\.|KABUPATEN|KOTA)\s+/i, '').trim();
-  const found = KABUPATEN_LIST.find(kab => name.includes(kab));
-  if (found) return found;
-  return name; 
-};
-
 const getKabupatenRank = (kabName) => {
   const name = String(kabName).toUpperCase();
   if (name.includes("BENGKAYANG")) return 1;
@@ -48,23 +28,40 @@ const getKabupatenRank = (kabName) => {
   return 99;
 };
 
+const cleanKabupatenName = (rawName) => {
+  if (!rawName) return "TIDAK DIKETAHUI";
+  let name = String(rawName).toUpperCase().replace(/^(KAB\.|KABUPATEN|KOTA)\s+/i, '').trim();
+  // Simplified since we only use it for sorting in this modal
+  return name; 
+};
+
 // =====================================================================
 // MAPPING STRUKTUR JENJANG BARU (SINKRON DENGAN DASHBOARD)
 // =====================================================================
 const KATEGORI_MAPPING = {
   'PAUD': ['TK', 'KB', 'PAUD'],
-  'DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
-  'MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
-  'INKLUSIF': ['SLB'],
+  'SD': ['SD', 'SPK SD'],
+  'SMP': ['SMP', 'SPK SMP'],
+  'SMA': ['SMA', 'SPK SMA'],
+  'SMK': ['SMK'],
+  'SLB (Inklusif)': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
   'NON FORMAL': ['PKBM', 'TPA', 'SPS', 'SKB']
 };
 
-const isJenjangValid = (jenjangDb, targetJenjang) => {
-  if (targetJenjang === 'SEMUA') return true;
-  if (KATEGORI_MAPPING[targetJenjang]) {
-      return KATEGORI_MAPPING[targetJenjang].includes(jenjangDb);
+const isJenjangValid = (jenjangDb, targetTab) => {
+  if (targetTab === 'SEMUA' || targetTab === 'SEMUA JENJANG') return true;
+
+  // Jika Target memiliki Prefix CAT_ (Berarti dia minta Kategori Gabungan)
+  if (targetTab.startsWith('CAT_')) {
+      const kat = targetTab.replace('CAT_', '');
+      if (KATEGORI_MAPPING[kat]) {
+          return KATEGORI_MAPPING[kat].includes(jenjangDb);
+      }
+      return jenjangDb === kat;
   }
-  return jenjangDb === targetJenjang;
+
+  // Jika tidak, maka lakukan Pencocokan Strict (Misal: Hanya SD, Bukan SPK SD)
+  return jenjangDb === targetTab;
 };
 
 // =====================================================================
@@ -78,7 +75,13 @@ export default function RincianAkreditasiSekolah({
   activeJenjang = 'SEMUA', // Context Header/Awal
   displayLastUpdated 
 }) {
-  const mappedJenjang = activeJenjang === 'SLB (Inklusif)' ? 'INKLUSIF' : activeJenjang;
+  const mappedJenjang = activeJenjang === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : activeJenjang;
+  const isModeSemua = initialWilayah === 'SEMUA';
+
+  // State inisialisasi cerdas untuk Tab Jenjang
+  const defaultJenjangTab = (mappedJenjang === 'SEMUA' || mappedJenjang === 'SEMUA JENJANG') 
+      ? 'SEMUA' 
+      : `CAT_${mappedJenjang}`;
 
   // STATE MODAL TABS
   const [activeModalTab, setActiveModalTab] = useState('KECAMATAN'); 
@@ -88,12 +91,10 @@ export default function RincianAkreditasiSekolah({
   const [filterWilayah, setFilterWilayah] = useState('SEMUA'); 
   const [filterWilayahSekolah, setFilterWilayahSekolah] = useState('SEMUA'); 
   const [filterStatus, setFilterStatus] = useState('SEMUA'); 
-  const [activeJenjangTab, setActiveJenjangTab] = useState('SEMUA'); 
+  const [activeJenjangTab, setActiveJenjangTab] = useState(defaultJenjangTab); 
 
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 15;
-
-  const isModeSemua = initialWilayah === 'SEMUA';
 
   // Sinkronisasi saat modal dibuka
   useEffect(() => {
@@ -103,10 +104,10 @@ export default function RincianAkreditasiSekolah({
       setFilterWilayah('SEMUA');
       setFilterWilayahSekolah('SEMUA');
       setFilterStatus('SEMUA');
-      setActiveJenjangTab(mappedJenjang); 
+      setActiveJenjangTab(defaultJenjangTab); 
       setCurrentPage(1);
     }
-  }, [isOpen, mappedJenjang]);
+  }, [isOpen, defaultJenjangTab]);
 
   // Reset pagination saat pencarian atau filter berubah
   useEffect(() => { 
@@ -122,7 +123,9 @@ export default function RincianAkreditasiSekolah({
 
   // Dinamika Tab Jenjang di dalam Modal
   const availableTabs = useMemo(() => {
-    if (mappedJenjang === 'SEMUA') return Object.keys(KATEGORI_MAPPING);
+    if (mappedJenjang === 'SEMUA' || mappedJenjang === 'SEMUA JENJANG') {
+        return ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'].map(k => `CAT_${k}`);
+    }
     if (KATEGORI_MAPPING[mappedJenjang]) return KATEGORI_MAPPING[mappedJenjang];
     
     for (const [kat, arr] of Object.entries(KATEGORI_MAPPING)) {
@@ -131,20 +134,18 @@ export default function RincianAkreditasiSekolah({
     return [];
   }, [mappedJenjang]);
 
-  // Ekstrak Daftar Wilayah 
+  // Ekstrak Daftar Wilayah (Diperbarui Membaca Data Compact)
   const listWilayahFilter = useMemo(() => {
     const validData = data.filter(item => {
       if (isModeSemua) return true;
-      return cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) === initialWilayah;
+      return item.kabupaten === initialWilayah;
     });
 
     const list = validData.map(item => {
-      return isModeSemua 
-        ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'))
-        : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+      return isModeSemua ? item.kabupaten : item.kecamatan;
     });
 
-    return [...new Set(list)].sort();
+    return [...new Set(list)].filter(Boolean).sort();
   }, [data, isModeSemua, initialWilayah]);
 
   // =====================================================================
@@ -153,15 +154,16 @@ export default function RincianAkreditasiSekolah({
   const dataKecamatan = useMemo(() => {
     if (!data) return [];
     
-    const baseData = data.filter(item => {
-      const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
-      if (!isModeSemua && kabDb !== initialWilayah) return false;
+    const parentTarget = (mappedJenjang === 'SEMUA' || mappedJenjang === 'SEMUA JENJANG') ? 'SEMUA' : `CAT_${mappedJenjang}`;
 
-      const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
-      if (!isJenjangValid(jenjangDb, mappedJenjang)) return false;
+    const baseData = data.filter(item => {
+      if (!isModeSemua && item.kabupaten !== initialWilayah) return false;
+      
+      const jenjangDb = String(item.bentuk_pendidikan || '').trim().toUpperCase();
+      if (!isJenjangValid(jenjangDb, parentTarget)) return false;
 
       if (filterStatus !== 'SEMUA') {
-        const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
+        const statusDb = String(item.status_sekolah || '').toUpperCase();
         if (statusDb !== filterStatus) return false;
       }
       return true;
@@ -170,9 +172,7 @@ export default function RincianAkreditasiSekolah({
     const mapAgg = new Map();
 
     baseData.forEach(item => {
-      let keyId = isModeSemua 
-          ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) 
-          : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+      let keyId = isModeSemua ? item.kabupaten : String(item.kecamatan || 'TIDAK DIKETAHUI').trim().toUpperCase();
 
       if (filterWilayah !== 'SEMUA' && keyId !== filterWilayah) return;
 
@@ -181,12 +181,12 @@ export default function RincianAkreditasiSekolah({
       }
 
       const row = mapAgg.get(keyId);
-      const akr = String(getVal(item, 'akreditasi')).trim().toUpperCase();
+      const akr = item.akreditasi;
       
       if (akr === 'A') row.akr_a++;
       else if (akr === 'B') row.akr_b++;
       else if (akr === 'C') row.akr_c++;
-      else if (akr === 'TT' || akr === 'TIDAK TERAKREDITASI') row.akr_tt++;
+      else if (akr === 'TT') row.akr_tt++;
       else row.akr_belum++;
       
       row.total++;
@@ -216,33 +216,30 @@ export default function RincianAkreditasiSekolah({
   }, [dataKecamatan]);
 
   // =====================================================================
-  // AGREGASI DATA TAB "PER SEKOLAH"
+  // AGREGASI DATA TAB "PER SEKOLAH" (Diperbarui Membaca Data Compact)
   // =====================================================================
   const dataSekolah = useMemo(() => {
     if (!data) return [];
     
     let validData = data.filter(item => {
-      const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
-      if (!isModeSemua && kabDb !== initialWilayah) return false;
+      if (!isModeSemua && item.kabupaten !== initialWilayah) return false;
 
       if (filterStatus !== 'SEMUA') {
-        const statusDb = String(getVal(item, 'status_sekolah')).toUpperCase();
+        const statusDb = String(item.status_sekolah || '').toUpperCase();
         if (statusDb !== filterStatus) return false;
       }
 
-      const jenjangDb = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
+      const jenjangDb = String(item.bentuk_pendidikan || '').trim().toUpperCase();
       if (!isJenjangValid(jenjangDb, activeJenjangTab)) return false;
 
       if (filterWilayahSekolah !== 'SEMUA') {
-        let keyId = isModeSemua 
-          ? cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota')) 
-          : String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+        let keyId = isModeSemua ? item.kabupaten : String(item.kecamatan || 'TIDAK DIKETAHUI').trim().toUpperCase();
         if (keyId !== filterWilayahSekolah) return false;
       }
 
       if (searchTerm) {
-        const nama = String(getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '').toLowerCase();
-        const npsn = String(getVal(item, 'npsn') || '').toLowerCase();
+        const nama = String(item.nama || '').toLowerCase();
+        const npsn = String(item.npsn || '').toLowerCase();
         const q = searchTerm.toLowerCase();
         if (!nama.includes(q) && !npsn.includes(q)) return false;
       }
@@ -250,25 +247,14 @@ export default function RincianAkreditasiSekolah({
       return true;
     });
 
-    return validData.map(item => {
-      const akrRaw = String(getVal(item, 'akreditasi')).trim().toUpperCase();
-      let akrDisplay = 'BELUM';
-
-      if (['A', 'B', 'C'].includes(akrRaw)) {
-         akrDisplay = akrRaw;
-      } else if (akrRaw === 'TT' || akrRaw === 'TIDAK TERAKREDITASI') {
-         akrDisplay = 'TT';
-      }
-      
-      return {
-        npsn: getVal(item, 'npsn'),
-        nama_sekolah: getVal(item, 'nama_sekolah') || getVal(item, 'nama_satuan_pendidikan') || '-',
-        jenjang: getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang'),
-        status: getVal(item, 'status_sekolah'),
-        kecamatan: String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase(),
-        akreditasi: akrDisplay
-      };
-    }).sort((a, b) => String(a.nama_sekolah).localeCompare(String(b.nama_sekolah)));
+    return validData.map(item => ({
+      npsn: item.npsn || '-',
+      nama_sekolah: item.nama || '-',
+      jenjang: item.bentuk_pendidikan || '-',
+      status: item.status_sekolah || '-',
+      kecamatan: item.kecamatan || '-',
+      akreditasi: item.akreditasi || 'BELUM'
+    })).sort((a, b) => String(a.nama_sekolah).localeCompare(String(b.nama_sekolah)));
 
   }, [data, isModeSemua, initialWilayah, filterStatus, activeJenjangTab, filterWilayahSekolah, searchTerm]);
 
@@ -278,9 +264,11 @@ export default function RincianAkreditasiSekolah({
   // =====================================================================
   const downloadExcelRincian = async () => {
     const workbook = new ExcelJS.Workbook();
+    const safeJenjang = activeJenjang.replace(/\//g, '-');
+    const safeActiveTab = activeJenjangTab.replace('CAT_', '').replace(/\//g, '-');
     
     if (activeModalTab === 'KECAMATAN') {
-      const sheetName = isModeSemua ? 'Rekap Provinsi' : `Rekap ${initialWilayah}`;
+      const sheetName = isModeSemua ? 'Rekap Provinsi' : `Rekap ${filterWilayah}`;
       const worksheet = workbook.addWorksheet(sheetName);
 
       worksheet.columns = [
@@ -337,7 +325,7 @@ export default function RincianAkreditasiSekolah({
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `Daftar_Sekolah_Akreditasi_${initialWilayah}_${activeJenjangTab.replace(/\//g,'-')}.xlsx`;
+      link.download = `Daftar_Sekolah_Akreditasi_${initialWilayah}_${safeActiveTab}.xlsx`;
       link.click();
     }
   };
@@ -401,67 +389,52 @@ export default function RincianAkreditasiSekolah({
         {activeModalTab === 'SEKOLAH' && (
           <div className="bg-white px-6 pt-4 pb-0 flex gap-2 overflow-x-auto scrollbar-hide shrink-0 z-10 relative">
             <button 
-              onClick={() => setActiveJenjangTab(mappedJenjang)}
-              className={`px-5 py-2 rounded-xl font-black uppercase text-[10px] md:text-xs transition-all whitespace-nowrap border ${activeJenjangTab === mappedJenjang ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
+              onClick={() => setActiveJenjangTab(defaultJenjangTab)}
+              className={`px-5 py-2 rounded-xl font-black uppercase text-[10px] md:text-xs transition-all whitespace-nowrap border ${activeJenjangTab === defaultJenjangTab ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
             >
-              {mappedJenjang === 'SEMUA' ? 'Semua Jenjang' : `SEMUA ${mappedJenjang}`}
+              {mappedJenjang === 'SEMUA' || mappedJenjang === 'SEMUA JENJANG' ? 'Semua Jenjang' : `SEMUA ${mappedJenjang}`}
             </button>
-            {availableTabs.map(j => (
-              <button 
-                key={j}
-                onClick={() => setActiveJenjangTab(j)}
-                className={`px-5 py-2 rounded-xl font-black uppercase text-[10px] md:text-xs transition-all whitespace-nowrap border ${activeJenjangTab === j ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
-              >
-                {j}
-              </button>
-            ))}
+            {availableTabs.map(j => {
+              // Jika ini kategori dari tampilan 'SEMUA', hapus prefix 'CAT_' untuk labelnya
+              const label = j.startsWith('CAT_') ? j.replace('CAT_', '') : j;
+              return (
+                <button 
+                  key={j}
+                  onClick={() => setActiveJenjangTab(j)}
+                  className={`px-5 py-2 rounded-xl font-black uppercase text-[10px] md:text-xs transition-all whitespace-nowrap border ${activeJenjangTab === j ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
         )}
 
         {/* FILTER BAR */}
-        <div className={`bg-white px-6 py-4 border-b border-gray-200 flex flex-wrap gap-4 items-center shrink-0 shadow-sm z-10 ${activeModalTab === 'SEKOLAH' ? 'border-t-0 pt-3' : ''}`}>
+        <div className={`bg-gray-50 px-6 py-4 border-b border-gray-200 flex flex-wrap gap-4 items-center shrink-0 ${activeModalTab === 'SEKOLAH' ? 'border-t-0 pt-3' : ''}`}>
           <div className="relative flex-1 min-w-[250px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input 
               type="text" 
-              placeholder={activeModalTab === 'KECAMATAN' ? `Cari ${isModeSemua ? 'Kabupaten' : 'Kecamatan'}...` : "Cari Nama Sekolah atau NPSN..."} 
+              placeholder={activeModalTab === 'KECAMATAN' ? `Cari Nama ${isModeSemua ? 'Kabupaten' : 'Kecamatan'}...` : "Cari Nama Sekolah atau NPSN..."} 
               value={searchTerm} 
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-gray-200 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 font-bold text-gray-700"
             />
           </div>
 
-          {/* FILTER TAB KECAMATAN */}
-          {activeModalTab === 'KECAMATAN' && (
-            <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
-              <MapPin size={16} className="text-gray-400 mr-2" />
-              <select 
-                value={filterWilayah} 
-                onChange={(e) => setFilterWilayah(e.target.value)} 
-                className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[200px]"
-              >
-                <option value="SEMUA">{isModeSemua ? 'SEMUA KABUPATEN' : 'SEMUA KECAMATAN'}</option>
-                {listWilayahFilter.map(w => <option key={w} value={w}>{w}</option>)}
-              </select>
-            </div>
-          )}
+          <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
+            <MapPin size={16} className="text-gray-400 mr-2" />
+            <select 
+              value={activeModalTab === 'KECAMATAN' ? filterWilayah : filterWilayahSekolah} 
+              onChange={(e) => activeModalTab === 'KECAMATAN' ? setFilterWilayah(e.target.value) : setFilterWilayahSekolah(e.target.value)} 
+              className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[200px]"
+            >
+              <option value="SEMUA">{isModeSemua ? 'SEMUA KABUPATEN' : 'SEMUA KECAMATAN'}</option>
+              {listWilayahFilter.map(w => <option key={w} value={w}>{w}</option>)}
+            </select>
+          </div>
 
-          {/* FILTER TAB SEKOLAH */}
-          {activeModalTab === 'SEKOLAH' && (
-            <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
-              <MapPin size={16} className="text-gray-400 mr-2" />
-              <select 
-                value={filterWilayahSekolah} 
-                onChange={(e) => setFilterWilayahSekolah(e.target.value)} 
-                className="bg-transparent text-xs font-black uppercase text-gray-700 outline-none cursor-pointer max-w-[200px]"
-              >
-                <option value="SEMUA">{isModeSemua ? 'SEMUA KABUPATEN' : 'SEMUA KECAMATAN'}</option>
-                {listWilayahFilter.map(w => <option key={w} value={w}>{w}</option>)}
-              </select>
-            </div>
-          )}
-
-          {/* FILTER STATUS (BERLAKU UNTUK KEDUANYA) */}
           <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-1.5 shadow-sm">
             <Building2 size={16} className="text-gray-400 mr-2" />
             <select 
@@ -477,7 +450,7 @@ export default function RincianAkreditasiSekolah({
         </div>
 
         {/* TABLE AREA */}
-        <div className="flex-1 overflow-auto bg-gray-50/50 p-4 custom-scrollbar">
+        <div className="flex-1 overflow-auto bg-white p-4 custom-scrollbar">
           
           {/* TABEL KECAMATAN */}
           {activeModalTab === 'KECAMATAN' && (
@@ -584,7 +557,7 @@ export default function RincianAkreditasiSekolah({
         </div>
 
         {/* FOOTER & PAGINATION */}
-        <div className="bg-white p-4 border-t border-gray-200 flex items-center justify-between shrink-0 rounded-b-3xl">
+        <div className="bg-gray-50 p-4 border-t border-gray-200 flex items-center justify-between shrink-0 rounded-b-3xl">
           <div className="flex flex-col">
             <p className="text-xs font-bold text-gray-500">
               Menampilkan <span className="text-gray-800">{activeData.length === 0 ? 0 : startIndex + 1}</span> - <span className="text-gray-800">{Math.min(startIndex + rowsPerPage, activeData.length)}</span> dari <span className="text-emerald-700 font-black">{activeData.length}</span> baris
@@ -597,9 +570,9 @@ export default function RincianAkreditasiSekolah({
           </div>
           
           <div className="flex items-center gap-2">
-            <button disabled={currentPage === 1} onClick={() => goToPage(currentPage - 1)} className="p-2 rounded-xl bg-gray-50 border border-gray-200 hover:bg-emerald-50 disabled:opacity-50 transition-colors"><ChevronLeft size={16} /></button>
+            <button disabled={currentPage === 1} onClick={() => goToPage(currentPage - 1)} className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-emerald-50 disabled:opacity-50 transition-colors"><ChevronLeft size={16} /></button>
             <span className="text-xs font-black text-gray-600 px-2">Hal {currentPage} / {totalPages}</span>
-            <button disabled={currentPage === totalPages || totalPages === 0} onClick={() => goToPage(currentPage + 1)} className="p-2 rounded-xl bg-gray-50 border border-gray-200 hover:bg-emerald-50 disabled:opacity-50 transition-colors"><ChevronRight size={16} /></button>
+            <button disabled={currentPage === totalPages || totalPages === 0} onClick={() => goToPage(currentPage + 1)} className="p-2 rounded-xl bg-white border border-gray-200 hover:bg-emerald-50 disabled:opacity-50 transition-colors"><ChevronRight size={16} /></button>
           </div>
         </div>
 

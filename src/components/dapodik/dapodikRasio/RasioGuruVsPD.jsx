@@ -1,11 +1,65 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { MapPin, Info, Users, Activity, Search, Download, Loader2, GraduationCap, School } from 'lucide-react';
 import { db } from '../../../firebase/config';
-import { doc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, query, where } from 'firebase/firestore';
 import ExcelJS from 'exceljs';
 
 // =====================================================================
-// UTILITY FUNCTIONS & STANDAR REGULASI
+// UTILITY: CACHING LOKAL (BRANKAS BROWSER) MULTI-DB
+// =====================================================================
+const CACHE_EXPIRY_HOURS = 12;
+
+const initDB = (dbName, storeName) => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(dbName, 1); 
+    request.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        // ANTI-CRASH: Cek dulu apakah laci sudah ada sebelum membuat baru
+        if (!db.objectStoreNames.contains(storeName)) {
+            db.createObjectStore(storeName);
+        }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = (e) => {
+        console.warn("IndexedDB Error:", e);
+        reject(request.error);
+    };
+  });
+};
+
+const saveToCache = async (dbName, storeName, key, data) => {
+  try {
+    const db = await initDB(dbName, storeName);
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, 'readwrite');
+      tx.objectStore(storeName).put({ data, timestamp: Date.now() }, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) { console.warn(`Gagal menyimpan ke cache ${storeName}`, err); }
+};
+
+const getFromCache = async (dbName, storeName, key) => {
+  try {
+    const db = await initDB(dbName, storeName);
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, 'readonly');
+      const req = tx.objectStore(storeName).get(key);
+      req.onsuccess = () => {
+        const result = req.result;
+        if (result && Array.isArray(result.data) && result.data.length > 0) {
+          const hoursOld = (Date.now() - result.timestamp) / (1000 * 60 * 60);
+          if (hoursOld < CACHE_EXPIRY_HOURS) return resolve(result.data);
+        }
+        resolve(null);
+      };
+      req.onerror = () => resolve(null);
+    });
+  } catch (err) { return null; }
+};
+
+// =====================================================================
+// UTILITY FUNCTIONS & PENGELOMPOKAN
 // =====================================================================
 const KABUPATEN_LIST = [
   "BENGKAYANG", "KAPUAS HULU", "KAYONG UTARA", "KETAPANG", 
@@ -13,18 +67,60 @@ const KABUPATEN_LIST = [
   "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
 ];
 
-// PEMISAHAN JENJANG SMA DAN SMK
-const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
+const cleanKabupatenName = (rawName) => {
+  if (!rawName) return "TIDAK DIKETAHUI";
+  let name = String(rawName).toUpperCase().replace(/^(KAB\.|KABUPATEN|KOTA)\s+/i, '').trim();
+  const found = KABUPATEN_LIST.find(kab => name.includes(kab));
+  if (found) return found;
+  return name; 
+};
+
+// PETA KOLOM BERDASARKAN KATEGORI YANG DIPILIH
+const COLUMN_MAP = {
+  'SEMUA': ['TK', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'NON FORMAL'],
+  'PAUD': ['TK', 'KB', 'SPS', 'TPA'],
+  'DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
+  'MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
+  'INKLUSIF': ['SLB'],
+  'NON FORMAL': ['PKBM', 'SKB']
+};
+
+// Fungsi Penentu Kolom Berdasarkan Raw Jenjang
+const getColumnKey = (jenjangDb, category) => {
+  const j = String(jenjangDb || '').trim().toUpperCase();
+  if (category === 'SEMUA') {
+      if (j === 'TK') return 'TK';
+      if (['SD', 'SPK SD'].includes(j)) return 'SD';
+      if (['SMP', 'SPK SMP'].includes(j)) return 'SMP';
+      if (['SMA', 'SPK SMA'].includes(j)) return 'SMA';
+      if (j === 'SMK') return 'SMK';
+      if (j.includes('SLB') || j.includes('LB')) return 'SLB';
+      if (['PKBM', 'SKB'].includes(j)) return 'NON FORMAL';
+  } else if (category === 'PAUD') {
+      if (['TK', 'KB', 'SPS', 'TPA'].includes(j)) return j;
+  } else if (category === 'DASAR') {
+      if (['SD', 'SPK SD'].includes(j)) return 'SD';
+      if (['SMP', 'SPK SMP'].includes(j)) return 'SMP';
+  } else if (category === 'MENENGAH') {
+      if (['SMA', 'SPK SMA'].includes(j)) return 'SMA';
+      if (j === 'SMK') return 'SMK';
+  } else if (category === 'INKLUSIF') {
+      if (j.includes('SLB') || j.includes('LB')) return 'SLB';
+  } else if (category === 'NON FORMAL') {
+      if (['PKBM', 'SKB'].includes(j)) return 'NON FORMAL';
+  }
+  return null;
+};
 
 // BEBAN MAKSIMAL PESERTA DIDIK PER 1 GURU (Permendikdasmen No.14/2026)
 const MAX_PD_PER_GURU = {
-  'PAUD': 15,          
-  'SD': 28,            
-  'SMP': 32,           
-  'SMA': 36,       
+  'TK': 15, 'KB': 15, 'SPS': 15, 'TPA': 15,          
+  'SD': 28, 'SPK SD': 28,            
+  'SMP': 32, 'SPK SMP': 32,           
+  'SMA': 36, 'SPK SMA': 36,       
   'SMK': 36,       
-  'SLB (Inklusif)': 8, 
-  'NON FORMAL': 30     
+  'SLB': 8, 
+  'NON FORMAL': 30, 'PKBM': 30, 'SKB': 30     
 };
 
 // Fungsi hitung angka rasio mentah (Jumlah PD / Jumlah Guru)
@@ -39,7 +135,7 @@ const renderRatio = (guruCount, pdCount, jenjang) => {
   if (guruCount === 0 && pdCount > 0) return <span className="text-red-500 font-bold text-[10px]">Error (0 Guru)</span>;
   
   const ratio = getRawRatio(guruCount, pdCount);
-  const maxCapacity = MAX_PD_PER_GURU[jenjang];
+  const maxCapacity = MAX_PD_PER_GURU[jenjang] || 36;
   const minCapacity = maxCapacity * 0.3; // Ambang batas bawah (Guru mengajar terlalu sedikit siswa)
   
   let colorClass = 'text-emerald-600'; // IDEAL
@@ -57,77 +153,224 @@ const renderRatio = (guruCount, pdCount, jenjang) => {
 // MAIN COMPONENT
 // =====================================================================
 export default function RasioGuruVsPD({ selectedYear }) {
+  const [activeKategori, setActiveKategori] = useState('SEMUA');
   const [filterWilayah, setFilterWilayah] = useState('SEMUA');
-  const [filterStatusTab2, setFilterStatusTab2] = useState('SEMUA'); // STATE BARU FILTER STATUS TABEL 2
+  const [filterStatusTab2, setFilterStatusTab2] = useState('SEMUA'); 
   
-  const [tab2DataRaw, setTab2DataRaw] = useState([]);
+  const [mergedData, setMergedData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState('');
 
-  // --- FETCH DATA PRE-CALCULATED DARI FIREBASE ---
+  // --- FETCH DATA (Membaca Chunks Guru & Siswa, Lalu Di-Merge) ---
   useEffect(() => {
-    const fetchAgregasi = async () => {
+    const fetchData = async () => {
       setLoading(true);
       setError(null);
+      const cacheKeyGuru = `guru_agregasi_v3_${selectedYear}`;
+      const cacheKeySiswa = `siswa_agregasi_v3_${selectedYear}`;
+      
       try {
-        const docRef = doc(db, 'dapodik_agregasi', `rasio_guru_pd_${selectedYear}`);
-        const docSnap = await getDoc(docRef);
+        // --- 1. FETCH GURU TAHAP 2 (UNTUK GURU AKTUAL) ---
+        let guruData = await getFromCache("SitakaCache_GurAgg_V3", "guruDataAgg", cacheKeyGuru);
+        let lastUpdGuru = '';
+        
+        if (!guruData || !Array.isArray(guruData) || guruData.length === 0) {
+            guruData = [];
+            const summaryRef = doc(db, 'guru_agregasi', `summary_${selectedYear}`);
+            const summarySnap = await getDoc(summaryRef);
+            if (summarySnap.exists()) {
+                if(summarySnap.data().last_updated) lastUpdGuru = summarySnap.data().last_updated;
+                let qChunks = query(collection(db, 'guru_agregasi'), where('tahun_data', '==', String(selectedYear)));
+                let snapChunks = await getDocs(qChunks);
+                if(snapChunks.empty){
+                    qChunks = query(collection(db, 'guru_agregasi'), where('tahun_data', '==', Number(selectedYear)));
+                    snapChunks = await getDocs(qChunks);
+                }
+                snapChunks.forEach(docChunk => {
+                    if (docChunk.id.includes('_chunk_')) {
+                       const arr = docChunk.data().data_agregasi;
+                       if(Array.isArray(arr)) guruData.push(...arr);
+                    }
+                });
+                if(guruData.length > 0) await saveToCache("SitakaCache_GurAgg_V3", "guruDataAgg", cacheKeyGuru, guruData);
+            }
+        }
 
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setTab2DataRaw(data.tabel2 || []);
-          
-          if (data.last_updated) {
-            const d = new Date(data.last_updated);
-            const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
-            setLastUpdated(`${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()} Pukul ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
-          } else {
-            setLastUpdated('Tidak Diketahui');
-          }
+        // --- 2. FETCH SISWA TAHAP 3 (UNTUK PESERTA DIDIK) ---
+        let siswaData = await getFromCache("SitakaCache_SisAgg_V3", "siswaDataAgg", cacheKeySiswa);
+        let lastUpdSiswa = '';
+        
+        if (!siswaData || !Array.isArray(siswaData) || siswaData.length === 0) {
+            siswaData = [];
+            const summaryRef = doc(db, 'siswa_agregasi', `summary_${selectedYear}`);
+            const summarySnap = await getDoc(summaryRef);
+            if (summarySnap.exists()) {
+                if(summarySnap.data().last_updated) lastUpdSiswa = summarySnap.data().last_updated;
+                let qChunks = query(collection(db, 'siswa_agregasi'), where('tahun_data', '==', String(selectedYear)));
+                let snapChunks = await getDocs(qChunks);
+                if(snapChunks.empty){
+                    qChunks = query(collection(db, 'siswa_agregasi'), where('tahun_data', '==', Number(selectedYear)));
+                    snapChunks = await getDocs(qChunks);
+                }
+                snapChunks.forEach(docChunk => {
+                    if (docChunk.id.includes('_chunk_')) {
+                       const arr = docChunk.data().data_agregasi;
+                       if(Array.isArray(arr)) siswaData.push(...arr);
+                    }
+                });
+                if(siswaData.length > 0) await saveToCache("SitakaCache_SisAgg_V3", "siswaDataAgg", cacheKeySiswa, siswaData);
+            }
+        }
+
+        // FALLBACK PENGECEKAN
+        if (!guruData || guruData.length === 0 || !siswaData || siswaData.length === 0) {
+            setError(`Data Guru (Tahap 2) atau Siswa (Tahap 3) tahun ${selectedYear} belum dikalkulasi.`);
+            setMergedData([]);
         } else {
-          setError(`Data rasio Guru VS Peserta Didik tahun ${selectedYear} belum dikalkulasi oleh Admin.`);
+            // --- 3. MERGE DATA GURU & SISWA (REALTIME BY NPSN) ---
+            const mapSekolah = new Map();
+            guruData.forEach(g => {
+                if(g && g.npsn) {
+                  if(!mapSekolah.has(g.npsn)) {
+                    mapSekolah.set(g.npsn, { ...g, guru_aktual: 1, pd_aktual: 0 });
+                  } else {
+                    mapSekolah.get(g.npsn).guru_aktual++;
+                  }
+                }
+            });
+            siswaData.forEach(p => {
+                if(p && p.npsn){
+                  if(mapSekolah.has(p.npsn)){
+                    mapSekolah.get(p.npsn).pd_aktual = parseInt(p.pd_total) || 0;
+                  } else {
+                    mapSekolah.set(p.npsn, { ...p, guru_aktual: 0, pd_aktual: parseInt(p.pd_total) || 0 });
+                  }
+                }
+            });
+
+            setMergedData(Array.from(mapSekolah.values()));
+            
+            const useDate = lastUpdSiswa || lastUpdGuru;
+            if(useDate){
+                const d = new Date(useDate);
+                const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+                setLastUpdated(`${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()}`);
+            } else {
+                setLastUpdated('Tidak Diketahui');
+            }
         }
       } catch (err) {
-        console.error(err);
-        setError("Gagal menarik data rasio dari server.");
+          console.error(err);
+          setError("Gagal menarik data dari server.");
+          setMergedData([]);
       } finally {
-        setLoading(false);
+          setLoading(false);
       }
     };
-
-    fetchAgregasi();
+    fetchData();
   }, [selectedYear]);
 
   const isModeSemua = filterWilayah === 'SEMUA';
+  const activeColumns = COLUMN_MAP[activeKategori] || COLUMN_MAP['SEMUA'];
 
-  // =====================================================================
-  // DATA ENGINE (TABEL 1)
-  // =====================================================================
-  const tab1Data = useMemo(() => {
-    if (!tab2DataRaw || tab2DataRaw.length === 0) return [];
+  // --- ENGINE KOMPUTASI REAL-TIME TABEL 1 & TABEL 2 ---
+  const processedData = useMemo(() => {
+    if (!mergedData || !Array.isArray(mergedData) || mergedData.length === 0) {
+        return { tab1: [], tab2: [] };
+    }
 
-    const resMap = new Map();
-    JENJANG_KEYS.forEach(k => resMap.set(k, { jenjang: k, guru_n: 0, pd_n: 0, guru_s: 0, pd_s: 0, total_guru: 0, total_pd: 0 }));
+    const t1Map = new Map();
+    activeColumns.forEach(k => t1Map.set(k, { jenjang: k, guru_n: 0, pd_n: 0, guru_s: 0, pd_s: 0, total_guru: 0, total_pd: 0 }));
 
-    tab2DataRaw.forEach(row => {
-      if (!isModeSemua && row.wilayah !== filterWilayah) return;
+    const t2Map = new Map();
 
-      JENJANG_KEYS.forEach(k => {
-        const agg = resMap.get(k);
-        const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
-        agg.guru_n += (row[`${baseK}_guru_n`] || 0);
-        agg.pd_n += (row[`${baseK}_pd_n`] || 0);
-        agg.guru_s += (row[`${baseK}_guru_s`] || 0);
-        agg.pd_s += (row[`${baseK}_pd_s`] || 0);
-        
-        agg.total_guru += (row[`${baseK}_guru`] || 0);
-        agg.total_pd += (row[`${baseK}_pd`] || 0);
-      });
+    mergedData.forEach(item => {
+       if (!item) return;
+
+       const jenjangDb = item.bentuk_pendidikan || item.jenjang;
+       const colKey = getColumnKey(jenjangDb, activeKategori);
+       if (!colKey) return; 
+
+       const isNegeri = String(item.status_sekolah).toUpperCase() === 'NEGERI';
+       const guruTotal = parseInt(item.guru_aktual) || 0;
+       const pdTotal = parseInt(item.pd_aktual) || 0;
+
+       // Filter Wilayah untuk Tab 1
+       const kabDb = cleanKabupatenName(item.kabupaten);
+       if (isModeSemua || kabDb === filterWilayah) {
+           const t1Row = t1Map.get(colKey);
+           if (t1Row) {
+               if (isNegeri) { t1Row.guru_n += guruTotal; t1Row.pd_n += pdTotal; }
+               else { t1Row.guru_s += guruTotal; t1Row.pd_s += pdTotal; }
+               t1Row.total_guru += guruTotal;
+               t1Row.total_pd += pdTotal;
+           }
+       }
+
+       // Penyiapan Data Tab 2 (Breakdown Wilayah)
+       const kecDb = String(item.kecamatan || 'TIDAK DIKETAHUI').trim().toUpperCase();
+       if (!isModeSemua && kabDb !== filterWilayah) return;
+
+       const groupKey = isModeSemua ? kabDb : kecDb;
+
+       if (!t2Map.has(groupKey)) {
+           const init = { wilayah: kabDb, kecamatan: kecDb, group_label: groupKey };
+           activeColumns.forEach(k => {
+               init[`${k}_guru_n`] = 0; init[`${k}_pd_n`] = 0;
+               init[`${k}_guru_s`] = 0; init[`${k}_pd_s`] = 0;
+           });
+           t2Map.set(groupKey, init);
+       }
+
+       const t2Row = t2Map.get(groupKey);
+       if (isNegeri) {
+           t2Row[`${colKey}_guru_n`] += guruTotal;
+           t2Row[`${colKey}_pd_n`] += pdTotal;
+       } else {
+           t2Row[`${colKey}_guru_s`] += guruTotal;
+           t2Row[`${colKey}_pd_s`] += pdTotal;
+       }
     });
 
-    return Array.from(resMap.values());
-  }, [tab2DataRaw, filterWilayah, isModeSemua]);
+    const t1Arr = Array.from(t1Map.values());
+    const t2Arr = Array.from(t2Map.values()).sort((a, b) => {
+        if (isModeSemua) {
+           const rankA = KABUPATEN_LIST.indexOf(a.group_label);
+           const rankB = KABUPATEN_LIST.indexOf(b.group_label);
+           return (rankA !== -1 ? rankA : 99) - (rankB !== -1 ? rankB : 99);
+        } else {
+           return a.group_label.localeCompare(b.group_label);
+        }
+    });
+
+    return { tab1: t1Arr, tab2: t2Arr };
+  }, [mergedData, activeKategori, filterWilayah, isModeSemua, activeColumns]);
+
+  const tab1Data = processedData.tab1;
+  
+  // Format data Tab 2 agar responsif terhadap filter Status Negeri/Swasta
+  const tab2DataDisplay = useMemo(() => {
+    return processedData.tab2.map(row => {
+       const mapped = { group_label: row.group_label };
+       activeColumns.forEach(k => {
+           let guru = 0; let pd = 0;
+           if (filterStatusTab2 === 'SEMUA') {
+               guru = row[`${k}_guru_n`] + row[`${k}_guru_s`];
+               pd = row[`${k}_pd_n`] + row[`${k}_pd_s`];
+           } else if (filterStatusTab2 === 'NEGERI') {
+               guru = row[`${k}_guru_n`];
+               pd = row[`${k}_pd_n`];
+           } else if (filterStatusTab2 === 'SWASTA') {
+               guru = row[`${k}_guru_s`];
+               pd = row[`${k}_pd_s`];
+           }
+           mapped[`${k}_guru`] = guru;
+           mapped[`${k}_pd`] = pd;
+       });
+       return mapped;
+    });
+  }, [processedData.tab2, filterStatusTab2, activeColumns]);
 
   // --- LOGIKA GRAND TOTAL TABEL 1 ---
   const grandTotalTab1 = useMemo(() => {
@@ -142,62 +385,7 @@ export default function RasioGuruVsPD({ selectedYear }) {
     }, { guru_n: 0, pd_n: 0, guru_s: 0, pd_s: 0, total_guru: 0, total_pd: 0 });
   }, [tab1Data]);
 
-
-  // =====================================================================
-  // DATA ENGINE (TABEL 2) DENGAN FILTER STATUS SAKTI
-  // =====================================================================
-  const tab2Data = useMemo(() => {
-    if (!tab2DataRaw || tab2DataRaw.length === 0) return [];
-    
-    // Helper fungsi menentukan kolom yg akan ditarik (SEMUA, _n, _s)
-    const getSuffix = (baseType) => {
-      if (filterStatusTab2 === 'NEGERI') return `${baseType}_n`;
-      if (filterStatusTab2 === 'SWASTA') return `${baseType}_s`;
-      return baseType; 
-    };
-
-    const guruKey = getSuffix('guru');
-    const pdKey = getSuffix('pd');
-
-    if (isModeSemua) {
-      const mapKab = new Map();
-      tab2DataRaw.forEach(row => {
-         const kab = row.wilayah;
-         if(!mapKab.has(kab)) {
-             const init = { wilayah: kab, kecamatan: kab }; 
-             JENJANG_KEYS.forEach(k => { init[`${k}_guru`] = 0; init[`${k}_pd`] = 0; });
-             mapKab.set(kab, init);
-         }
-         const aggRow = mapKab.get(kab);
-         JENJANG_KEYS.forEach(k => { 
-             const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
-             aggRow[`${k}_guru`] += (row[`${baseK}_${guruKey}`] || 0); 
-             aggRow[`${k}_pd`] += (row[`${baseK}_${pdKey}`] || 0); 
-         });
-      });
-      return Array.from(mapKab.values()).sort((a, b) => {
-         const rankA = KABUPATEN_LIST.indexOf(a.wilayah.toUpperCase());
-         const rankB = KABUPATEN_LIST.indexOf(b.wilayah.toUpperCase());
-         return (rankA !== -1 ? rankA : 99) - (rankB !== -1 ? rankB : 99);
-      });
-    } else {
-      // Pada tingkat kecamatan, remap ke variabel penampung default (_guru, _pd) agar seragam renderingnya
-      const filtered = tab2DataRaw.filter(r => r.wilayah === filterWilayah).sort((a,b) => a.kecamatan.localeCompare(b.kecamatan));
-      return filtered.map(row => {
-        const mappedRow = { ...row };
-        JENJANG_KEYS.forEach(k => {
-           const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
-           mappedRow[`${k}_guru`] = row[`${baseK}_${guruKey}`] || 0;
-           mappedRow[`${k}_pd`] = row[`${baseK}_${pdKey}`] || 0;
-        });
-        return mappedRow;
-      });
-    }
-  }, [tab2DataRaw, filterWilayah, isModeSemua, filterStatusTab2]);
-
-  // =====================================================================
-  // EXCEL EXPORTS
-  // =====================================================================
+  // --- EXCEL EXPORTS ---
   const handleUnduhTab1 = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Ketersediaan Guru vs PD');
@@ -220,7 +408,7 @@ export default function RasioGuruVsPD({ selectedYear }) {
     });
 
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF10B981' } }; // Emerald 600
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF10B981' } }; // Emerald 500
 
     totalRow.font = { bold: true, color: { argb: 'FF064E3B' } }; // Emerald 900
     totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } }; // Emerald 100
@@ -229,7 +417,7 @@ export default function RasioGuruVsPD({ selectedYear }) {
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Ketersediaan_Guru_PD_${filterWilayah}_${selectedYear}.xlsx`;
+    link.download = `Rekap_Guru_PD_${activeKategori}_${filterWilayah}_${selectedYear}.xlsx`;
     link.click();
   };
 
@@ -239,12 +427,12 @@ export default function RasioGuruVsPD({ selectedYear }) {
 
     worksheet.columns = [
       { header: isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan', key: 'wilayah_label', width: 30 },
-      ...JENJANG_KEYS.map(k => ({ header: k, key: k, width: 15 })),
+      ...activeColumns.map(k => ({ header: k, key: k, width: 15 })),
     ];
 
-    tab2Data.forEach(row => {
-      const excelRow = { wilayah_label: isModeSemua ? row.wilayah : row.kecamatan };
-      JENJANG_KEYS.forEach(k => {
+    tab2DataDisplay.forEach(row => {
+      const excelRow = { wilayah_label: row.group_label };
+      activeColumns.forEach(k => {
         const guruCount = row[`${k}_guru`];
         const pdCount = row[`${k}_pd`];
         
@@ -265,7 +453,7 @@ export default function RasioGuruVsPD({ selectedYear }) {
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Analisa_Beban_Mengajar_Guru_${filterWilayah}_${filterStatusTab2}_${selectedYear}.xlsx`;
+    link.download = `Analisa_Beban_Mengajar_Guru_${activeKategori}_${filterWilayah}_${filterStatusTab2}_${selectedYear}.xlsx`;
     link.click();
   };
 
@@ -280,9 +468,12 @@ export default function RasioGuruVsPD({ selectedYear }) {
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center p-20 bg-orange-50 rounded-3xl border-2 border-orange-200 border-dashed text-orange-600">
-         <p className="font-black text-lg uppercase tracking-widest text-center">{error}</p>
-         <p className="text-sm mt-2 font-bold">Harap minta Admin untuk menjalankan Mesin Kalkulasi di Admin Dashboard.</p>
+      <div className="flex flex-col items-center justify-center p-12 bg-orange-50 rounded-3xl border-2 border-orange-200 border-dashed text-orange-600">
+         <p className="font-black text-lg uppercase tracking-widest text-center mb-2">{error}</p>
+         <p className="text-sm font-bold text-center">
+            Harap minta Admin untuk masuk ke menu Master Data dan klik tombol <span className="text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded">Hitung Tahun {selectedYear}</span> pada bagian <br/>
+            <span className="text-indigo-700 underline underline-offset-4 decoration-indigo-300">Ringkasan Guru (Tahap 2) dan Siswa (Tahap 3)</span>.
+         </p>
       </div>
     );
   }
@@ -296,16 +487,39 @@ export default function RasioGuruVsPD({ selectedYear }) {
           <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">Guru <span className="text-emerald-500">VS</span> Peserta Didik</h2>
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mt-1">Modul Analisa Beban Kerja & Kapasitas Mengajar</p>
         </div>
-        <div className="flex items-center bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2 shadow-sm">
-          <MapPin size={18} className="text-emerald-600 mr-3" />
-          <select 
-            value={filterWilayah} 
-            onChange={(e) => setFilterWilayah(e.target.value)} 
-            className="bg-transparent text-sm font-black uppercase text-gray-700 outline-none cursor-pointer min-w-[200px]"
-          >
-            <option value="SEMUA">SELURUH PROVINSI</option>
-            {KABUPATEN_LIST.map(k => <option key={k} value={k}>KAB. {k}</option>)}
-          </select>
+        <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+          {/* FILTER JENJANG/KATEGORI BARU */}
+          <div className="flex items-center bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2 shadow-sm w-full sm:w-auto focus-within:ring-2 focus-within:ring-emerald-200">
+            <GraduationCap size={18} className="text-emerald-600 mr-3" />
+            <select 
+              value={activeKategori} 
+              onChange={(e) => setActiveKategori(e.target.value)} 
+              className="bg-transparent text-sm font-black uppercase text-gray-700 outline-none cursor-pointer min-w-[150px] w-full"
+            >
+              <option value="SEMUA">Semua Jenjang</option>
+              <option value="PAUD">PAUD</option>
+              <option value="DASAR">Pendidikan Dasar</option>
+              <option value="MENENGAH">Pendidikan Menengah</option>
+              <option value="INKLUSIF">Pendidikan Inklusif</option>
+              <option value="NON FORMAL">Non Formal</option>
+            </select>
+          </div>
+
+          <div className="flex items-center bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2 shadow-sm w-full sm:w-auto focus-within:ring-2 focus-within:ring-emerald-200">
+            <MapPin size={18} className="text-emerald-600 mr-3" />
+            <select 
+              value={filterWilayah} 
+              onChange={(e) => setFilterWilayah(e.target.value)} 
+              className="bg-transparent text-sm font-black uppercase text-gray-700 outline-none cursor-pointer min-w-[150px] w-full"
+            >
+              <option value="SEMUA">SELURUH PROVINSI</option>
+              {KABUPATEN_LIST.map(k => (
+                <option key={k} value={k}>
+                  {k === 'SINGKAWANG' || k === 'PONTIANAK' ? 'KOTA' : 'KAB.'} {k}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -407,20 +621,20 @@ export default function RasioGuruVsPD({ selectedYear }) {
               <tr className="text-[10px] font-black uppercase text-gray-500 bg-emerald-50/50">
                 <th className="px-4 py-4 rounded-l-xl w-12">No</th>
                 <th className="px-4 py-4 text-left">{isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan'}</th>
-                {JENJANG_KEYS.map(k => (
+                {activeColumns.map(k => (
                   <th key={k} className="px-2 py-4 text-emerald-800 border-l border-emerald-100 whitespace-nowrap">{k}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {tab2Data.map((row, idx) => (
+              {tab2DataDisplay.map((row, idx) => (
                 <tr key={idx} className="bg-white shadow-sm hover:shadow-md transition-all group">
                   <td className="px-4 py-4 rounded-l-xl font-bold text-gray-400 text-xs border-y border-l border-gray-100">{idx + 1}</td>
                   <td className="px-4 py-4 font-black text-gray-800 text-sm uppercase text-left border-y border-gray-100 whitespace-nowrap">
-                    {isModeSemua ? row.wilayah : row.kecamatan}
+                    {row.group_label}
                   </td>
-                  {JENJANG_KEYS.map((k, kIdx) => {
-                    const isLast = kIdx === JENJANG_KEYS.length - 1;
+                  {activeColumns.map((k, kIdx) => {
+                    const isLast = kIdx === activeColumns.length - 1;
                     return (
                       <td key={k} className={`px-2 py-4 border-y border-l border-gray-100 bg-gray-50/30 text-sm ${isLast ? 'rounded-r-xl border-r' : ''}`}>
                         {renderRatio(row[`${k}_guru`], row[`${k}_pd`], k)}
@@ -432,7 +646,7 @@ export default function RasioGuruVsPD({ selectedYear }) {
             </tbody>
           </table>
           
-          {tab2Data.length === 0 ? (
+          {tab2DataDisplay.length === 0 ? (
              <div className="py-20 flex flex-col items-center opacity-30 text-gray-500">
                <Search size={64} className="mb-4" />
                <p className="font-black uppercase tracking-widest text-xl">Tidak Ada Data</p>
@@ -454,11 +668,10 @@ export default function RasioGuruVsPD({ selectedYear }) {
             Batas maksimal daya tampung mengajar peserta didik per 1 orang guru:
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-3 font-bold opacity-90">
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> PAUD: Max 15 PD / Guru</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> TK, KB, SPS, TPA: Max 15 PD / Guru</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SD: Max 28 PD / Guru</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SMP: Max 32 PD / Guru</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SMA: Max 36 PD / Guru</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SMK: Max 36 PD / Guru</div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SMA, SMK: Max 36 PD / Guru</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> SLB: Max 8 PD / Guru</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500"></div> NON FORMAL: Max 30 PD / Guru</div>
           </div>

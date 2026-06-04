@@ -27,10 +27,19 @@ const CACHE_EXPIRY_HOURS = 12;
 
 const initDB = () => {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = (e) => e.target.result.createObjectStore(STORE_NAME);
+    const request = indexedDB.open(DB_NAME, 2); // VERSI 2 UNTUK MEMBERSIHKAN CACHE LAMA
+    request.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        // ANTI-CRASH: Cek dulu apakah nama store sudah ada
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME);
+        }
+    };
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onerror = (e) => {
+        console.warn("IndexedDB Error:", e);
+        reject(request.error);
+    };
   });
 };
 
@@ -248,9 +257,15 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
       
       try {
         const cachedData = await getFromCache(cacheKey);
+        // ANTI-CRASH: Cek apakah cachedData adalah Array atau Object (terhindar dari error Undefined Map)
         if (cachedData) {
-          setDataGuru(cachedData.data);
-          setFetchedDate(cachedData.date);
+          if (Array.isArray(cachedData)) {
+             setDataGuru(cachedData); 
+             setFetchedDate(''); 
+          } else {
+             setDataGuru(cachedData.data || []); 
+             setFetchedDate(cachedData.date || '');
+          }
           setLoading(false);
           return;
         }
@@ -285,6 +300,7 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
 
       } catch (e) {
         console.error("Gagal menarik data guru agregasi", e);
+        setDataGuru([]); // Failsafe agar tidak map dari undefined
       } finally {
         setLoading(false);
       }
@@ -295,15 +311,18 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
 
   const displayLastUpdated = fetchedDate || 'Belum Di-Kalkulasi oleh Admin';
 
+  // ANTI-CRASH MEMO: Selalu kembalikan Array kosong jika undefined
+  const safeDataGuru = Array.isArray(dataGuru) ? dataGuru : [];
+
   const listKabupaten = useMemo(() => {
-    const unik = [...new Set(dataGuru.map(item => item.kabupaten))];
+    const unik = [...new Set(safeDataGuru.map(item => item.kabupaten))];
     return unik.filter(k => k && k !== 'TIDAK DIKETAHUI').sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
-  }, [dataGuru]);
+  }, [safeDataGuru]);
 
   const activeLabel = activeKategori === 'SEMUA' ? (activeBentuk === 'SEMUA' ? 'SEMUA JENJANG' : activeBentuk) : (activeBentuk === 'SEMUA' ? activeKategori : activeBentuk);
 
   const aggregatedData = useMemo(() => {
-    const filteredData = dataGuru.filter(item => {
+    const filteredData = safeDataGuru.filter(item => {
       const bentukDb = String(item.bentuk_pendidikan || '').trim().toUpperCase();
       
       if (activeKategori === 'SEMUA') {
@@ -385,7 +404,7 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
     });
 
     return Array.from(mapAgg.values()).sort((a, b) => getKabupatenRank(a.wilayah) - getKabupatenRank(b.wilayah));
-  }, [dataGuru, activeKategori, activeBentuk, listKabupaten]);
+  }, [safeDataGuru, activeKategori, activeBentuk, listKabupaten]);
 
   const grandTotals = useMemo(() => {
     return aggregatedData.reduce((acc, curr) => {
@@ -837,7 +856,7 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
         <RincianStatusSekolahGuru 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={dataGuru}
+          data={safeDataGuru}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
@@ -848,7 +867,7 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
         <RincianGenderGuru 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={dataGuru}
+          data={safeDataGuru}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
@@ -859,7 +878,7 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
         <RincianKualifikasiGuru 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={dataGuru}
+          data={safeDataGuru}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
@@ -870,7 +889,7 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
         <RincianKepegawaianGuru 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={dataGuru}
+          data={safeDataGuru}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
@@ -881,7 +900,7 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
         <RincianProfesiGuru 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={dataGuru}
+          data={safeDataGuru}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
@@ -892,7 +911,7 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
         <RincianUsiaGuru 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={dataGuru}
+          data={safeDataGuru}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
@@ -903,7 +922,7 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
         <RincianProyeksiPensiunGuru 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={dataGuru}
+          data={safeDataGuru}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}

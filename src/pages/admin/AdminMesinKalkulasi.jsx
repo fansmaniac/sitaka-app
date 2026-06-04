@@ -1,13 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, ArrowLeft, Loader2, School, Users, GraduationCap } from 'lucide-react';
+import { 
+  Activity, ArrowLeft, Loader2, School, Users, 
+  GraduationCap, HelpCircle, ShieldAlert, ClipboardCheck
+} from 'lucide-react';
 import { db } from '../../firebase/config';
-import { collection, doc, query, where, getDocs, setDoc, writeBatch } from 'firebase/firestore';
+import { 
+  collection, doc, query, where, getDocs, getDoc, setDoc, writeBatch 
+} from 'firebase/firestore';
 
 // =====================================================================
 // UTILITY & REFERENSI
 // =====================================================================
 
-// Fungsi ekstraktor data SUPER KEBAL (mengabaikan spasi dan underscore)
+// Fungsi ekstraktor dasar (Hanya untuk data kecil/fallback)
 const getVal = (obj, keyName) => {
   if (!obj) return '';
   const target = keyName.toLowerCase().replace(/[\s_]/g, '');
@@ -15,7 +20,7 @@ const getVal = (obj, keyName) => {
   return key ? obj[key] : '';
 };
 
-// Fungsi ekstraktor angka (Anti-NaN)
+// Fungsi ekstraktor angka dasar
 const getNum = (obj, keyName) => {
   const val = getVal(obj, keyName);
   if (typeof val === 'number') return val;
@@ -26,16 +31,41 @@ const getNum = (obj, keyName) => {
   return 0;
 };
 
-// PEMBERSIH NPSN ULTIMATE (Membunuh desimal .0 dari Excel dan karakter gaib)
+// =====================================================================
+// FAST EXTRACTOR (ULTIMATE MEMORY SAVER UNTUK BIG DATA > 100K ROWS)
+// Mencegah pembuatan Object.keys() jutaan kali yang menyebabkan Aw Snap!
+// =====================================================================
+const createFastExtractor = (sampleObj) => {
+  const keyMap = {};
+  if (sampleObj) {
+    Object.keys(sampleObj).forEach(k => {
+      keyMap[k.toLowerCase().replace(/[\s_]/g, '')] = k;
+    });
+  }
+  return (obj, target) => {
+    if (!obj) return '';
+    const cleanTarget = target.toLowerCase().replace(/[\s_]/g, '');
+    const exactKey = keyMap[cleanTarget];
+    return exactKey !== undefined ? obj[exactKey] : '';
+  };
+};
+
+const getNumFast = (val) => {
+  if (typeof val === 'number') return val;
+  if (typeof val === 'string') {
+      const parsed = parseInt(val.replace(/[^0-9]/g, ''), 10);
+      return isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+};
+
+// PEMBERSIH NPSN ULTIMATE
 const cleanNpsn = (str) => {
   let s = String(str || '').trim();
-  if (s.endsWith('.0')) {
-     s = s.slice(0, -2); // Hapus ".0" di belakang jika terbaca sebagai float
-  }
+  if (s.endsWith('.0')) s = s.slice(0, -2); 
   return s.replace(/[^0-9a-zA-Z]/g, '').toUpperCase();
 };
 
-// Deteksi String "YA" yang Super Kebal
 const checkYa = (val) => {
   if (!val) return false;
   const cleanStr = String(val).replace(/[^a-zA-Z]/g, '').toUpperCase();
@@ -56,9 +86,6 @@ const cleanKabupatenName = (rawName) => {
   return name; 
 };
 
-// =====================================================================
-// PEMISAHAN JENJANG GLOBAL + FALLBACK ANTI GAGAL
-// =====================================================================
 const JENJANG_GROUPS = {
   'PAUD': ['TK', 'KB', 'SPS', 'TPA', 'PAUD'],
   'SD': ['SD', 'SPK SD'],
@@ -75,7 +102,6 @@ const identifyJenjangGroup = (jenjangDb) => {
   for (const group of JENJANG_KEYS) {
     if (JENJANG_GROUPS[group].includes(j)) return group;
   }
-  
   if (j.includes('TK') || j.includes('KB') || j.includes('PAUD') || j.includes('SPS') || j.includes('TPA')) return 'PAUD';
   if (j.includes('SD') && !j.includes('SLB')) return 'SD';
   if (j.includes('SMP') && !j.includes('SLB')) return 'SMP';
@@ -83,13 +109,9 @@ const identifyJenjangGroup = (jenjangDb) => {
   if (j.includes('SMK')) return 'SMK';
   if (j.includes('SLB') || j.includes('SDLB') || j.includes('SMPLB') || j.includes('SMALB')) return 'SLB (Inklusif)';
   if (j.includes('PKBM') || j.includes('SKB')) return 'NON FORMAL';
-
   return null;
 };
 
-// =====================================================================
-// PEMISAHAN JENJANG KHUSUS UNTUK ROMBEL VS KELAS (HANYA TK)
-// =====================================================================
 const JENJANG_GROUPS_RK = {
   'TK': ['TK'], 
   'SD': ['SD', 'SPK SD'],
@@ -106,7 +128,6 @@ const identifyJenjangGroupRK = (jenjangDb) => {
   for (const group of JENJANG_KEYS_RK) {
     if (JENJANG_GROUPS_RK[group].includes(j)) return group;
   }
-
   if (j.includes('TK')) return 'TK';
   if (j.includes('SD') && !j.includes('SLB')) return 'SD';
   if (j.includes('SMP') && !j.includes('SLB')) return 'SMP';
@@ -114,9 +135,9 @@ const identifyJenjangGroupRK = (jenjangDb) => {
   if (j.includes('SMK')) return 'SMK';
   if (j.includes('SLB') || j.includes('SDLB') || j.includes('SMPLB') || j.includes('SMALB')) return 'SLB (Inklusif)';
   if (j.includes('PKBM') || j.includes('SKB')) return 'NON FORMAL';
-
   return null;
 };
+
 
 // =====================================================================
 // KOMPONEN UTAMA
@@ -137,40 +158,49 @@ export default function AdminMesinKalkulasi({ onBack }) {
     let newStatus = {};
     
     for (const year of years) {
-      // Cek Status Modul Dashboard Sekolah Ter-Kalkulasi (TAHAP 1)
       const sekolahDoc = await getDocs(query(collection(db, 'sekolah_agregasi'), where("__name__", "==", `summary_${year}`)));
       if (!sekolahDoc.empty) {
           const data = sekolahDoc.docs[0].data();
           if (data.last_updated) {
              const d = new Date(data.last_updated);
              newStatus[`sekolah_dashboard_${year}`] = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth()+1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-          } else {
-             newStatus[`sekolah_dashboard_${year}`] = 'Selesai';
-          }
+          } else { newStatus[`sekolah_dashboard_${year}`] = 'Selesai'; }
       }
 
-      // Cek Status Modul Dashboard Guru Ter-Kalkulasi (TAHAP 2)
       const guruDoc = await getDocs(query(collection(db, 'guru_agregasi'), where("__name__", "==", `summary_${year}`)));
       if (!guruDoc.empty) {
           const data = guruDoc.docs[0].data();
           if (data.last_updated) {
              const d = new Date(data.last_updated);
              newStatus[`guru_dashboard_${year}`] = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth()+1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-          } else {
-             newStatus[`guru_dashboard_${year}`] = 'Selesai';
-          }
+          } else { newStatus[`guru_dashboard_${year}`] = 'Selesai'; }
       }
 
-      // Cek Status Modul Dashboard Siswa Ter-Kalkulasi (TAHAP 3)
       const siswaDoc = await getDocs(query(collection(db, 'siswa_agregasi'), where("__name__", "==", `summary_${year}`)));
       if (!siswaDoc.empty) {
           const data = siswaDoc.docs[0].data();
           if (data.last_updated) {
              const d = new Date(data.last_updated);
              newStatus[`siswa_dashboard_${year}`] = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth()+1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-          } else {
-             newStatus[`siswa_dashboard_${year}`] = 'Selesai';
-          }
+          } else { newStatus[`siswa_dashboard_${year}`] = 'Selesai'; }
+      }
+
+      const inklusiSnap = await getDocs(query(collection(db, 'dapodik_agregasi'), where("__name__", "==", `inklusi_pd_${year}`)));
+      if (!inklusiSnap.empty) {
+          const data = inklusiSnap.docs[0].data();
+          if (data.last_updated) {
+             const d = new Date(data.last_updated);
+             newStatus[`inklusi_pd_${year}`] = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth()+1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+          } else { newStatus[`inklusi_pd_${year}`] = 'Selesai'; }
+      }
+
+      const kesiapanSnap = await getDocs(query(collection(db, 'dapodik_agregasi'), where("__name__", "==", `kesiapan_sekolah_${year}`)));
+      if (!kesiapanSnap.empty) {
+          const data = kesiapanSnap.docs[0].data();
+          if (data.last_updated) {
+             const d = new Date(data.last_updated);
+             newStatus[`kesiapan_sekolah_${year}`] = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth()+1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+          } else { newStatus[`kesiapan_sekolah_${year}`] = 'Selesai'; }
       }
 
       for (const type of calcTypes) {
@@ -180,9 +210,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
            if (data.last_updated) {
               const d = new Date(data.last_updated);
               newStatus[`${type}_${year}`] = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth()+1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-           } else {
-              newStatus[`${type}_${year}`] = 'Selesai';
-           }
+           } else { newStatus[`${type}_${year}`] = 'Selesai'; }
         }
       }
 
@@ -192,9 +220,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
           if (data.last_updated) {
              const d = new Date(data.last_updated);
              newStatus[`sekolah_lebih_shift_${year}`] = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth()+1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-          } else {
-             newStatus[`sekolah_lebih_shift_${year}`] = 'Selesai';
-          }
+          } else { newStatus[`sekolah_lebih_shift_${year}`] = 'Selesai'; }
       }
 
       const aksesSnap = await getDocs(query(collection(db, 'akses_pd_agregasi'), where("__name__", "==", `jarak_waktu_${year}`)));
@@ -203,9 +229,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
           if (data.last_updated) {
              const d = new Date(data.last_updated);
              newStatus[`akses_pd_${year}`] = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth()+1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-          } else {
-             newStatus[`akses_pd_${year}`] = 'Selesai';
-          }
+          } else { newStatus[`akses_pd_${year}`] = 'Selesai'; }
       }
     }
 
@@ -215,9 +239,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
         if (data.last_updated) {
            const d = new Date(data.last_updated);
            newStatus[`trend_data_nasional`] = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth()+1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-        } else {
-           newStatus[`trend_data_nasional`] = 'Selesai';
-        }
+        } else { newStatus[`trend_data_nasional`] = 'Selesai'; }
     }
 
     setCalcStatus(newStatus);
@@ -228,8 +250,358 @@ export default function AdminMesinKalkulasi({ onBack }) {
   }, []);
 
   // =====================================================================
+  // MESIN BARU: PERHITUNGAN ANGKA KESIAPAN SEKOLAH (KELAS 1, 7, 10)
+  // CHUNKING SYSTEM MEMORY SAFE & SMART REGEX (ANTI CRASH)
+  // =====================================================================
+  const handleCalculateKesiapanSekolah = async (year) => {
+    setUploading(true);
+    setProgressLabel(`Membaca Master Agregasi Sekolah Tahun ${year}...`);
+    setUploadProgress(5);
+
+    try {
+      const summaryRef = doc(db, 'sekolah_agregasi', `summary_${year}`);
+      const summarySnap = await getDoc(summaryRef);
+
+      if (!summarySnap.exists()) {
+        alert(`Gagal, Sob!\n\nRingkasan Sekolah untuk Tahun ${year} belum di-kalkulasi. Silakan jalankan 'Ringkasan Dashboard Sekolah (Tahap 1)' terlebih dahulu.`);
+        setUploading(false); return;
+      }
+
+      const totalSchoolChunks = summarySnap.data().total_chunks || 0;
+      const schoolLookupMap = new Map();         
+
+      for (let i = 0; i < totalSchoolChunks; i++) {
+        setProgressLabel(`Membangun Peta Sekolah Chunk ${i + 1}/${totalSchoolChunks}...`);
+        const chunkRef = doc(db, 'sekolah_agregasi', `sekolah_${year}_chunk_${i}`);
+        const chunkSnap = await getDoc(chunkRef);
+        
+        if (chunkSnap.exists() && chunkSnap.data().data_agregasi) {
+          const arr = chunkSnap.data().data_agregasi;
+          arr.forEach(s => {
+            const npsn = cleanNpsn(s.npsn);
+            if (!npsn) return;
+            schoolLookupMap.set(npsn, { 
+              kabupaten: cleanKabupatenName(s.kabupaten), 
+              kecamatan: String(s.kecamatan || 'TIDAK DIKETAHUI').trim().toUpperCase(), 
+              bentuk_pendidikan: String(s.bentuk_pendidikan || '').trim().toUpperCase(), 
+              status_sekolah: String(s.status_sekolah || '').trim().toUpperCase() 
+            });
+          });
+        }
+        await new Promise(r => setTimeout(r, 10));
+        setUploadProgress(5 + Math.floor((i / totalSchoolChunks) * 15));
+      }
+
+      setUploadProgress(25);
+      setProgressLabel(`Menarik Database Akses PD Chunks ${year}...`);
+      
+      const qAkses = query(collection(db, 'data_akses_pd_chunks'), where("tahun_data", "==", year));
+      const snapAkses = await getDocs(qAkses);
+
+      if (snapAkses.empty) {
+        alert(`Database Akses PD untuk Tahun Data ${year} kosong! Silahkan upload datanya terlebih dahulu.`);
+        setUploading(false); return;
+      }
+
+      const kesiapanMap = new Map(); 
+      let processedChunks = 0;
+      const totalAksesDocs = snapAkses.docs.length;
+
+      const rxKls1 = /(?:kelas|kls)\s*1\b/i;
+      const rxKls7 = /(?:kelas|kls)\s*7\b/i;
+      const rxKls10 = /(?:kelas|kls)\s*10\b/i;
+      const rxAsalPAUD = /\b(?:TK|KB|PAUD|RA|BA|TA|SPS|KOBER)\b/i;
+      const rxAsalSD = /\b(?:SD|SDN|SDS|MI|MIN|MIS|IBTIDAIYAH)\b/i;
+      const rxAsalSMP = /\b(?:SMP|SMPN|SMPS|MTS|MTSN|MTSS|TSANAWIYAH)\b/i;
+
+      for (const chunkDoc of snapAkses.docs) {
+        processedChunks++;
+        setProgressLabel(`Menganalisis Kesiapan & Asal Sekolah ${processedChunks}/${totalAksesDocs}...`);
+        
+        const rawRows = chunkDoc.data().data;
+        if (Array.isArray(rawRows) && rawRows.length > 0) {
+          const getV = createFastExtractor(rawRows[0]);
+
+          rawRows.forEach(item => {
+            const npsn = cleanNpsn(getV(item, 'npsn'));
+            
+            let kab = '', kec = '', bentuk = '', status = '';
+            if (npsn && schoolLookupMap.has(npsn)) {
+              const meta = schoolLookupMap.get(npsn);
+              kab = meta.kabupaten;
+              kec = meta.kecamatan;
+              bentuk = meta.bentuk_pendidikan;
+              status = meta.status_sekolah;
+            } else {
+              kab = cleanKabupatenName(getV(item, 'kabupaten'));
+              kec = String(getV(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+              bentuk = String(getV(item, 'bentuk_pendidikan') || '').trim().toUpperCase();
+              status = String(getV(item, 'status_sekolah') || '').trim().toUpperCase() === 'NEGERI' ? 'NEGERI' : 'SWASTA';
+            }
+
+            const group = identifyJenjangGroup(bentuk);
+            if (!['SD', 'SMP', 'SMA', 'SMK'].includes(group)) return;
+
+            const tingkatPendidikan = String(getV(item, 'tingkat_pendidikan') || '').trim();
+            const asalSekolah = String(getV(item, 'sekolah_asal') || '').trim();
+            const tglLahirRaw = String(getV(item, 'tanggal_lahir') || '').trim();
+
+            const isKls1 = rxKls1.test(tingkatPendidikan);
+            const isKls7 = rxKls7.test(tingkatPendidikan);
+            const isKls10 = rxKls10.test(tingkatPendidikan);
+
+            let isTargetKelas = false;
+            let isAsalSesuai = false;
+            let umurMax = 0;
+
+            if (group === 'SD') {
+                if (!isKls1) return;
+                isTargetKelas = true;
+                umurMax = 7;
+                isAsalSesuai = rxAsalPAUD.test(asalSekolah);
+            } 
+            else if (group === 'SMP') {
+                if (!isKls7) return;
+                isTargetKelas = true;
+                umurMax = 12;
+                isAsalSesuai = rxAsalSD.test(asalSekolah);
+            }
+            else if (group === 'SMA' || group === 'SMK') {
+                if (!isKls10) return;
+                isTargetKelas = true;
+                umurMax = 15;
+                isAsalSesuai = rxAsalSMP.test(asalSekolah);
+            }
+
+            if (!isTargetKelas) return;
+
+            // =========================================================================
+            // REGEX UMUR PINTAR: Cari 4 digit angka berawalan 19 atau 20
+            // Ini KEBAL TERHADAP format aneh seperti "12 Maret, 2013" atau "2013-05-12"
+            // =========================================================================
+            let isKurangUmur = false;
+            if (tglLahirRaw) {
+                const yearMatch = tglLahirRaw.match(/(?:19|20)\d{2}/);
+                if (yearMatch) {
+                    const birthYear = parseInt(yearMatch[0], 10);
+                    const age = parseInt(year) - birthYear;
+                    if (age < umurMax) isKurangUmur = true;
+                }
+            }
+
+            const comboKey = `${kab}|${kec}|${group}|${status}`;
+            if (!kesiapanMap.has(comboKey)) {
+              kesiapanMap.set(comboKey, {
+                kabupaten: kab,
+                kecamatan: kec,
+                bentuk_pendidikan: group,
+                status_sekolah: status,
+                total_siswa_awal: 0,
+                siswa_asal_sesuai: 0,
+                siswa_kurang_umur: 0
+              });
+            }
+
+            const node = kesiapanMap.get(comboKey);
+            node.total_siswa_awal++;
+            if (isAsalSesuai) node.siswa_asal_sesuai++;
+            if (isKurangUmur) node.siswa_kurang_umur++;
+
+          });
+        }
+        
+        await new Promise(r => setTimeout(r, 10)); // GC
+        setUploadProgress(25 + Math.floor((processedChunks / totalAksesDocs) * 65));
+      }
+
+      setUploadProgress(90);
+      setProgressLabel(`Menyimpan Dokumen Agregasi Kesiapan Sekolah...`);
+
+      const finalKesiapanAgregasi = Array.from(kesiapanMap.values());
+
+      const outDocRef = doc(db, 'dapodik_agregasi', `kesiapan_sekolah_${year}`);
+      await setDoc(outDocRef, {
+        tahun_data: year,
+        data: finalKesiapanAgregasi,
+        last_updated: new Date().toISOString()
+      });
+
+      setUploadProgress(100);
+      alert(`SINKRONISASI KALKULASI BERHASIL!\n\nAnalisis Angka Kesiapan Sekolah tahun ${year} telah selesai diproses.`);
+      checkCalcStatus();
+
+    } catch (err) {
+      console.error("Kesiapan engine error:", err);
+      alert("Terjadi kegagalan fatal pada internal server engine kalkulasi Kesiapan Sekolah.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+
+  // =====================================================================
+  // MESIN BARU: PERHITUNGAN SISWA INKLUSI (PRE-CALCULATED)
+  // CHUNKING SYSTEM MEMORY SAFE (ANTI AW-SNAP / OUT OF MEMORY)
+  // =====================================================================
+  const handleCalculateInklusi = async (year) => {
+    setUploading(true);
+    setProgressLabel(`Membaca Master Agregasi Sekolah Tahun ${year}...`);
+    setUploadProgress(5);
+
+    try {
+      const summaryRef = doc(db, 'sekolah_agregasi', `summary_${year}`);
+      const summarySnap = await getDoc(summaryRef);
+
+      if (!summarySnap.exists()) {
+        alert(`Gagal, Sob!\n\nRingkasan Sekolah untuk Tahun ${year} belum di-kalkulasi. Silakan jalankan 'Ringkasan Dashboard Sekolah (Tahap 1)' terlebih dahulu.`);
+        setUploading(false); return;
+      }
+
+      const totalSchoolChunks = summarySnap.data().total_chunks || 0;
+      const schoolLookupMap = new Map();         
+      const comboSchoolCountMap = new Map();     
+
+      for (let i = 0; i < totalSchoolChunks; i++) {
+        setProgressLabel(`Membangun Peta Sekolah Chunk ${i + 1}/${totalSchoolChunks}...`);
+        const chunkRef = doc(db, 'sekolah_agregasi', `sekolah_${year}_chunk_${i}`);
+        const chunkSnap = await getDoc(chunkRef);
+        
+        if (chunkSnap.exists() && chunkSnap.data().data_agregasi) {
+          const arr = chunkSnap.data().data_agregasi;
+          arr.forEach(s => {
+            const npsn = cleanNpsn(s.npsn);
+            if (!npsn) return;
+
+            const kab = cleanKabupatenName(s.kabupaten);
+            const kec = String(s.kecamatan || 'TIDAK DIKETAHUI').trim().toUpperCase();
+            const bentuk = String(s.bentuk_pendidikan || '').trim().toUpperCase();
+            const status = String(s.status_sekolah || '').trim().toUpperCase();
+
+            schoolLookupMap.set(npsn, { kabupaten: kab, kecamatan: kec, bentuk_pendidikan: bentuk, status_sekolah: status });
+
+            const comboKey = `${kab}|${kec}|${bentuk}|${status}`;
+            comboSchoolCountMap.set(comboKey, (comboSchoolCountMap.get(comboKey) || 0) + 1);
+          });
+        }
+        
+        await new Promise(r => setTimeout(r, 10));
+        setUploadProgress(5 + Math.floor((i / totalSchoolChunks) * 15));
+      }
+
+      setUploadProgress(25);
+      setProgressLabel(`Menarik Database Akses PD Chunks ${year}...`);
+      
+      const qAkses = query(collection(db, 'data_akses_pd_chunks'), where("tahun_data", "==", year));
+      const snapAkses = await getDocs(qAkses);
+
+      if (snapAkses.empty) {
+        alert(`Database Akses PD untuk Tahun Data ${year} kosong, Sob! Silahkan upload datanya terlebih dahulu di halaman Admin Database Master.`);
+        setUploading(false); return;
+      }
+
+      const comboInclusionSchoolsSetMap = new Map(); 
+      const comboInclusionStudentCountMap = new Map(); 
+      let totalSiswaInklusiCount = 0;
+      let processedChunks = 0;
+      const totalAksesDocs = snapAkses.docs.length;
+
+      for (const chunkDoc of snapAkses.docs) {
+        processedChunks++;
+        setProgressLabel(`Menganalisis Data Inklusi ${processedChunks}/${totalAksesDocs}...`);
+        
+        const rawRows = chunkDoc.data().data;
+        if (Array.isArray(rawRows) && rawRows.length > 0) {
+          const getV = createFastExtractor(rawRows[0]);
+
+          rawRows.forEach(item => {
+            const kebKhusus = String(getV(item, 'kebutuhan_khusus')).trim();
+
+            if (!kebKhusus || kebKhusus === '' || kebKhusus.toUpperCase() === 'TIDAK ADA' || kebKhusus.toUpperCase() === 'NULL' || kebKhusus.toUpperCase() === 'NORMAL') {
+              return;
+            }
+
+            totalSiswaInklusiCount++;
+            const npsn = cleanNpsn(getV(item, 'npsn'));
+
+            let kab = '', kec = '', bentuk = '', status = '';
+            if (npsn && schoolLookupMap.has(npsn)) {
+              const meta = schoolLookupMap.get(npsn);
+              kab = meta.kabupaten;
+              kec = meta.kecamatan;
+              bentuk = meta.bentuk_pendidikan;
+              status = meta.status_sekolah;
+            } else {
+              kab = cleanKabupatenName(getV(item, 'kabupaten'));
+              kec = String(getV(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+              bentuk = String(getV(item, 'bentuk_pendidikan') || '').trim().toUpperCase();
+              status = String(getV(item, 'status_sekolah') || '').trim().toUpperCase() === 'NEGERI' ? 'NEGERI' : 'SWASTA';
+            }
+
+            const comboKey = `${kab}|${kec}|${bentuk}|${status}`;
+
+            if (!comboInclusionSchoolsSetMap.has(comboKey)) {
+              comboInclusionSchoolsSetMap.set(comboKey, new Set());
+            }
+            if (npsn) comboInclusionSchoolsSetMap.get(comboKey).add(npsn);
+
+            comboInclusionStudentCountMap.set(comboKey, (comboInclusionStudentCountMap.get(comboKey) || 0) + 1);
+          });
+        }
+        
+        await new Promise(r => setTimeout(r, 10));
+        setUploadProgress(25 + Math.floor((processedChunks / totalAksesDocs) * 50));
+      }
+
+      setUploadProgress(80);
+      setProgressLabel(`Menyusun Flat Matrix Data Gabungan...`);
+
+      const allPossibleComboKeys = new Set([...comboSchoolCountMap.keys(), ...comboInclusionStudentCountMap.keys()]);
+      const finalInklusiAgregasi = [];
+
+      allPossibleComboKeys.forEach(comboKey => {
+        const [kab, kec, bentuk, status] = comboKey.split('|');
+        const totalSekolah = comboSchoolCountMap.get(comboKey) || 0;
+        const uniqueSchoolsSet = comboInclusionSchoolsSetMap.get(comboKey);
+        const sekolahInklusi = uniqueSchoolsSet ? uniqueSchoolsSet.size : 0;
+        const siswaInklusi = comboInclusionStudentCountMap.get(comboKey) || 0;
+
+        if (totalSekolah > 0 || sekolahInklusi > 0 || siswaInklusi > 0) {
+          finalInklusiAgregasi.push({
+            kabupaten: kab,
+            kecamatan: kec,
+            bentuk_pendidikan: bentuk,
+            status_sekolah: status,
+            total_sekolah: totalSekolah,
+            sekolah_inklusi: sekolahInklusi,
+            siswa_inklusi: siswaInklusi
+          });
+        }
+      });
+
+      setUploadProgress(90);
+      setProgressLabel(`Menyimpan Dokumen Agregasi Inklusi...`);
+
+      const outDocRef = doc(db, 'dapodik_agregasi', `inklusi_pd_${year}`);
+      await setDoc(outDocRef, {
+        tahun_data: year,
+        data: finalInklusiAgregasi,
+        last_updated: new Date().toISOString()
+      });
+
+      setUploadProgress(100);
+      alert(`SINKRONISASI KALKULASI BERHASIL!\n\nAnalisis data Siswa Inklusi tahun ${year} telah selesai diproses.\nTotal ${totalSiswaInklusiCount.toLocaleString('id-ID')} siswa inklusi berhasil di-agregasikan.`);
+      checkCalcStatus();
+
+    } catch (err) {
+      console.error("Inklusi engine error:", err);
+      alert("Terjadi kegagalan fatal pada internal server engine kalkulasi inklusi.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // =====================================================================
   // TAHAP 1: PRE-KALKULASI DATA SEKOLAH (DAPODIKSEKOLAH.JSX & RINCIAN MODALS)
-  // CHUNKING SYSTEM SYSTEM MEMORY SAFE & LIGHT-WEIGHT PUBLIC CALL
   // =====================================================================
   const handleCalculateDashboardSekolah = async (year) => {
     setUploading(true);
@@ -246,7 +618,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
       }
 
       let allSekolahData = [];
-      // ANTI-MEMORY LEAK
       snap.forEach(doc => { 
           const arr = doc.data().data;
           if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
@@ -255,7 +626,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
       setUploadProgress(30);
       setProgressLabel(`Memproses & Membersihkan Sisa Dokumen Lama...`);
 
-      // Bersihkan agregasi lama tahun tertentu agar data overwrite total bersih 100%
       const snapOld = await getDocs(collection(db, 'sekolah_agregasi'));
       let batchDel = writeBatch(db);
       let delCount = 0;
@@ -289,7 +659,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
         const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
         const akreditasi = String(getVal(item, 'akreditasi')).trim().toUpperCase();
 
-        // Hitung akumulasi rombel komparatif dengan Dynamic Field Scanning
         let rombel = 0;
         Object.keys(item).forEach(k => {
           if (k.toLowerCase().includes('rombel_')) {
@@ -300,7 +669,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
           rombel = parseInt(getVal(item, 'rombel')) || parseInt(getVal(item, 'rombongan_belajar')) || 0;
         }
 
-        // Simpan objek yang telah dikompresi (Vastly lighter payload)
         compactSekolahList.push({
           npsn,
           nama,
@@ -316,7 +684,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
       setUploadProgress(70);
       setProgressLabel(`Menyimpan Dokumen Agregasi Ter-Kalkulasi...`);
 
-      // Simpan Chunks Optimal (Mencegah Firestore Payload Limit 1MB)
       const CHUNK_SIZE = 1500;
       const totalChunks = Math.ceil(compactSekolahList.length / CHUNK_SIZE);
       const currentTime = new Date().toISOString();
@@ -331,7 +698,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
         });
       }
 
-      // Dokumen Master Summary untuk public tracking
       await setDoc(doc(db, 'sekolah_agregasi', `summary_${year}`), {
         tahun_data: year,
         total_chunks: totalChunks,
@@ -354,7 +720,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
   // =====================================================================
   // TAHAP 2: PRE-KALKULASI DATA GURU (DAPODIKGURU.JSX & RINCIAN MODALS)
-  // MENGKOMPRESI DAN JOIN RELASI ANTARA SEKOLAH & GURU
   // =====================================================================
   const handleCalculateDashboardGuru = async (year) => {
     setUploading(true);
@@ -362,7 +727,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
     setUploadProgress(5);
 
     try {
-      // 1. Tarik Data Sekolah untuk Referensi Relasi (Kecamatan, Status, dll)
       const qSekolah = query(collection(db, 'dapodik_sekolah_chunks'), where("tahun_data", "==", year));
       const snapSekolah = await getDocs(qSekolah);
 
@@ -408,7 +772,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
       setUploadProgress(40);
       setProgressLabel(`Membersihkan Agregasi Guru Lama...`);
 
-      // Bersihkan agregasi guru lama tahun terkait
       const snapOld = await getDocs(collection(db, 'guru_agregasi'));
       const docsToDelete = [];
       snapOld.forEach(d => {
@@ -438,7 +801,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
       const compactGuruList = [];
 
       allPtkData.forEach(p => {
-         // Deteksi khusus Guru dan status Induk
          const jenisPtk = String(p.jenis_ptk || p['Jenis PTK'] || p.jenisptk || '').toUpperCase();
          const isGuru = jenisPtk.includes('GURU');
          
@@ -447,7 +809,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
          
          if(isGuru && isInduk) {
             const npsnRaw = cleanNpsn(p.npsn || p.NPSN || '');
-            const s = mapSekolah.get(npsnRaw) || {}; // Ambil relasi dari map sekolah
+            const s = mapSekolah.get(npsnRaw) || {};
             
             const kabupaten = cleanKabupatenName(getVal(p, 'kabupaten') || getVal(s, 'kabupaten') || getVal(s, 'Kabupaten/Kota'));
             const kecamatan = String(getVal(p, 'kecamatan') || getVal(s, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
@@ -456,7 +818,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
             const status_sekolah = String(getVal(s, 'status_sekolah') || getVal(p, 'status_sekolah')).toUpperCase() === 'NEGERI' ? 'NEGERI' : 'SWASTA';
             const nama_guru = String(getVal(p, 'nama') || getVal(p, 'nama_ptk') || '-').toUpperCase();
 
-            // PUSH DATA TERKECIL YANG DIBUTUHKAN DAPODIKGURU.JSX SAJA
             compactGuruList.push({
               npsn: npsnRaw,
               nama: nama_guru,
@@ -477,8 +838,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
       setUploadProgress(70);
       setProgressLabel(`Menyimpan ${compactGuruList.length.toLocaleString('id-ID')} Data Guru Terkompresi...`);
 
-      // Simpan Chunks Optimal (Mencegah Firestore Payload Limit)
-      // Limit diperbesar sedikit ke 2500 karena objek Guru ini sangat ramping
       const CHUNK_SIZE = 2500;
       const totalChunks = Math.ceil(compactGuruList.length / CHUNK_SIZE);
       const currentTime = new Date().toISOString();
@@ -493,7 +852,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
         });
       }
 
-      // Dokumen Master Summary untuk public tracking
       await setDoc(doc(db, 'guru_agregasi', `summary_${year}`), {
         tahun_data: year,
         total_chunks: totalChunks,
@@ -516,7 +874,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
   // =====================================================================
   // TAHAP 3: PRE-KALKULASI DATA PESERTA DIDIK (DAPODIKPESERTADIDIK.JSX & RINCIAN)
-  // MENGAMBIL DATA SISWA DARI DAPODIK SEKOLAH
   // =====================================================================
   const handleCalculateDashboardSiswa = async (year) => {
     setUploading(true);
@@ -541,7 +898,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
       setUploadProgress(30);
       setProgressLabel(`Memproses & Membersihkan Sisa Dokumen Lama...`);
 
-      // Bersihkan agregasi siswa lama tahun tertentu
       const snapOld = await getDocs(collection(db, 'siswa_agregasi'));
       let batchDel = writeBatch(db);
       let delCount = 0;
@@ -574,13 +930,11 @@ export default function AdminMesinKalkulasi({ onBack }) {
         const status = String(getVal(item, 'status_sekolah') || getVal(item, 'status')).trim().toUpperCase() === 'NEGERI' ? 'NEGERI' : 'SWASTA';
         const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang') || '').trim().toUpperCase();
 
-        // Helper Ekstraktor Siswa Super Kebal (Mencari semua variasi l, p, pd_l, pd_p, lk, pr)
         const getNumSafe = (key) => parseInt(getVal(item, key)) || 0;
 
         let pd_l = getNumSafe('pd_l') || getNumSafe('l') || getNumSafe('lk') || 0;
         let pd_p = getNumSafe('pd_p') || getNumSafe('p') || getNumSafe('pr') || 0;
         
-        // Coba akumulasi manual jika pd_l dan pd_p kosong (Biasa terjadi di PAUD/TK)
         if (pd_l === 0 && pd_p === 0) {
            pd_l = getNumSafe('tka_l') + getNumSafe('tkb_l') + getNumSafe('t1_l') + getNumSafe('t2_l') + getNumSafe('t3_l') + getNumSafe('t4_l') + getNumSafe('t5_l') + getNumSafe('t6_l') + getNumSafe('t7_l') + getNumSafe('t8_l') + getNumSafe('t9_l') + getNumSafe('t10_l') + getNumSafe('t11_l') + getNumSafe('t12_l') + getNumSafe('t13_l') + getNumSafe('paket_a_l') + getNumSafe('paket_b_l') + getNumSafe('paket_c_l');
            
@@ -588,11 +942,8 @@ export default function AdminMesinKalkulasi({ onBack }) {
         }
 
         let pd_total = getNumSafe('pd_total') || (pd_l + pd_p);
-
-        // Jika pd_total masih 0, kalkulasi ulang total 
         if (pd_total === 0) pd_total = pd_l + pd_p;
 
-        // PUSH DATA TERKECIL YANG DIBUTUHKAN DAPODIKPESERTADIDIK.JSX SAJA
         compactSiswaList.push({
           npsn,
           nama,
@@ -676,7 +1027,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
         const snapSekolah = await getDocs(qSekolah);
         
         let allSekolahData = [];
-        // ANTI-MEMORY LEAK: Hindari .concat()
         snapSekolah.forEach(doc => { 
             const arr = doc.data().data;
             if (Array.isArray(arr)) {
@@ -774,8 +1124,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
   };
 
   // =====================================================================
-  // 9. MESIN BARU: AKSESIBILITAS & KELAYAKAN PIP PD ---> [UPDATE DATE & LOGIKA]
-  // CHUNK BY CHUNK PROCESSING MEMORY SAFE
+  // 9. MESIN BARU: AKSESIBILITAS & KELAYAKAN PIP PD
   // =====================================================================
   const handleCalculateAksesDanPIP = async (year) => {
     setUploading(true);
@@ -791,7 +1140,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
         setUploading(false); return;
       }
 
-      // --- AUTO-CLEAR STALE CHUNKS DENGAN BATCH SAFE-LIMIT ---
       setProgressLabel(`Membersihkan Hasil Agregasi Lama Tahun ${year}...`);
       const pfxAkses = `akses_${year}_chunk_`;
       const pfxPip = `pip_${year}_chunk_`;
@@ -810,7 +1158,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
           for (let i = 0; i < docsToDelete.length; i++) {
               delBatch.delete(docsToDelete[i]);
               delCount++;
-              // Batas Firestore WriteBatch adalah 500
               if (delCount === 100 || i === docsToDelete.length - 1) {
                   await delBatch.commit();
                   delBatch = writeBatch(db);
@@ -822,7 +1169,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       setUploadProgress(20);
 
-      // --- SETUP MAP PENAMPUNG ---
       const mapAkses = new Map();
       const getAksesNode = (kab, kec, jenjang, moda) => {
           if (!mapAkses.has(kab)) mapAkses.set(kab, new Map());
@@ -862,28 +1208,28 @@ export default function AdminMesinKalkulasi({ onBack }) {
           return mapPIP.get(key);
       };
 
-      // --- PROSES CHUNKS MENTAH SATU-PERSATU (MENCEGAH RAM JEBOL) ---
       let processedChunksCount = 0;
       const totalDocs = snapAkses.docs.length;
 
       for (const chunkDoc of snapAkses.docs) {
           const arrData = chunkDoc.data().data;
-          if (Array.isArray(arrData)) {
+          if (Array.isArray(arrData) && arrData.length > 0) {
+              const getV = createFastExtractor(arrData[0]);
+
               arrData.forEach(item => {
-                  const nisnVal = getVal(item, 'nisn');
+                  const nisnVal = getV(item, 'nisn');
                   const nisnStr = String(nisnVal).trim();
                   if (!nisnVal || nisnStr === '' || nisnStr === '0' || nisnStr.toLowerCase() === 'null' || nisnStr.toLowerCase() === 'undefined') {
                       return; 
                   }
 
-                  const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
+                  const bentuk = String(getV(item, 'bentuk_pendidikan') || getV(item, 'jenjang')).trim().toUpperCase();
                   const group = identifyJenjangGroup(bentuk);
                   if (!group) return; 
 
-                  const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
-                  const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
+                  const kabDb = cleanKabupatenName(getV(item, 'kabupaten') || getV(item, 'Kabupaten/Kota'));
+                  const keyKec = String(getV(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
                   
-                  // A. KALKULASI KELAYAKAN PIP
                   const pipNode = getPipNode(kabDb, keyKec, group);
                   pipNode.total_siswa++;
 
@@ -899,12 +1245,11 @@ export default function AdminMesinKalkulasi({ onBack }) {
                       pipNode.tidak_layak++;
                   }
 
-                  // B. KALKULASI AKSESIBILITAS (JARAK & WAKTU)
                   let modaRaw = String(getVal(item, 'alat_transportasi')).trim().toUpperCase();
                   if (!modaRaw || modaRaw === 'UNDEFINED' || modaRaw === 'NULL') modaRaw = 'TIDAK DIKETAHUI';
                   
-                  const jarak = getNum(item, 'jarak_rumah_ke_sekolah');
-                  const waktu = getNum(item, 'menit_tempuh_ke_sekolah');
+                  const jarak = getNumFast(getV(item, 'jarak_rumah_ke_sekolah'));
+                  const waktu = getNumFast(getV(item, 'menit_tempuh_ke_sekolah'));
 
                   const aksesNode = getAksesNode(kabDb, keyKec, group, modaRaw);
 
@@ -926,14 +1271,12 @@ export default function AdminMesinKalkulasi({ onBack }) {
           processedChunksCount++;
           setProgressLabel(`Mengagregasi Chunks ${processedChunksCount} / ${totalDocs}...`);
           setUploadProgress(20 + Math.floor((processedChunksCount / totalDocs) * 50));
-          // Jeda agar UI browser tidak Freeze
           await new Promise(r => setTimeout(r, 10)); 
       }
 
       setUploadProgress(75);
       setProgressLabel(`Menyiapkan Data Simpanan...`);
 
-      // Mengubah Map Akses menjadi Array Flat
       const finalAksesToSave = [];
       mapAkses.forEach((kecMap, kabKey) => {
           kecMap.forEach((jenjangMap, kecKey) => {
@@ -951,7 +1294,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
           });
       });
 
-      // Mengubah Map PIP menjadi Array Flat (+ Kalkulasi Selisih)
       const finalPipToSave = Array.from(mapPIP.values()).map(item => ({
           ...item,
           selisih: item.layak_pip - item.layak_dan_menerima_kip
@@ -959,7 +1301,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       setUploadProgress(85);
 
-      // --- CHUNKING SYSTEM (Pemecah Dokumen Firestore max 1MB) ---
       const CHUNK_SIZE = 2000;
       const aksesChunks = [];
       const pipChunks = [];
@@ -971,10 +1312,8 @@ export default function AdminMesinKalkulasi({ onBack }) {
           pipChunks.push(finalPipToSave.slice(i, i + CHUNK_SIZE));
       }
 
-      // WAKTU UPDATE SEKARANG DIINJEKSI KE SELURUH CHUNKS SECARA KONSISTEN
       const currentTime = new Date().toISOString(); 
 
-      // Simpan Chunks Aksesibilitas
       for(let i=0; i < aksesChunks.length; i++) {
           await setDoc(doc(db, 'akses_pd_agregasi', `akses_${year}_chunk_${i}`), {
               tahun_data: year,
@@ -985,7 +1324,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
           });
       }
 
-      // Simpan Chunks PIP
       for(let i=0; i < pipChunks.length; i++) {
           await setDoc(doc(db, 'akses_pd_agregasi', `pip_${year}_chunk_${i}`), {
               tahun_data: year,
@@ -998,7 +1336,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       setUploadProgress(95);
 
-      // --- MASTER DOCUMENT (Untuk Checking Status Panel) ---
       const docRef = doc(db, 'akses_pd_agregasi', `jarak_waktu_${year}`);
       await setDoc(docRef, {
         tahun_data: year, 
@@ -1039,14 +1376,12 @@ export default function AdminMesinKalkulasi({ onBack }) {
       }
 
       let allSekolahData = [];
-      // ANTI-MEMORY LEAK: Hindari .concat()
       snapSekolah.forEach(doc => { 
           const arr = doc.data().data;
           if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
       });
       
       let allSarprasData = [];
-      // ANTI-MEMORY LEAK: Hindari .concat()
       snapSarpras.forEach(doc => { 
           const arr = doc.data().data;
           if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSarprasData.push(arr[j]); }
@@ -1054,7 +1389,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       setUploadProgress(40);
 
-      // 1. Buat Peta (Map) Ruang Kelas dari Sarpras by NPSN
       const sarprasMap = new Map();
       allSarprasData.forEach(s => {
         const npsn = cleanNpsn(getVal(s, 'npsn'));
@@ -1070,7 +1404,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
         }
       });
 
-      // 2. Siapkan Wadah Agregasi
       const tab1Data = JENJANG_KEYS_RK.map(k => ({ jenjang: k, sekolah_count: 0, kelas_total: 0, rombel_total: 0, double_shift_count: 0 }));
       const mapWilayah = new Map();
 
@@ -1091,7 +1424,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       setUploadProgress(60);
 
-      // 3. Olah Data Sekolah dan Bandingkan dengan Map Sarpras
       allSekolahData.forEach(item => {
         const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
         const group = identifyJenjangGroupRK(bentuk);
@@ -1108,15 +1440,12 @@ export default function AdminMesinKalkulasi({ onBack }) {
             }
         });
 
-        // Safeguard (Jika nol, coba narik dari field default Rombel)
         if (rombelTotal === 0) {
             rombelTotal = getNum(item, 'rombel') || getNum(item, 'rombongan_belajar');
         }
 
-        // Penentuan Sekolah Lebih Shift
         const isDoubleShift = rombelTotal > kelasTotal;
 
-        // Agregasi Tab 1 (Per Jenjang)
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
         if (rowTab1) {
            rowTab1.sekolah_count++;
@@ -1125,7 +1454,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
            if (isDoubleShift) rowTab1.double_shift_count++;
         }
 
-        // Agregasi Tab 2 (Per Wilayah)
         const kabDb = cleanKabupatenName(getVal(item, 'kabupaten') || getVal(item, 'Kabupaten/Kota'));
         const keyKec = String(getVal(item, 'kecamatan') || 'TIDAK DIKETAHUI').trim().toUpperCase();
         const rowTab2 = initWilayah(kabDb, keyKec);
@@ -1140,13 +1468,9 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       const tab2DataRaw = Array.from(mapWilayah.values());
 
-      // 4. Simpan ke Collection 'rombel_agregasi'
       const docRef = doc(db, 'rombel_agregasi', `sekolah_lebih_shift_${year}`);
       await setDoc(docRef, {
-        tahun_data: year,
-        tabel1: tab1Data, 
-        tabel2: tab2DataRaw, 
-        last_updated: new Date().toISOString()
+        tahun_data: year, tabel1: tab1Data, tabel2: tab2DataRaw, last_updated: new Date().toISOString()
       });
 
       setUploadProgress(100);
@@ -1178,7 +1502,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
       }
 
       let allSekolahData = [];
-      // ANTI-MEMORY LEAK: Hindari .concat()
       snapshot.forEach(doc => {
         const arr = doc.data().data;
         if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
@@ -1276,7 +1599,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
   };
 
   // =====================================================================
-  // 2. SEKOLAH VS GURU (GURU / SEKOLAH) ---> SOLUSI DIRECT PROPERTY ACCESS
+  // 2. SEKOLAH VS GURU (GURU / SEKOLAH)
   // =====================================================================
   const handleCalculateRasioSekolahGuru = async (year) => {
     setUploading(true);
@@ -1296,14 +1619,12 @@ export default function AdminMesinKalkulasi({ onBack }) {
       }
 
       let allSekolahData = [];
-      // ANTI-MEMORY LEAK: Hindari .concat()
       snapSek.forEach(doc => { 
           const arr = doc.data().data;
           if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
       });
       
       let allPtkData = [];
-      // ANTI-MEMORY LEAK: Hindari .concat()
       snapPtk.forEach(doc => { 
         const d = doc.data();
         if(d.data && (String(d.tahun_data) === String(year) || !d.tahun_data)) {
@@ -1320,7 +1641,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
          if(npsnRaw) mapSekolah.set(npsnRaw, { ...s, guru_aktual: 0 });
       });
 
-      // PENCARIAN SUPER LANGSUNG (TIDAK PAKAI GETVAL)
       allPtkData.forEach(p => {
          const jenisPtk = String(p.jenis_ptk || p['Jenis PTK'] || p.jenisptk || '').toUpperCase();
          const isGuru = jenisPtk.includes('GURU');
@@ -1404,7 +1724,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
   };
 
   // =====================================================================
-  // 3. ROMBEL VS GURU (GURU / ROMBEL) ---> SOLUSI DIRECT PROPERTY ACCESS
+  // 3. ROMBEL VS GURU (GURU / ROMBEL)
   // =====================================================================
   const handleCalculateRasioRombelGuru = async (year) => {
     setUploading(true);
@@ -1424,18 +1744,16 @@ export default function AdminMesinKalkulasi({ onBack }) {
       }
 
       let allSekolahData = [];
-      // ANTI-MEMORY LEAK: Hindari .concat()
       snapSek.forEach(doc => { 
           const arr = doc.data().data;
           if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
       });
       let allPtkData = [];
-      // ANTI-MEMORY LEAK: Hindari .concat()
       snapPtk.forEach(doc => { 
         const d = doc.data();
         if(d.data && (String(d.tahun_data) === String(year) || !d.tahun_data)) { 
-            const arr = d.data;
-            if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allPtkData.push(arr[j]); }
+             const arr = d.data;
+             if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allPtkData.push(arr[j]); }
         }
       });
 
@@ -1443,20 +1761,19 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       const mapSekolah = new Map();
       allSekolahData.forEach(s => {
-         const npsnRaw = cleanNpsn(getVal(s, 'npsn'));
-         if(npsnRaw) {
-             let rombelTotal = 0;
-             Object.keys(s).forEach(k => {
-                 const keyStr = k.trim().toLowerCase();
-                 if (/^rombel_(tka|tkb|t?\d{1,2}|paket_[abc])$/.test(keyStr)) {
-                     rombelTotal += parseInt(s[k]) || 0;
-                 }
-             });
-             mapSekolah.set(npsnRaw, { ...s, rombel_total: rombelTotal, guru_aktual: 0 });
-         }
+          const npsnRaw = cleanNpsn(getVal(s, 'npsn'));
+          if(npsnRaw) {
+              let rombelTotal = 0;
+              Object.keys(s).forEach(k => {
+                  const keyStr = k.trim().toLowerCase();
+                  if (/^rombel_(tka|tkb|t?\d{1,2}|paket_[abc])$/.test(keyStr)) {
+                      rombelTotal += parseInt(s[k]) || 0;
+                  }
+              });
+              mapSekolah.set(npsnRaw, { ...s, rombel_total: rombelTotal, guru_aktual: 0 });
+          }
       });
 
-      // PENCARIAN SUPER LANGSUNG (TIDAK PAKAI GETVAL)
       allPtkData.forEach(p => {
          const jenisPtk = String(p.jenis_ptk || p['Jenis PTK'] || p.jenisptk || '').toUpperCase();
          const isGuru = jenisPtk.includes('GURU');
@@ -1557,7 +1874,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
       }
 
       let allSekolahData = [];
-      // ANTI-MEMORY LEAK: Hindari .concat()
       snapSek.forEach(doc => { 
           const arr = doc.data().data;
           if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
@@ -1654,7 +1970,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
       }
 
       let allSekolahData = [];
-      // ANTI-MEMORY LEAK: Hindari .concat()
       snapSek.forEach(doc => { 
           const arr = doc.data().data;
           if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
@@ -1766,7 +2081,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
 
   // =====================================================================
-  // 6. ROMBEL VS RUANG KELAS (KELAS / ROMBEL) ---> SOLUSI FINAL ANTI OVERWRITE
+  // 6. ROMBEL VS RUANG KELAS (KELAS / ROMBEL)
   // =====================================================================
   const handleCalculateRasioRombelKelas = async (year) => {
     setUploading(true);
@@ -1786,14 +2101,12 @@ export default function AdminMesinKalkulasi({ onBack }) {
       }
 
       let allSekolahData = [];
-      // ANTI-MEMORY LEAK: Hindari .concat()
       snapSek.forEach(doc => { 
           const arr = doc.data().data;
           if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
       });
       
       let allSarprasData = [];
-      // ANTI-MEMORY LEAK: Hindari .concat()
       snapSarpras.forEach(doc => { 
           const arr = doc.data().data;
           if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSarprasData.push(arr[j]); }
@@ -1801,26 +2114,23 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       setUploadProgress(40);
 
-      // KITA CERAIKAN PENGGUNAAN MAP NPSN, MURNI MENGGUNAKAN GROUPING WILAYAH
       const tab1Data = JENJANG_KEYS_RK.map(k => ({ jenjang: k, sek_n: 0, rombel_n: 0, kelas_n: 0, sek_s: 0, rombel_s: 0, kelas_s: 0 }));
       const mapWilayah = new Map();
 
-      // Helper untuk Inisialisasi Wilayah
       const initWilayah = (kabDb, keyKec) => {
           const uniqueId = `${kabDb}_${keyKec}`;
           if (!mapWilayah.has(uniqueId)) {
               const init = { wilayah: kabDb, kecamatan: keyKec };
               JENJANG_KEYS_RK.forEach(k => { 
-                 init[`${k}_sek`] = 0; init[`${k}_rombel`] = 0; init[`${k}_kelas`] = 0;
-                 init[`${k}_sek_n`] = 0; init[`${k}_rombel_n`] = 0; init[`${k}_kelas_n`] = 0;
-                 init[`${k}_sek_s`] = 0; init[`${k}_rombel_s`] = 0; init[`${k}_kelas_s`] = 0;
+                  init[`${k}_sek`] = 0; init[`${k}_rombel`] = 0; init[`${k}_kelas`] = 0;
+                  init[`${k}_sek_n`] = 0; init[`${k}_rombel_n`] = 0; init[`${k}_kelas_n`] = 0;
+                  init[`${k}_sek_s`] = 0; init[`${k}_rombel_s`] = 0; init[`${k}_kelas_s`] = 0;
               });
               mapWilayah.set(uniqueId, init);
           }
           return mapWilayah.get(uniqueId);
       };
 
-      // --- LOOPING 1: MENGHITUNG ROMBEL DARI DATA SEKOLAH ---
       allSekolahData.forEach(item => {
         const bentuk = String(getVal(item, 'bentuk_pendidikan') || getVal(item, 'jenjang')).trim().toUpperCase();
         const group = identifyJenjangGroupRK(bentuk);
@@ -1836,7 +2146,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
             }
         });
 
-        // Safeguard (Jika nol, coba narik dari field default Rombel)
         if (rombelTotal === 0) {
             rombelTotal = getNum(item, 'rombel') || getNum(item, 'rombongan_belajar');
         }
@@ -1864,7 +2173,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       setUploadProgress(60);
 
-      // --- LOOPING 2: MENGHITUNG KELAS DARI DATA SARPRAS (TANPA NPSN) ---
       allSarprasData.forEach(s => {
         const bentuk = String(getVal(s, 'bentuk_pendidikan') || getVal(s, 'jenjang')).trim().toUpperCase();
         const group = identifyJenjangGroupRK(bentuk);
@@ -1879,7 +2187,6 @@ export default function AdminMesinKalkulasi({ onBack }) {
         const kelasRusakSedang = getNum(s, 'ruang_kelas_rusak_sedang');
         const kelasRusakBerat = getNum(s, 'ruang_kelas_rusak_berat');
         
-        // Akumulasikan semua tipe kelas (Layak maupun Tidak Layak)
         const ruangKelasTotal = kelasBaik + kelasRusakRingan + kelasRusakSedang + kelasRusakBerat;
 
         const rowTab1 = tab1Data.find(r => r.jenjang === group);
@@ -1922,7 +2229,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
   };
 
   // =====================================================================
-  // 7. GURU VS PD (PD / GURU) ---> SOLUSI DIRECT PROPERTY ACCESS
+  // 7. GURU VS PD (PD / GURU) ---> SOLVED TYPO & MEMORY
   // =====================================================================
   const handleCalculateRasioGuruPD = async (year) => {
     setUploading(true);
@@ -1942,18 +2249,16 @@ export default function AdminMesinKalkulasi({ onBack }) {
       }
 
       let allSekolahData = [];
-      // ANTI-MEMORY LEAK: Hindari .concat()
       snapSek.forEach(doc => { 
           const arr = doc.data().data;
           if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allSekolahData.push(arr[j]); }
       });
       let allPtkData = [];
-      // ANTI-MEMORY LEAK: Hindari .concat()
       snapPtk.forEach(doc => { 
         const d = doc.data();
         if(d.data && (String(d.tahun_data) === String(year) || !d.tahun_data)) { 
-            const arr = d.data;
-            if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allPtkData.push(arr[j]); }
+             const arr = d.data;
+             if (Array.isArray(arr)) { for (let j = 0; j < arr.length; j++) allPtkData.push(arr[j]); }
         }
       });
 
@@ -1961,37 +2266,36 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       const mapSekolah = new Map();
       allSekolahData.forEach(s => {
-         const npsnRaw = cleanNpsn(getVal(s, 'npsn'));
-         if(npsnRaw) {
-             let pd = parseInt(getVal(s, 'pd_total'));
-             if (isNaN(pd)) {
-               const totalLaki = (parseInt(getVal(s, 'tka_l')) || 0) + (parseInt(getVal(s, 'tkb_l')) || 0) +
-                 (parseInt(getVal(s, 't1_l')) || 0) + (parseInt(getVal(s, 't2_l')) || 0) +
-                 (parseInt(getVal(s, 't3_l')) || 0) + (parseInt(getVal(s, 't4_l')) || 0) +
-                 (parseInt(getVal(s, 't5_l')) || 0) + (parseInt(getVal(s, 't6_l')) || 0) +
-                 (parseInt(getVal(s, 't7_l')) || 0) + (parseInt(getVal(s, 't8_l')) || 0) +
-                 (parseInt(getVal(s, 't9_l')) || 0) + (parseInt(getVal(s, 't10_l')) || 0) +
-                 (parseInt(getVal(s, 't11_l')) || 0) + (parseInt(getVal(s, 't12_l')) || 0) +
-                 (parseInt(getVal(s, 't13_l')) || 0) + (parseInt(getVal(s, 'paket_a_l')) || 0) +
-                 (parseInt(getVal(s, 'paket_b_l')) || 0) + (parseInt(getVal(s, 'paket_c_l')) || 0);
+          const npsnRaw = cleanNpsn(getVal(s, 'npsn'));
+          if(npsnRaw) {
+              let pd = parseInt(getVal(s, 'pd_total'));
+              if (isNaN(pd)) {
+                const totalLaki = (parseInt(getVal(s, 'tka_l')) || 0) + (parseInt(getVal(s, 'tkb_l')) || 0) +
+                  (parseInt(getVal(s, 't1_l')) || 0) + (parseInt(getVal(s, 't2_l')) || 0) +
+                  (parseInt(getVal(s, 't3_l')) || 0) + (parseInt(getVal(s, 't4_l')) || 0) +
+                  (parseInt(getVal(s, 't5_l')) || 0) + (parseInt(getVal(s, 't6_l')) || 0) +
+                  (parseInt(getVal(s, 't7_l')) || 0) + (parseInt(getVal(s, 't8_l')) || 0) +
+                  (parseInt(getVal(s, 't9_l')) || 0) + (parseInt(getVal(s, 't10_l')) || 0) +
+                  (parseInt(getVal(s, 't11_l')) || 0) + (parseInt(getVal(s, 't12_l')) || 0) +
+                  (parseInt(getVal(s, 't13_l')) || 0) + (parseInt(getVal(s, 'paket_a_l')) || 0) +
+                  (parseInt(getVal(s, 'paket_b_l')) || 0) + (parseInt(getVal(s, 'paket_c_l')) || 0);
 
-               const totalPerempuan = (parseInt(getVal(s, 'tka_p')) || 0) + (parseInt(getVal(s, 'tkb_p')) || 0) +
-                 (parseInt(getVal(s, 't1_p')) || 0) + (parseInt(getVal(s, 't2_p')) || 0) +
-                 (parseInt(getVal(s, 't3_p')) || 0) + (parseInt(getVal(s, 't4_p')) || 0) +
-                 (parseInt(getVal(s, 't5_p')) || 0) + (parseInt(getVal(s, 't6_p')) || 0) +
-                 (parseInt(getVal(s, 't7_p')) || 0) + (parseInt(getVal(s, 't8_p')) || 0) +
-                 (parseInt(getVal(s, 't9_p')) || 0) + (parseInt(getVal(s, 't10_p')) || 0) +
-                 (parseInt(getVal(s, 't11_p')) || 0) + (parseInt(getVal(s, 't12_p')) || 0) +
-                 (parseInt(getVal(s, 't13_p')) || 0) + (parseInt(getVal(s, 'paket_a_p')) || 0) +
-                 (parseInt(getVal(s, 'paket_b_p')) || 0) + (parseInt(getVal(s, 'paket_c_p')) || 0);
+                const totalPerempuan = (parseInt(getVal(s, 'tka_p')) || 0) + (parseInt(getVal(s, 'tkb_p')) || 0) +
+                  (parseInt(getVal(s, 't1_p')) || 0) + (parseInt(getVal(s, 't2_p')) || 0) +
+                  (parseInt(getVal(s, 't3_p')) || 0) + (parseInt(getVal(s, 't4_p')) || 0) +
+                  (parseInt(getVal(s, 't5_p')) || 0) + (parseInt(getVal(s, 't6_p')) || 0) +
+                  (parseInt(getVal(s, 't7_p')) || 0) + (parseInt(getVal(s, 't8_p')) || 0) +
+                  (parseInt(getVal(s, 't9_p')) || 0) + (parseInt(getVal(s, 't10_p')) || 0) +
+                  (parseInt(getVal(s, 't11_p')) || 0) + (parseInt(getVal(s, 't12_p')) || 0) +
+                  (parseInt(getVal(s, 't13_p')) || 0) + (parseInt(getVal(s, 'paket_a_p')) || 0) +
+                  (parseInt(getVal(s, 'paket_b_p')) || 0) + (parseInt(getVal(s, 'paket_c_p')) || 0);
 
-               pd = totalLaki + totalPerempuan;
-             }
-             mapSekolah.set(npsnRaw, { ...s, pd_total: pd, guru_aktual: 0 });
-         }
+                pd = totalLaki + totalPerempuan;
+              }
+              mapSekolah.set(npsnRaw, { ...s, pd_total: pd, guru_aktual: 0 });
+          }
       });
 
-      // PENCARIAN SUPER LANGSUNG (TIDAK PAKAI GETVAL)
       allPtkData.forEach(p => {
          const jenisPtk = String(p.jenis_ptk || p['Jenis PTK'] || p.jenisptk || '').toUpperCase();
          const isGuru = jenisPtk.includes('GURU');
@@ -2034,9 +2338,9 @@ export default function AdminMesinKalkulasi({ onBack }) {
         if (!mapWilayah.has(uniqueId)) {
           const init = { wilayah: kabDb, kecamatan: keyKec };
           JENJANG_KEYS.forEach(k => { 
-             init[`${k}_guru`] = 0; init[`${k}_pd`] = 0;
-             init[`${k}_guru_n`] = 0; init[`${k}_pd_n`] = 0;
-             init[`${k}_guru_s`] = 0; init[`${k}_pd_s`] = 0;
+              init[`${k}_guru`] = 0; init[`${k}_pd`] = 0;
+              init[`${k}_guru_n`] = 0; init[`${k}_pd_n`] = 0;
+              init[`${k}_guru_s`] = 0; init[`${k}_pd_s`] = 0;
           });
           mapWilayah.set(uniqueId, init);
         }
@@ -2060,7 +2364,10 @@ export default function AdminMesinKalkulasi({ onBack }) {
 
       const docRef = doc(db, 'dapodik_agregasi', `rasio_guru_pd_${year}`);
       await setDoc(docRef, {
-        tahun_data: year, tabel1: tab1Data, tabel2: tab2DataRaw, last_updated: new Date().toISOString()
+        tahun_data: year, 
+        tabel1: tab1Data, 
+        tabel2: tab2DataRaw, 
+        last_updated: new Date().toISOString()
       });
 
       setUploadProgress(100);
@@ -2181,8 +2488,56 @@ export default function AdminMesinKalkulasi({ onBack }) {
                 </div>
              </div>
 
+             {/* ========================================================================= */}
+             {/* SLOT TERBARU: PRE-KALKULASI SISWA INKLUSI / ABK (BRANDING TEAL AKSEN)   */}
+             {/* ========================================================================= */}
+             <div className="bg-teal-50 p-6 rounded-3xl border border-teal-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
+                <div>
+                  <h4 className="text-xl font-black text-teal-900 uppercase flex items-center gap-2">
+                    <Users size={20} className="text-teal-600" /> Analisis Siswa Inklusi (ABK)
+                  </h4>
+                  <p className="text-sm font-medium text-teal-700 mt-1">
+                    Mengkalkulasi persentase ketersediaan sekolah penyelenggara inklusi serta jumlah total anak berkebutuhan khusus per wilayah kecamatan.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                   {['2024', '2025', '2026'].map(year => (
+                     <div key={year} className="flex flex-col items-center gap-1">
+                       <button onClick={() => handleCalculateInklusi(year)} className="bg-white border-2 border-teal-300 text-teal-700 hover:bg-teal-600 hover:text-white font-black uppercase px-5 py-3 rounded-xl transition-all active:scale-95 shadow-sm text-xs">
+                         Hitung {year}
+                       </button>
+                       <span className="text-[9px] font-bold text-teal-600/60">{calcStatus[`inklusi_pd_${year}`] || 'Belum'}</span>
+                     </div>
+                   ))}
+                </div>
+             </div>
+
+             {/* ========================================================================= */}
+             {/* SLOT TERBARU: ANGKA KESIAPAN SEKOLAH (BRANDING BLUE)                      */}
+             {/* ========================================================================= */}
+             <div className="bg-blue-50 p-6 rounded-3xl border border-blue-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm mt-2">
+                <div>
+                  <h4 className="text-xl font-black text-blue-900 uppercase flex items-center gap-2">
+                    <ClipboardCheck size={20} className="text-blue-600" /> Angka Kesiapan Sekolah
+                  </h4>
+                  <p className="text-sm font-medium text-blue-700 mt-1">
+                    Analisis intake peserta didik baru (Kelas 1, 7, 10), memeriksa transisi asal jenjang sekolah sebelumnya dan kewajaran umur.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                   {['2024', '2025', '2026'].map(year => (
+                     <div key={year} className="flex flex-col items-center gap-1">
+                       <button onClick={() => handleCalculateKesiapanSekolah(year)} className="bg-white border-2 border-blue-300 text-blue-700 hover:bg-blue-600 hover:text-white font-black uppercase px-5 py-3 rounded-xl transition-all active:scale-95 shadow-sm text-xs">
+                         Hitung {year}
+                       </button>
+                       <span className="text-[9px] font-bold text-blue-600/60">{calcStatus[`kesiapan_sekolah_${year}`] || 'Belum'}</span>
+                     </div>
+                   ))}
+                </div>
+             </div>
+
              {/* MESIN BARU 3: TREND DATA (SISWA & SEKOLAH) */}
-             <div className="bg-yellow-50 p-6 rounded-3xl border border-yellow-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm mt-4">
+             <div className="bg-yellow-50 p-6 rounded-3xl border border-yellow-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm mt-2">
                 <div>
                   <h4 className="text-xl font-black text-yellow-900 uppercase">Trend Data Siswa & Sekolah</h4>
                   <p className="text-sm font-medium text-yellow-700 mt-1">Mengagregasi data 3 tahun terakhir (2024, 2025, 2026) lintas wilayah secara instan.</p>
@@ -2214,7 +2569,7 @@ export default function AdminMesinKalkulasi({ onBack }) {
              </div>
 
              {/* MESIN BARU: SEKOLAH LEBIH SHIFT (JOIN NPSN) */}
-             <div className="bg-red-50 p-6 rounded-3xl border border-red-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm mt-4">
+             <div className="bg-red-50 p-6 rounded-3xl border border-red-200 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm mt-2">
                 <div>
                   <h4 className="text-xl font-black text-red-900 uppercase">Sekolah Lebih Shift</h4>
                   <p className="text-sm font-medium text-gray-600 mt-1">Metodologi Baru: Agregasi per NPSN (Jumlah Rombel &gt; Ruang Kelas)</p>

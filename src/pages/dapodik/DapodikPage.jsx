@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
   School, Users, GraduationCap, MapPin, LineChart, 
   Layers, Building2, Menu, X, Loader2, RefreshCw,
-  TrendingUp // <-- Tambahan Ikon untuk Menu Trend Data
+  TrendingUp, HeartHandshake, ClipboardCheck // <-- Tambahan Ikon ClipboardCheck
 } from 'lucide-react';
 import { db } from '../../firebase/config';
 import { collection, getDocs, query, where, limit } from 'firebase/firestore';
@@ -14,10 +14,12 @@ import DapodikSekolah from './DapodikSekolah';
 import DapodikGuru from './DapodikGuru'; 
 import DapodikPesertaDidik from './DapodikPesertaDidik'; 
 import DapodikDemografiAkses from './DapodikDemografiAkses'; 
+import SiswaInklusi from './SiswaInklusi';
+import AngkaKesiapanSekolah from './AngkaKesiapanSekolah'; // <-- IMPORT HALAMAN BARU KESIAPAN SEKOLAH
 import DapodikRasio from './DapodikRasio';
 import DapodikSarpras from './DapodikSarpras';
 import RombelLebihShift from './RombelLebihShift'; 
-import TrendData from './TrendData'; // <-- IMPORT HALAMAN TREND DATA BARU
+import TrendData from './TrendData'; 
 
 // =====================================================================
 // UTILITY: INDEXED-DB CACHING (BRANKAS LOKAL)
@@ -74,10 +76,12 @@ const MENU_ITEMS = [
   { id: 'guru', label: 'Guru', icon: Users },
   { id: 'peserta_didik', label: 'Peserta Didik', icon: GraduationCap },
   { id: 'demografi_akses', label: 'Aksesibilitas & Kelayakan PIP', icon: MapPin }, 
+  { id: 'siswa_inklusi', label: 'Sekolah dan Siswa Inklusi', icon: HeartHandshake }, 
+  { id: 'angka_kesiapan', label: 'Angka Kesiapan Sekolah', icon: ClipboardCheck }, // <-- MENU BARU
   { id: 'rasio', label: 'Rasio / Bandingkan Data', icon: LineChart },
   { id: 'rombel', label: 'Rombel', icon: Layers }, 
   { id: 'sarpras', label: 'Sarpras', icon: Building2 },
-  { id: 'trend_data', label: 'Trend Data Siswa & Sekolah', icon: TrendingUp }, // <-- MENU BARU DI BAWAH SARPRAS
+  { id: 'trend_data', label: 'Trend Data Siswa & Sekolah', icon: TrendingUp }, 
 ];
 
 export default function DapodikPage({ Header }) {
@@ -199,10 +203,12 @@ export default function DapodikPage({ Header }) {
       case 'guru': return <DapodikGuru data={ptkData} selectedYear={selectedYear} />;
       case 'peserta_didik': return <DapodikPesertaDidik data={sekolahData} selectedYear={selectedYear} />; 
       case 'demografi_akses': return <DapodikDemografiAkses selectedYear={selectedYear} />; 
+      case 'siswa_inklusi': return <SiswaInklusi selectedYear={selectedYear} />;
+      case 'angka_kesiapan': return <AngkaKesiapanSekolah selectedYear={selectedYear} />; // <-- RENDER MENU BARU
       case 'rasio': return <DapodikRasio dataSekolah={sekolahData} dataGuru={ptkData} selectedYear={selectedYear} />;
       case 'rombel': return <RombelLebihShift selectedYear={selectedYear} />; 
       case 'sarpras': return <DapodikSarpras selectedYear={selectedYear} />;
-      case 'trend_data': return <TrendData selectedYear={selectedYear} />; // <-- KONDISIONAL TAMPILAN MENU BARU
+      case 'trend_data': return <TrendData selectedYear={selectedYear} />; 
       default: return <DapodikSekolah data={sekolahData} selectedYear={selectedYear} />;
     }
   };

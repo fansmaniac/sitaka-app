@@ -1,11 +1,65 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { MapPin, Info, Layers, Activity, Search, Download, Loader2, Users, School } from 'lucide-react';
+import { MapPin, Info, Layers, Activity, Search, Download, Loader2, Users, School, GraduationCap } from 'lucide-react';
 import { db } from '../../../firebase/config';
-import { doc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, query, where } from 'firebase/firestore';
 import ExcelJS from 'exceljs';
 
 // =====================================================================
-// UTILITY FUNCTIONS & STANDAR REGULASI
+// UTILITY: CACHING LOKAL (BRANKAS BROWSER) MULTI-DB
+// =====================================================================
+const CACHE_EXPIRY_HOURS = 12;
+
+const initDB = (dbName, storeName) => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(dbName, 2); 
+    request.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        // FIX: Cek dulu apakah laci sudah ada sebelum membuat baru
+        if (!db.objectStoreNames.contains(storeName)) {
+            db.createObjectStore(storeName);
+        }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = (e) => {
+        console.warn("IndexedDB Error:", e);
+        reject(request.error);
+    };
+  });
+};
+
+const saveToCache = async (dbName, storeName, key, data) => {
+  try {
+    const db = await initDB(dbName, storeName);
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, 'readwrite');
+      tx.objectStore(storeName).put({ data, timestamp: Date.now() }, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) { console.warn(`Gagal menyimpan ke cache ${storeName}`, err); }
+};
+
+const getFromCache = async (dbName, storeName, key) => {
+  try {
+    const db = await initDB(dbName, storeName);
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, 'readonly');
+      const req = tx.objectStore(storeName).get(key);
+      req.onsuccess = () => {
+        const result = req.result;
+        if (result && Array.isArray(result.data) && result.data.length > 0) {
+          const hoursOld = (Date.now() - result.timestamp) / (1000 * 60 * 60);
+          if (hoursOld < CACHE_EXPIRY_HOURS) return resolve(result.data);
+        }
+        resolve(null);
+      };
+      req.onerror = () => resolve(null);
+    });
+  } catch (err) { return null; }
+};
+
+// =====================================================================
+// UTILITY FUNCTIONS & PENGELOMPOKAN
 // =====================================================================
 const KABUPATEN_LIST = [
   "BENGKAYANG", "KAPUAS HULU", "KAYONG UTARA", "KETAPANG", 
@@ -13,8 +67,50 @@ const KABUPATEN_LIST = [
   "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
 ];
 
-// PEMISAHAN JENJANG SMA DAN SMK
-const JENJANG_KEYS = ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
+const cleanKabupatenName = (rawName) => {
+  if (!rawName) return "TIDAK DIKETAHUI";
+  let name = String(rawName).toUpperCase().replace(/^(KAB\.|KABUPATEN|KOTA)\s+/i, '').trim();
+  const found = KABUPATEN_LIST.find(kab => name.includes(kab));
+  if (found) return found;
+  return name; 
+};
+
+// PETA KOLOM BERDASARKAN KATEGORI YANG DIPILIH
+const COLUMN_MAP = {
+  'SEMUA': ['TK', 'SD', 'SMP', 'SMA', 'SMK', 'SLB', 'NON FORMAL'],
+  'PAUD': ['TK', 'KB', 'SPS', 'TPA'],
+  'DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
+  'MENENGAH': ['SMA', 'SPK SMA', 'SMK'],
+  'INKLUSIF': ['SLB'],
+  'NON FORMAL': ['PKBM', 'SKB']
+};
+
+// Fungsi Penentu Kolom Berdasarkan Raw Jenjang
+const getColumnKey = (jenjangDb, category) => {
+  const j = String(jenjangDb || '').trim().toUpperCase();
+  if (category === 'SEMUA') {
+      if (j === 'TK') return 'TK';
+      if (['SD', 'SPK SD'].includes(j)) return 'SD';
+      if (['SMP', 'SPK SMP'].includes(j)) return 'SMP';
+      if (['SMA', 'SPK SMA'].includes(j)) return 'SMA';
+      if (j === 'SMK') return 'SMK';
+      if (j.includes('SLB') || j.includes('LB')) return 'SLB';
+      if (['PKBM', 'SKB'].includes(j)) return 'NON FORMAL';
+  } else if (category === 'PAUD') {
+      if (['TK', 'KB', 'SPS', 'TPA'].includes(j)) return j;
+  } else if (category === 'DASAR') {
+      if (['SD', 'SPK SD'].includes(j)) return 'SD';
+      if (['SMP', 'SPK SMP'].includes(j)) return 'SMP';
+  } else if (category === 'MENENGAH') {
+      if (['SMA', 'SPK SMA'].includes(j)) return 'SMA';
+      if (j === 'SMK') return 'SMK';
+  } else if (category === 'INKLUSIF') {
+      if (j.includes('SLB') || j.includes('LB')) return 'SLB';
+  } else if (category === 'NON FORMAL') {
+      if (['PKBM', 'SKB'].includes(j)) return 'NON FORMAL';
+  }
+  return null;
+};
 
 // Fungsi hitung angka rasio mentah (Jumlah Guru / Jumlah Rombel)
 const getRawRatio = (rombelCount, guruCount) => {
@@ -38,7 +134,7 @@ const renderRatio = (rombelCount, guruCount) => {
     colorClass = 'text-blue-600'; // SURPLUS (Sangat berlebih, > 2 guru per rombel)
   }
 
-  // Menggunakan pembulatan 1 angka di belakang koma untuk kemudahan membaca (misal 1 : 1.2)
+  // Menggunakan pembulatan 1 angka di belakang koma
   return <span className={`font-black ${colorClass} tracking-wider`}>1 : {ratio.toFixed(1)}</span>;
 };
 
@@ -46,79 +142,214 @@ const renderRatio = (rombelCount, guruCount) => {
 // MAIN COMPONENT
 // =====================================================================
 export default function RasioRombelVsGuru({ selectedYear }) {
+  const [activeKategori, setActiveKategori] = useState('SEMUA');
   const [filterWilayah, setFilterWilayah] = useState('SEMUA');
-  const [filterStatusTab2, setFilterStatusTab2] = useState('SEMUA'); // STATE BARU FILTER STATUS TABEL 2
+  const [filterStatusTab2, setFilterStatusTab2] = useState('SEMUA'); 
   
-  const [tab2DataRaw, setTab2DataRaw] = useState([]);
+  const [mergedData, setMergedData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [lastUpdated, setLastUpdated] = useState(''); // State untuk tanggal update
+  const [lastUpdated, setLastUpdated] = useState('');
 
-  // --- FETCH DATA PRE-CALCULATED DARI FIREBASE ---
+  // --- FETCH DATA (Membaca Chunks Sekolah & Guru, Lalu Di-Merge) ---
   useEffect(() => {
-    const fetchAgregasi = async () => {
+    const fetchData = async () => {
       setLoading(true);
       setError(null);
+      const cacheKeySekolah = `sekolah_agregasi_v1_${selectedYear}`;
+      const cacheKeyGuru = `guru_agregasi_v1_${selectedYear}`;
+      
       try {
-        // Mengambil data yang digenerate oleh handleCalculateRasioRombelGuru
-        const docRef = doc(db, 'dapodik_agregasi', `rasio_rombel_guru_${selectedYear}`);
-        const docSnap = await getDoc(docRef);
+        // --- 1. FETCH SEKOLAH TAHAP 1 (UNTUK ROMBEL) ---
+        let sekolahData = await getFromCache("SitakaCacheDB_SekolahModul_Agregasi", "sekolahDataAgg", cacheKeySekolah);
+        let lastUpdSekolah = '';
+        
+        if (!sekolahData || !Array.isArray(sekolahData) || sekolahData.length === 0) {
+            sekolahData = [];
+            const summaryRef = doc(db, 'sekolah_agregasi', `summary_${selectedYear}`);
+            const summarySnap = await getDoc(summaryRef);
+            if (summarySnap.exists()) {
+                if(summarySnap.data().last_updated) lastUpdSekolah = summarySnap.data().last_updated;
+                let qChunks = query(collection(db, 'sekolah_agregasi'), where('tahun_data', '==', String(selectedYear)));
+                let snapChunks = await getDocs(qChunks);
+                if(snapChunks.empty){
+                    qChunks = query(collection(db, 'sekolah_agregasi'), where('tahun_data', '==', Number(selectedYear)));
+                    snapChunks = await getDocs(qChunks);
+                }
+                snapChunks.forEach(docChunk => {
+                    if (docChunk.id.includes('_chunk_')) {
+                       const arr = docChunk.data().data_agregasi;
+                       if(Array.isArray(arr)) sekolahData.push(...arr);
+                    }
+                });
+                if(sekolahData.length > 0) await saveToCache("SitakaCacheDB_SekolahModul_Agregasi", "sekolahDataAgg", cacheKeySekolah, sekolahData);
+            }
+        }
 
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setTab2DataRaw(data.tabel2 || []);
-          
-          // Format tanggal last_updated
-          if (data.last_updated) {
-            const d = new Date(data.last_updated);
-            const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
-            setLastUpdated(`${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()} Pukul ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
-          } else {
-            setLastUpdated('Tidak Diketahui');
-          }
+        // --- 2. FETCH GURU TAHAP 2 (UNTUK GURU AKTUAL) ---
+        let guruData = await getFromCache("SitakaCacheDB_GuruModul_Agregasi", "guruDataAgg", cacheKeyGuru);
+        let lastUpdGuru = '';
+        
+        if (!guruData || !Array.isArray(guruData) || guruData.length === 0) {
+            guruData = [];
+            const summaryRef = doc(db, 'guru_agregasi', `summary_${selectedYear}`);
+            const summarySnap = await getDoc(summaryRef);
+            if (summarySnap.exists()) {
+                if(summarySnap.data().last_updated) lastUpdGuru = summarySnap.data().last_updated;
+                let qChunks = query(collection(db, 'guru_agregasi'), where('tahun_data', '==', String(selectedYear)));
+                let snapChunks = await getDocs(qChunks);
+                if(snapChunks.empty){
+                    qChunks = query(collection(db, 'guru_agregasi'), where('tahun_data', '==', Number(selectedYear)));
+                    snapChunks = await getDocs(qChunks);
+                }
+                snapChunks.forEach(docChunk => {
+                    if (docChunk.id.includes('_chunk_')) {
+                       const arr = docChunk.data().data_agregasi;
+                       if(Array.isArray(arr)) guruData.push(...arr);
+                    }
+                });
+                if(guruData.length > 0) await saveToCache("SitakaCacheDB_GuruModul_Agregasi", "guruDataAgg", cacheKeyGuru, guruData);
+            }
+        }
+
+        // FALLBACK PENGECEKAN
+        if (!sekolahData || sekolahData.length === 0 || !guruData || guruData.length === 0) {
+            setError(`Data Sekolah (Tahap 1) atau Guru (Tahap 2) tahun ${selectedYear} belum dikalkulasi.`);
+            setMergedData([]);
         } else {
-          setError(`Data rasio Rombel VS Guru tahun ${selectedYear} belum dikalkulasi oleh Admin.`);
+            // --- 3. MERGE DATA SEKOLAH & GURU (REALTIME BY NPSN) ---
+            const mapSekolah = new Map();
+            sekolahData.forEach(s => {
+                if(s && s.npsn) mapSekolah.set(s.npsn, { ...s, guru_aktual: 0 });
+            });
+            guruData.forEach(g => {
+                if(g && g.npsn && mapSekolah.has(g.npsn)){
+                    mapSekolah.get(g.npsn).guru_aktual++;
+                }
+            });
+
+            setMergedData(Array.from(mapSekolah.values()));
+            
+            const useDate = lastUpdGuru || lastUpdSekolah;
+            if(useDate){
+                const d = new Date(useDate);
+                const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+                setLastUpdated(`${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()}`);
+            } else {
+                setLastUpdated('Tidak Diketahui');
+            }
         }
       } catch (err) {
-        console.error(err);
-        setError("Gagal menarik data rasio dari server.");
+          console.error(err);
+          setError("Gagal menarik data dari server.");
+          setMergedData([]);
       } finally {
-        setLoading(false);
+          setLoading(false);
       }
     };
-
-    fetchAgregasi();
+    fetchData();
   }, [selectedYear]);
 
   const isModeSemua = filterWilayah === 'SEMUA';
+  const activeColumns = COLUMN_MAP[activeKategori] || COLUMN_MAP['SEMUA'];
 
-  // =====================================================================
-  // DATA ENGINE (TABEL 1)
-  // =====================================================================
-  const tab1Data = useMemo(() => {
-    if (!tab2DataRaw || tab2DataRaw.length === 0) return [];
+  // --- ENGINE KOMPUTASI REAL-TIME TABEL 1 & TABEL 2 ---
+  const processedData = useMemo(() => {
+    if (!mergedData || !Array.isArray(mergedData) || mergedData.length === 0) {
+        return { tab1: [], tab2: [] };
+    }
 
-    const resMap = new Map();
-    JENJANG_KEYS.forEach(k => resMap.set(k, { jenjang: k, rombel_n: 0, guru_n: 0, rombel_s: 0, guru_s: 0, total_rombel: 0, total_guru: 0 }));
+    const t1Map = new Map();
+    activeColumns.forEach(k => t1Map.set(k, { jenjang: k, rombel_n: 0, guru_n: 0, rombel_s: 0, guru_s: 0, total_rombel: 0, total_guru: 0 }));
 
-    tab2DataRaw.forEach(row => {
-      if (!isModeSemua && row.wilayah !== filterWilayah) return;
+    const t2Map = new Map();
 
-      JENJANG_KEYS.forEach(k => {
-        const agg = resMap.get(k);
-        const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
-        agg.rombel_n += (row[`${baseK}_rombel_n`] || 0);
-        agg.guru_n += (row[`${baseK}_guru_n`] || 0);
-        agg.rombel_s += (row[`${baseK}_rombel_s`] || 0);
-        agg.guru_s += (row[`${baseK}_guru_s`] || 0);
-        
-        agg.total_rombel += (row[`${baseK}_rombel`] || 0);
-        agg.total_guru += (row[`${baseK}_guru`] || 0);
-      });
+    mergedData.forEach(item => {
+       if (!item) return;
+
+       const jenjangDb = item.bentuk_pendidikan || item.jenjang;
+       const colKey = getColumnKey(jenjangDb, activeKategori);
+       if (!colKey) return; 
+
+       const isNegeri = String(item.status_sekolah).toUpperCase() === 'NEGERI';
+       const rombelTotal = parseInt(item.rombel_total) || 0;
+       const guruTotal = parseInt(item.guru_aktual) || 0;
+
+       // Filter Wilayah untuk Tab 1
+       const kabDb = cleanKabupatenName(item.kabupaten);
+       if (isModeSemua || kabDb === filterWilayah) {
+           const t1Row = t1Map.get(colKey);
+           if (t1Row) {
+               if (isNegeri) { t1Row.rombel_n += rombelTotal; t1Row.guru_n += guruTotal; }
+               else { t1Row.rombel_s += rombelTotal; t1Row.guru_s += guruTotal; }
+               t1Row.total_rombel += rombelTotal;
+               t1Row.total_guru += guruTotal;
+           }
+       }
+
+       // Penyiapan Data Tab 2 (Breakdown Wilayah)
+       const kecDb = String(item.kecamatan || 'TIDAK DIKETAHUI').trim().toUpperCase();
+       if (!isModeSemua && kabDb !== filterWilayah) return;
+
+       const groupKey = isModeSemua ? kabDb : kecDb;
+
+       if (!t2Map.has(groupKey)) {
+           const init = { wilayah: kabDb, kecamatan: kecDb, group_label: groupKey };
+           activeColumns.forEach(k => {
+               init[`${k}_rombel_n`] = 0; init[`${k}_guru_n`] = 0;
+               init[`${k}_rombel_s`] = 0; init[`${k}_guru_s`] = 0;
+           });
+           t2Map.set(groupKey, init);
+       }
+
+       const t2Row = t2Map.get(groupKey);
+       if (isNegeri) {
+           t2Row[`${colKey}_rombel_n`] += rombelTotal;
+           t2Row[`${colKey}_guru_n`] += guruTotal;
+       } else {
+           t2Row[`${colKey}_rombel_s`] += rombelTotal;
+           t2Row[`${colKey}_guru_s`] += guruTotal;
+       }
     });
 
-    return Array.from(resMap.values());
-  }, [tab2DataRaw, filterWilayah, isModeSemua]);
+    const t1Arr = Array.from(t1Map.values());
+    const t2Arr = Array.from(t2Map.values()).sort((a, b) => {
+        if (isModeSemua) {
+           const rankA = KABUPATEN_LIST.indexOf(a.group_label);
+           const rankB = KABUPATEN_LIST.indexOf(b.group_label);
+           return (rankA !== -1 ? rankA : 99) - (rankB !== -1 ? rankB : 99);
+        } else {
+           return a.group_label.localeCompare(b.group_label);
+        }
+    });
+
+    return { tab1: t1Arr, tab2: t2Arr };
+  }, [mergedData, activeKategori, filterWilayah, isModeSemua, activeColumns]);
+
+  const tab1Data = processedData.tab1;
+  
+  // Format data Tab 2 agar responsif terhadap filter Status Negeri/Swasta
+  const tab2DataDisplay = useMemo(() => {
+    return processedData.tab2.map(row => {
+       const mapped = { group_label: row.group_label };
+       activeColumns.forEach(k => {
+           let rombel = 0; let guru = 0;
+           if (filterStatusTab2 === 'SEMUA') {
+               rombel = row[`${k}_rombel_n`] + row[`${k}_rombel_s`];
+               guru = row[`${k}_guru_n`] + row[`${k}_guru_s`];
+           } else if (filterStatusTab2 === 'NEGERI') {
+               rombel = row[`${k}_rombel_n`];
+               guru = row[`${k}_guru_n`];
+           } else if (filterStatusTab2 === 'SWASTA') {
+               rombel = row[`${k}_rombel_s`];
+               guru = row[`${k}_guru_s`];
+           }
+           mapped[`${k}_rombel`] = rombel;
+           mapped[`${k}_guru`] = guru;
+       });
+       return mapped;
+    });
+  }, [processedData.tab2, filterStatusTab2, activeColumns]);
 
   // --- LOGIKA GRAND TOTAL TABEL 1 ---
   const grandTotalTab1 = useMemo(() => {
@@ -133,62 +364,7 @@ export default function RasioRombelVsGuru({ selectedYear }) {
     }, { rombel_n: 0, guru_n: 0, rombel_s: 0, guru_s: 0, total_rombel: 0, total_guru: 0 });
   }, [tab1Data]);
 
-
-  // =====================================================================
-  // DATA ENGINE (TABEL 2) DENGAN FILTER STATUS SAKTI
-  // =====================================================================
-  const tab2Data = useMemo(() => {
-    if (!tab2DataRaw || tab2DataRaw.length === 0) return [];
-    
-    // Helper fungsi menentukan kolom yg akan ditarik (SEMUA, _n, _s)
-    const getSuffix = (baseType) => {
-      if (filterStatusTab2 === 'NEGERI') return `${baseType}_n`;
-      if (filterStatusTab2 === 'SWASTA') return `${baseType}_s`;
-      return baseType; 
-    };
-
-    const rombelKey = getSuffix('rombel');
-    const guruKey = getSuffix('guru');
-
-    if (isModeSemua) {
-      const mapKab = new Map();
-      tab2DataRaw.forEach(row => {
-         const kab = row.wilayah;
-         if(!mapKab.has(kab)) {
-             const init = { wilayah: kab, kecamatan: kab }; 
-             JENJANG_KEYS.forEach(k => { init[`${k}_rombel`] = 0; init[`${k}_guru`] = 0; });
-             mapKab.set(kab, init);
-         }
-         const aggRow = mapKab.get(kab);
-         JENJANG_KEYS.forEach(k => { 
-             const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
-             aggRow[`${k}_rombel`] += (row[`${baseK}_${rombelKey}`] || 0); 
-             aggRow[`${k}_guru`] += (row[`${baseK}_${guruKey}`] || 0); 
-         });
-      });
-      return Array.from(mapKab.values()).sort((a, b) => {
-         const rankA = KABUPATEN_LIST.indexOf(a.wilayah.toUpperCase());
-         const rankB = KABUPATEN_LIST.indexOf(b.wilayah.toUpperCase());
-         return (rankA !== -1 ? rankA : 99) - (rankB !== -1 ? rankB : 99);
-      });
-    } else {
-      // Pada tingkat kecamatan, remap ke variabel penampung default (_rombel, _guru) agar seragam renderingnya
-      const filtered = tab2DataRaw.filter(r => r.wilayah === filterWilayah).sort((a,b) => a.kecamatan.localeCompare(b.kecamatan));
-      return filtered.map(row => {
-        const mappedRow = { ...row };
-        JENJANG_KEYS.forEach(k => {
-           const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
-           mappedRow[`${k}_rombel`] = row[`${baseK}_${rombelKey}`] || 0;
-           mappedRow[`${k}_guru`] = row[`${baseK}_${guruKey}`] || 0;
-        });
-        return mappedRow;
-      });
-    }
-  }, [tab2DataRaw, filterWilayah, isModeSemua, filterStatusTab2]);
-
-  // =====================================================================
-  // EXCEL EXPORTS
-  // =====================================================================
+  // --- EXCEL EXPORTS ---
   const handleUnduhTab1 = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Ketersediaan Rombel vs Guru');
@@ -205,7 +381,6 @@ export default function RasioRombelVsGuru({ selectedYear }) {
 
     tab1Data.forEach(row => worksheet.addRow(row));
 
-    // Tambahkan Baris Total di Excel
     const totalRow = worksheet.addRow({
       jenjang: 'TOTAL KESELURUHAN',
       ...grandTotalTab1
@@ -221,7 +396,7 @@ export default function RasioRombelVsGuru({ selectedYear }) {
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Ketersediaan_Rombel_Guru_${filterWilayah}_${selectedYear}.xlsx`;
+    link.download = `Rekap_Rombel_Guru_${activeKategori}_${filterWilayah}_${selectedYear}.xlsx`;
     link.click();
   };
 
@@ -231,19 +406,19 @@ export default function RasioRombelVsGuru({ selectedYear }) {
 
     worksheet.columns = [
       { header: isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan', key: 'wilayah_label', width: 30 },
-      ...JENJANG_KEYS.map(k => ({ header: k, key: k, width: 15 })),
+      ...activeColumns.map(k => ({ header: k, key: k, width: 15 })),
     ];
 
-    tab2Data.forEach(row => {
-      const excelRow = { wilayah_label: isModeSemua ? row.wilayah : row.kecamatan };
-      JENJANG_KEYS.forEach(k => {
+    tab2DataDisplay.forEach(row => {
+      const excelRow = { wilayah_label: row.group_label };
+      activeColumns.forEach(k => {
         const rombelCount = row[`${k}_rombel`];
         const guruCount = row[`${k}_guru`];
         
         if (rombelCount === 0 && guruCount === 0) excelRow[k] = '-';
         else if (rombelCount === 0 && guruCount > 0) excelRow[k] = 'Error (0 Rombel)';
         else {
-          const ratio = getRawRatio(rombelCount, guruCount);
+          const ratio = guruCount / rombelCount;
           excelRow[k] = `1 : ${ratio.toFixed(1)}`;
         }
       });
@@ -257,27 +432,27 @@ export default function RasioRombelVsGuru({ selectedYear }) {
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Analisa_Rasio_Guru_per_Rombel_${filterWilayah}_${filterStatusTab2}_${selectedYear}.xlsx`;
+    link.download = `Analisa_Rasio_Guru_per_Rombel_${activeKategori}_${filterWilayah}_${filterStatusTab2}_${selectedYear}.xlsx`;
     link.click();
   };
 
-  // =====================================================================
-  // UI RENDER
-  // =====================================================================
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center p-20 opacity-60">
          <Loader2 size={64} className="text-purple-500 mb-4 animate-spin" />
-         <p className="font-black text-xl text-purple-800 uppercase tracking-widest">Menarik Data Rasio...</p>
+         <p className="font-black text-xl text-purple-800 uppercase tracking-widest">Menarik Data Rasio Kapasitas...</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center p-20 bg-orange-50 rounded-3xl border-2 border-orange-200 border-dashed text-orange-600">
-         <p className="font-black text-lg uppercase tracking-widest text-center">{error}</p>
-         <p className="text-sm mt-2 font-bold">Harap minta Admin untuk menjalankan Mesin Kalkulasi di Admin Dashboard.</p>
+      <div className="flex flex-col items-center justify-center p-12 bg-orange-50 rounded-3xl border-2 border-orange-200 border-dashed text-orange-600">
+         <p className="font-black text-lg uppercase tracking-widest text-center mb-2">{error}</p>
+         <p className="text-sm font-bold text-center">
+            Harap minta Admin untuk masuk ke menu Master Data dan klik tombol <span className="text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded">Hitung Tahun {selectedYear}</span> pada bagian <br/>
+            <span className="text-indigo-700 underline underline-offset-4 decoration-indigo-300">Ringkasan Sekolah (Tahap 1) dan Guru (Tahap 2)</span>.
+         </p>
       </div>
     );
   }
@@ -285,22 +460,45 @@ export default function RasioRombelVsGuru({ selectedYear }) {
   return (
     <div className="w-full flex flex-col gap-8 animate-in slide-in-from-bottom-8 duration-500">
       
-      {/* HEADER & FILTER WILAYAH */}
+      {/* HEADER & FILTER */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100">
         <div>
           <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">Rombel <span className="text-purple-500">VS</span> Guru</h2>
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mt-1">Modul Analisa Kebutuhan Tenaga Pengajar</p>
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mt-1">Modul Analisa Pemenuhan Tenaga Pendidik</p>
         </div>
-        <div className="flex items-center bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2 shadow-sm">
-          <MapPin size={18} className="text-purple-600 mr-3" />
-          <select 
-            value={filterWilayah} 
-            onChange={(e) => setFilterWilayah(e.target.value)} 
-            className="bg-transparent text-sm font-black uppercase text-gray-700 outline-none cursor-pointer min-w-[200px]"
-          >
-            <option value="SEMUA">SELURUH PROVINSI</option>
-            {KABUPATEN_LIST.map(k => <option key={k} value={k}>KAB. {k}</option>)}
-          </select>
+        <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+          {/* FILTER JENJANG/KATEGORI BARU */}
+          <div className="flex items-center bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2 shadow-sm w-full sm:w-auto focus-within:ring-2 focus-within:ring-purple-200">
+            <GraduationCap size={18} className="text-purple-600 mr-3" />
+            <select 
+              value={activeKategori} 
+              onChange={(e) => setActiveKategori(e.target.value)} 
+              className="bg-transparent text-sm font-black uppercase text-gray-700 outline-none cursor-pointer min-w-[150px] w-full"
+            >
+              <option value="SEMUA">Semua Jenjang</option>
+              <option value="PAUD">PAUD</option>
+              <option value="DASAR">Pendidikan Dasar</option>
+              <option value="MENENGAH">Pendidikan Menengah</option>
+              <option value="INKLUSIF">Pendidikan Inklusif</option>
+              <option value="NON FORMAL">Non Formal</option>
+            </select>
+          </div>
+
+          <div className="flex items-center bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2 shadow-sm w-full sm:w-auto focus-within:ring-2 focus-within:ring-purple-200">
+            <MapPin size={18} className="text-purple-600 mr-3" />
+            <select 
+              value={filterWilayah} 
+              onChange={(e) => setFilterWilayah(e.target.value)} 
+              className="bg-transparent text-sm font-black uppercase text-gray-700 outline-none cursor-pointer min-w-[150px] w-full"
+            >
+              <option value="SEMUA">SELURUH PROVINSI</option>
+              {KABUPATEN_LIST.map(k => (
+                <option key={k} value={k}>
+                  {k === 'SINGKAWANG' || k === 'PONTIANAK' ? 'KOTA' : 'KAB.'} {k}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -371,10 +569,10 @@ export default function RasioRombelVsGuru({ selectedYear }) {
 
       {/* TABEL 2: ANALISA RASIO */}
       <div className="bg-white rounded-3xl shadow-md border border-gray-100 overflow-hidden">
-        <div className="bg-purple-900 px-6 py-5 border-b border-purple-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="bg-purple-700 px-6 py-5 border-b border-purple-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <Activity className="text-purple-200" size={24} />
-            <h3 className="font-black text-lg text-white uppercase tracking-tighter">Tabel 2: Hasil Analisa Ketercukupan Guru</h3>
+            <Activity className="text-purple-100" size={24} />
+            <h3 className="font-black text-lg text-white uppercase tracking-tighter">Tabel 2: Hasil Analisa Kebutuhan Guru</h3>
           </div>
           
           {/* FILTER STATUS & TOMBOL UNDUH TABEL 2 */}
@@ -402,20 +600,20 @@ export default function RasioRombelVsGuru({ selectedYear }) {
               <tr className="text-[10px] font-black uppercase text-gray-500 bg-purple-50/50">
                 <th className="px-4 py-4 rounded-l-xl w-12">No</th>
                 <th className="px-4 py-4 text-left">{isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan'}</th>
-                {JENJANG_KEYS.map(k => (
+                {activeColumns.map(k => (
                   <th key={k} className="px-2 py-4 text-purple-800 border-l border-purple-100 whitespace-nowrap">{k}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {tab2Data.map((row, idx) => (
+              {tab2DataDisplay.map((row, idx) => (
                 <tr key={idx} className="bg-white shadow-sm hover:shadow-md transition-all group">
                   <td className="px-4 py-4 rounded-l-xl font-bold text-gray-400 text-xs border-y border-l border-gray-100">{idx + 1}</td>
                   <td className="px-4 py-4 font-black text-gray-800 text-sm uppercase text-left border-y border-gray-100 whitespace-nowrap">
-                    {isModeSemua ? row.wilayah : row.kecamatan}
+                    {row.group_label}
                   </td>
-                  {JENJANG_KEYS.map((k, kIdx) => {
-                    const isLast = kIdx === JENJANG_KEYS.length - 1;
+                  {activeColumns.map((k, kIdx) => {
+                    const isLast = kIdx === activeColumns.length - 1;
                     return (
                       <td key={k} className={`px-2 py-4 border-y border-l border-gray-100 bg-gray-50/30 text-sm ${isLast ? 'rounded-r-xl border-r' : ''}`}>
                         {renderRatio(row[`${k}_rombel`], row[`${k}_guru`], k)}
@@ -427,7 +625,7 @@ export default function RasioRombelVsGuru({ selectedYear }) {
             </tbody>
           </table>
           
-          {tab2Data.length === 0 ? (
+          {tab2DataDisplay.length === 0 ? (
              <div className="py-20 flex flex-col items-center opacity-30 text-gray-500">
                <Search size={64} className="mb-4" />
                <p className="font-black uppercase tracking-widest text-xl">Tidak Ada Data</p>
@@ -446,20 +644,14 @@ export default function RasioRombelVsGuru({ selectedYear }) {
         <div className="text-sm text-purple-900 leading-relaxed w-full">
           <strong className="font-black text-base uppercase tracking-widest block mb-3 text-purple-800">Acuan Standar Minimum Jumlah Guru</strong>
           <p className="font-medium opacity-90 mb-3">
-            Berdasarkan rentang minimal dan maksimal Rombongan Belajar per sekolah, idealnya 1 Rombel setidaknya diampu oleh 1 orang Guru:
+            Berdasarkan beban kerja ideal, diusahakan rasio minimal jumlah Guru terhadap jumlah Rombongan Belajar (Rombel) adalah 1 Guru per 1 Rombel.
           </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-3 font-bold opacity-90">
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> PAUD: Min. 2 Guru</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> SD: Min. 6 Guru</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> SMP: Min. 3 Guru</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> SMA: Min. 3 Guru</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> SMK: Min. 3 Guru</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> SLB: Min. 3 Guru</div>
-            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> NON FORMAL: Min. 3 Guru</div>
+          <div className="grid grid-cols-1 font-bold opacity-90">
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-purple-500"></div> Rasio Ideal = Minimal 1 Guru untuk 1 Rombel.</div>
           </div>
           <div className="mt-4 pt-4 border-t border-purple-200/50 text-xs italic opacity-80 font-bold">
             * Format Rasio <span className="text-purple-700 font-black">1 : X</span>. Angka <span className="text-purple-700 font-black">1</span> mewakili 1 Rombel, dan <span className="text-purple-700 font-black">X</span> adalah rasio ketersediaan Guru.<br/>
-            Warna <span className="text-red-600 font-black">Merah</span> = Tidak Ideal / Kurang Guru (Jumlah rombel lebih besar dari jumlah guru). Warna <span className="text-emerald-600 font-black">Hijau</span> = Ideal (Minimal 1 Guru per Rombel).
+            Warna <span className="text-red-600 font-black">Merah</span> = Kurang Guru (Jumlah rombel lebih besar dari jumlah guru). Warna <span className="text-emerald-600 font-black">Hijau</span> = Ideal. Warna <span className="text-blue-600 font-black">Biru</span> = Sangat Berlebih (Lebih dari 2 Guru per Rombel).
           </div>
         </div>
       </div>

@@ -23,10 +23,23 @@ const CACHE_EXPIRY_HOURS = 12;
 
 const initDB = () => {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = (e) => e.target.result.createObjectStore(STORE_NAME);
+    // Kita tetap gunakan versi 2, tetapi handle onupgradeneeded dengan aman
+    const request = indexedDB.open(DB_NAME, 2); 
+    
+    request.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        // Hanya buat jika belum ada
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME);
+        }
+    };
+    
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    
+    request.onerror = (e) => {
+      console.warn("IndexedDB Error:", e);
+      reject(request.error);
+    };
   });
 };
 
@@ -288,9 +301,16 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
       
       try {
         const cachedData = await getFromCache(cacheKey);
+        
+        // PENANGANAN BUG CACHE BENTROK: Memeriksa apakah Array atau Objek
         if (cachedData) {
-          setDataSekolah(cachedData.data);
-          setFetchedDate(cachedData.date);
+          if (Array.isArray(cachedData)) {
+             setDataSekolah(cachedData); // Jika formatnya Array (dari modul Rasio)
+             setFetchedDate(''); 
+          } else {
+             setDataSekolah(cachedData.data || []); // Jika formatnya Objek (format asli)
+             setFetchedDate(cachedData.date || '');
+          }
           setLoading(false);
           return;
         }
@@ -325,6 +345,7 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
 
       } catch (e) {
         console.error("Gagal menarik data sekolah agregasi", e);
+        setDataSekolah([]); // Failsafe
       } finally {
         setLoading(false);
       }
@@ -335,14 +356,17 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
 
   const displayLastUpdated = fetchedDate || 'Belum Di-Kalkulasi oleh Admin';
 
+  // Failsafe ekstra: Jika dataSekolah kosong, defaultkan menjadi array kosong agar .map tidak error
+  const safeDataSekolah = Array.isArray(dataSekolah) ? dataSekolah : [];
+
   const listKabupaten = useMemo(() => {
-    const unik = [...new Set(dataSekolah.map(item => item.kabupaten))];
+    const unik = [...new Set(safeDataSekolah.map(item => item.kabupaten))];
     return unik.filter(Boolean).sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
-  }, [dataSekolah]);
+  }, [safeDataSekolah]);
 
   // ENGINE AGREGASI UNTUK KETIGA VIEW BERDASARKAN FILTER TAB & KATEGORI
   const aggregatedData = useMemo(() => {
-    const filteredData = dataSekolah.filter(item => {
+    const filteredData = safeDataSekolah.filter(item => {
       const bentukDb = String(item.bentuk_pendidikan || '').trim().toUpperCase();
       
       // LOGIKA FILTER BERDASARKAN KATEGORI & TAB
@@ -401,7 +425,7 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
     });
 
     return Array.from(mapAgg.values()).sort((a, b) => getKabupatenRank(a.wilayah) - getKabupatenRank(b.wilayah));
-  }, [dataSekolah, activeKategori, activeTab, listKabupaten]);
+  }, [safeDataSekolah, activeKategori, activeTab, listKabupaten]);
 
   const grandTotals = useMemo(() => {
     return aggregatedData.reduce((acc, curr) => {
@@ -769,7 +793,7 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
         <RincianStatusSekolah 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={dataSekolah}
+          data={safeDataSekolah}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
@@ -780,7 +804,7 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
         <RincianAkreditasiSekolah 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={dataSekolah}
+          data={safeDataSekolah}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}
@@ -791,7 +815,7 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
         <RincianRombelSekolah 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
-          data={dataSekolah}
+          data={safeDataSekolah}
           initialWilayah={selectedWilayah}
           activeJenjang={activeLabel}
           displayLastUpdated={displayLastUpdated}

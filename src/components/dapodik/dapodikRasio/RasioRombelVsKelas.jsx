@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { MapPin, Info, Search, Download, Loader2, Building, Activity, School } from 'lucide-react';
+import { MapPin, Info, Search, Download, Loader2, Building, Activity, School, GraduationCap } from 'lucide-react';
 import { db } from '../../../firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
 import ExcelJS from 'exceljs';
@@ -13,8 +13,16 @@ const KABUPATEN_LIST = [
   "SAMBAS", "SANGGAU", "SEKADAU", "SINGKAWANG", "SINTANG"
 ];
 
-// PEMISAHAN JENJANG (PAUD DIUBAH MENJADI KHUSUS TK)
-const JENJANG_KEYS = ['TK', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'];
+// PETA KOLOM BERDASARKAN KATEGORI YANG DIPILIH
+// PAUD secara spesifik hanya mengambil TK (KB, SPS, TPA diabaikan)
+const COLUMN_MAP = {
+  'SEMUA': ['TK', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'],
+  'PAUD': ['TK'],
+  'DASAR': ['SD', 'SMP'],
+  'MENENGAH': ['SMA', 'SMK'],
+  'INKLUSIF': ['SLB (Inklusif)'],
+  'NON FORMAL': ['NON FORMAL']
+};
 
 // Fungsi hitung angka rasio mentah (Jumlah Kelas / Jumlah Rombel)
 const getRawRatio = (rombelCount, kelasCount) => {
@@ -44,13 +52,14 @@ const renderRatio = (rombelCount, kelasCount) => {
 // MAIN COMPONENT
 // =====================================================================
 export default function RasioRombelVsKelas({ selectedYear }) {
+  const [activeKategori, setActiveKategori] = useState('SEMUA');
   const [filterWilayah, setFilterWilayah] = useState('SEMUA');
-  const [filterStatusTab2, setFilterStatusTab2] = useState('SEMUA'); // STATE BARU FILTER STATUS TABEL 2
+  const [filterStatusTab2, setFilterStatusTab2] = useState('SEMUA'); 
   
   const [tab2DataRaw, setTab2DataRaw] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [lastUpdated, setLastUpdated] = useState(''); // State untuk tanggal update
+  const [lastUpdated, setLastUpdated] = useState('');
 
   // --- FETCH DATA PRE-CALCULATED DARI FIREBASE ---
   useEffect(() => {
@@ -65,7 +74,6 @@ export default function RasioRombelVsKelas({ selectedYear }) {
           const data = docSnap.data();
           setTab2DataRaw(data.tabel2 || []);
           
-          // Format tanggal last_updated
           if (data.last_updated) {
             const d = new Date(data.last_updated);
             const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
@@ -88,36 +96,37 @@ export default function RasioRombelVsKelas({ selectedYear }) {
   }, [selectedYear]);
 
   const isModeSemua = filterWilayah === 'SEMUA';
+  const activeColumns = COLUMN_MAP[activeKategori] || COLUMN_MAP['SEMUA'];
 
   // =====================================================================
   // DATA ENGINE (TABEL 1)
   // =====================================================================
   const tab1Data = useMemo(() => {
-    if (!tab2DataRaw || tab2DataRaw.length === 0) return [];
+    if (!tab2DataRaw || !Array.isArray(tab2DataRaw) || tab2DataRaw.length === 0) return [];
 
     const resMap = new Map();
-    // Tambahkan variabel total_sek
-    JENJANG_KEYS.forEach(k => resMap.set(k, { jenjang: k, rombel_n: 0, kelas_n: 0, rombel_s: 0, kelas_s: 0, total_rombel: 0, total_kelas: 0, total_sek: 0 }));
+    activeColumns.forEach(k => resMap.set(k, { jenjang: k, rombel_n: 0, kelas_n: 0, rombel_s: 0, kelas_s: 0, total_rombel: 0, total_kelas: 0, total_sek: 0 }));
 
     tab2DataRaw.forEach(row => {
       if (!isModeSemua && row.wilayah !== filterWilayah) return;
 
-      JENJANG_KEYS.forEach(k => {
+      activeColumns.forEach(k => {
         const agg = resMap.get(k);
-        const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
-        agg.rombel_n += (row[`${baseK}_rombel_n`] || 0);
-        agg.kelas_n += (row[`${baseK}_kelas_n`] || 0);
-        agg.rombel_s += (row[`${baseK}_rombel_s`] || 0);
-        agg.kelas_s += (row[`${baseK}_kelas_s`] || 0);
-        
-        agg.total_rombel += (row[`${baseK}_rombel`] || 0);
-        agg.total_kelas += (row[`${baseK}_kelas`] || 0);
-        agg.total_sek += (row[`${baseK}_sek`] || 0); // Akumulasi Total Sekolah
+        if (agg) {
+            agg.rombel_n += (row[`${k}_rombel_n`] || 0);
+            agg.kelas_n += (row[`${k}_kelas_n`] || 0);
+            agg.rombel_s += (row[`${k}_rombel_s`] || 0);
+            agg.kelas_s += (row[`${k}_kelas_s`] || 0);
+            
+            agg.total_rombel += (row[`${k}_rombel`] || 0);
+            agg.total_kelas += (row[`${k}_kelas`] || 0);
+            agg.total_sek += (row[`${k}_sek`] || 0);
+        }
       });
     });
 
     return Array.from(resMap.values());
-  }, [tab2DataRaw, filterWilayah, isModeSemua]);
+  }, [tab2DataRaw, filterWilayah, isModeSemua, activeColumns]);
 
   // --- LOGIKA GRAND TOTAL TABEL 1 ---
   const grandTotalTab1 = useMemo(() => {
@@ -128,19 +137,17 @@ export default function RasioRombelVsKelas({ selectedYear }) {
       acc.kelas_s += curr.kelas_s;
       acc.total_rombel += curr.total_rombel;
       acc.total_kelas += curr.total_kelas;
-      acc.total_sek += curr.total_sek; // Akumulasi Grand Total Sekolah
+      acc.total_sek += curr.total_sek; 
       return acc;
     }, { rombel_n: 0, kelas_n: 0, rombel_s: 0, kelas_s: 0, total_rombel: 0, total_kelas: 0, total_sek: 0 });
   }, [tab1Data]);
-
 
   // =====================================================================
   // DATA ENGINE (TABEL 2) DENGAN FILTER STATUS SAKTI
   // =====================================================================
   const tab2Data = useMemo(() => {
-    if (!tab2DataRaw || tab2DataRaw.length === 0) return [];
+    if (!tab2DataRaw || !Array.isArray(tab2DataRaw) || tab2DataRaw.length === 0) return [];
     
-    // Helper fungsi menentukan kolom yg akan ditarik (SEMUA, _n, _s)
     const getSuffix = (baseType) => {
       if (filterStatusTab2 === 'NEGERI') return `${baseType}_n`;
       if (filterStatusTab2 === 'SWASTA') return `${baseType}_s`;
@@ -156,14 +163,13 @@ export default function RasioRombelVsKelas({ selectedYear }) {
          const kab = row.wilayah;
          if(!mapKab.has(kab)) {
              const init = { wilayah: kab, kecamatan: kab }; 
-             JENJANG_KEYS.forEach(k => { init[`${k}_rombel`] = 0; init[`${k}_kelas`] = 0; });
+             activeColumns.forEach(k => { init[`${k}_rombel`] = 0; init[`${k}_kelas`] = 0; });
              mapKab.set(kab, init);
          }
          const aggRow = mapKab.get(kab);
-         JENJANG_KEYS.forEach(k => { 
-             const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
-             aggRow[`${k}_rombel`] += (row[`${baseK}_${rombelKey}`] || 0); 
-             aggRow[`${k}_kelas`] += (row[`${baseK}_${kelasKey}`] || 0); 
+         activeColumns.forEach(k => { 
+             aggRow[`${k}_rombel`] += (row[`${k}_${rombelKey}`] || 0); 
+             aggRow[`${k}_kelas`] += (row[`${k}_${kelasKey}`] || 0); 
          });
       });
       return Array.from(mapKab.values()).sort((a, b) => {
@@ -172,19 +178,17 @@ export default function RasioRombelVsKelas({ selectedYear }) {
          return (rankA !== -1 ? rankA : 99) - (rankB !== -1 ? rankB : 99);
       });
     } else {
-      // Pada tingkat kecamatan, remap ke variabel penampung default (_rombel, _kelas) agar seragam renderingnya
       const filtered = tab2DataRaw.filter(r => r.wilayah === filterWilayah).sort((a,b) => a.kecamatan.localeCompare(b.kecamatan));
       return filtered.map(row => {
         const mappedRow = { ...row };
-        JENJANG_KEYS.forEach(k => {
-           const baseK = k === 'SLB (Inklusif)' ? 'SLB (Inklusif)' : k;
-           mappedRow[`${k}_rombel`] = row[`${baseK}_${rombelKey}`] || 0;
-           mappedRow[`${k}_kelas`] = row[`${baseK}_${kelasKey}`] || 0;
+        activeColumns.forEach(k => {
+           mappedRow[`${k}_rombel`] = row[`${k}_${rombelKey}`] || 0;
+           mappedRow[`${k}_kelas`] = row[`${k}_${kelasKey}`] || 0;
         });
         return mappedRow;
       });
     }
-  }, [tab2DataRaw, filterWilayah, isModeSemua, filterStatusTab2]);
+  }, [tab2DataRaw, filterWilayah, isModeSemua, filterStatusTab2, activeColumns]);
 
   // =====================================================================
   // EXCEL EXPORTS
@@ -201,7 +205,7 @@ export default function RasioRombelVsKelas({ selectedYear }) {
       { header: 'Kelas (Swasta)', key: 'kelas_s', width: 15 },
       { header: 'Total Rombel', key: 'total_rombel', width: 18 },
       { header: 'Total Kelas', key: 'total_kelas', width: 18 },
-      { header: 'Total Sekolah', key: 'total_sek', width: 18 }, // Tambahan kolom Export
+      { header: 'Total Sekolah', key: 'total_sek', width: 18 },
     ];
 
     tab1Data.forEach(row => worksheet.addRow(row));
@@ -212,16 +216,16 @@ export default function RasioRombelVsKelas({ selectedYear }) {
     });
 
     worksheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD97706' } }; // Amber 600
+    worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD97706' } }; 
 
-    totalRow.font = { bold: true, color: { argb: 'FF78350F' } }; // Amber 900
-    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } }; // Amber 100
+    totalRow.font = { bold: true, color: { argb: 'FF78350F' } }; 
+    totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } }; 
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Ketersediaan_Rombel_Kelas_${filterWilayah}_${selectedYear}.xlsx`;
+    link.download = `Ketersediaan_Rombel_Kelas_${activeKategori}_${filterWilayah}_${selectedYear}.xlsx`;
     link.click();
   };
 
@@ -231,12 +235,12 @@ export default function RasioRombelVsKelas({ selectedYear }) {
 
     worksheet.columns = [
       { header: isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan', key: 'wilayah_label', width: 30 },
-      ...JENJANG_KEYS.map(k => ({ header: k, key: k, width: 15 })),
+      ...activeColumns.map(k => ({ header: k, key: k, width: 15 })),
     ];
 
     tab2Data.forEach(row => {
       const excelRow = { wilayah_label: isModeSemua ? row.wilayah : row.kecamatan };
-      JENJANG_KEYS.forEach(k => {
+      activeColumns.forEach(k => {
         const rombelCount = row[`${k}_rombel`];
         const kelasCount = row[`${k}_kelas`];
         
@@ -257,7 +261,7 @@ export default function RasioRombelVsKelas({ selectedYear }) {
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Analisa_Rasio_Kelas_per_Rombel_${filterWilayah}_${filterStatusTab2}_${selectedYear}.xlsx`;
+    link.download = `Analisa_Rasio_Kelas_per_Rombel_${activeKategori}_${filterWilayah}_${filterStatusTab2}_${selectedYear}.xlsx`;
     link.click();
   };
 
@@ -274,7 +278,7 @@ export default function RasioRombelVsKelas({ selectedYear }) {
     return (
       <div className="flex flex-col items-center justify-center p-20 bg-orange-50 rounded-3xl border-2 border-orange-200 border-dashed text-orange-600">
          <p className="font-black text-lg uppercase tracking-widest text-center">{error}</p>
-         <p className="text-sm mt-2 font-bold">Harap minta Admin untuk menjalankan Mesin Kalkulasi di Admin Dashboard.</p>
+         <p className="text-sm mt-2 font-bold">Harap minta Admin untuk menjalankan Mesin Kalkulasi Rombel vs Kelas.</p>
       </div>
     );
   }
@@ -288,20 +292,39 @@ export default function RasioRombelVsKelas({ selectedYear }) {
           <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">Rombel <span className="text-amber-500">VS</span> Ruang Kelas</h2>
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mt-1">Modul Analisa Ketersediaan Ruang Belajar Fisik</p>
         </div>
-        <div className="flex items-center bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2 shadow-sm">
-          <MapPin size={18} className="text-amber-600 mr-3" />
-          <select 
-            value={filterWilayah} 
-            onChange={(e) => setFilterWilayah(e.target.value)} 
-            className="bg-transparent text-sm font-black uppercase text-gray-700 outline-none cursor-pointer min-w-[200px]"
-          >
-            <option value="SEMUA">SELURUH PROVINSI</option>
-            {KABUPATEN_LIST.map(k => (
-              <option key={k} value={k}>
-                {k === 'SINGKAWANG' || k === 'PONTIANAK' ? 'KOTA' : 'KAB.'} {k}
-              </option>
-            ))}
-          </select>
+        <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+          {/* FILTER JENJANG/KATEGORI BARU */}
+          <div className="flex items-center bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2 shadow-sm w-full sm:w-auto focus-within:ring-2 focus-within:ring-amber-200">
+            <GraduationCap size={18} className="text-amber-600 mr-3" />
+            <select 
+              value={activeKategori} 
+              onChange={(e) => setActiveKategori(e.target.value)} 
+              className="bg-transparent text-sm font-black uppercase text-gray-700 outline-none cursor-pointer min-w-[150px] w-full"
+            >
+              <option value="SEMUA">Semua Jenjang</option>
+              <option value="PAUD">PAUD</option>
+              <option value="DASAR">Pendidikan Dasar</option>
+              <option value="MENENGAH">Pendidikan Menengah</option>
+              <option value="INKLUSIF">Pendidikan Inklusif</option>
+              <option value="NON FORMAL">Non Formal</option>
+            </select>
+          </div>
+
+          <div className="flex items-center bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2 shadow-sm w-full sm:w-auto focus-within:ring-2 focus-within:ring-amber-200">
+            <MapPin size={18} className="text-amber-600 mr-3" />
+            <select 
+              value={filterWilayah} 
+              onChange={(e) => setFilterWilayah(e.target.value)} 
+              className="bg-transparent text-sm font-black uppercase text-gray-700 outline-none cursor-pointer min-w-[150px] w-full"
+            >
+              <option value="SEMUA">SELURUH PROVINSI</option>
+              {KABUPATEN_LIST.map(k => (
+                <option key={k} value={k}>
+                  {k === 'SINGKAWANG' || k === 'PONTIANAK' ? 'KOTA' : 'KAB.'} {k}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -406,7 +429,7 @@ export default function RasioRombelVsKelas({ selectedYear }) {
               <tr className="text-[10px] font-black uppercase text-gray-500 bg-amber-50/50">
                 <th className="px-4 py-4 rounded-l-xl w-12">No</th>
                 <th className="px-4 py-4 text-left">{isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan'}</th>
-                {JENJANG_KEYS.map(k => (
+                {activeColumns.map(k => (
                   <th key={k} className="px-2 py-4 text-amber-800 border-l border-amber-100 whitespace-nowrap">{k}</th>
                 ))}
               </tr>
@@ -418,8 +441,8 @@ export default function RasioRombelVsKelas({ selectedYear }) {
                   <td className="px-4 py-4 font-black text-gray-800 text-sm uppercase text-left border-y border-gray-100 whitespace-nowrap">
                     {isModeSemua ? row.wilayah : row.kecamatan}
                   </td>
-                  {JENJANG_KEYS.map((k, kIdx) => {
-                    const isLast = kIdx === JENJANG_KEYS.length - 1;
+                  {activeColumns.map((k, kIdx) => {
+                    const isLast = kIdx === activeColumns.length - 1;
                     return (
                       <td key={k} className={`px-2 py-4 border-y border-l border-gray-100 bg-gray-50/30 text-sm ${isLast ? 'rounded-r-xl border-r' : ''}`}>
                         {renderRatio(row[`${k}_rombel`], row[`${k}_kelas`], k)}

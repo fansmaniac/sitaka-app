@@ -1,8 +1,20 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { MapPin, Layers, Activity, Search, Download, Loader2, School, GraduationCap } from 'lucide-react';
+import { MapPin, Layers, Activity, Search, Download, Loader2, School, GraduationCap, Users, Sparkles, X, FileText, Info } from 'lucide-react';
 import { db } from '../../../firebase/config';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, query, where } from 'firebase/firestore';
 import ExcelJS from 'exceljs';
+
+// --- TAMBAHAN LIBRARY UNTUK AI & CETAK PDF ---
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import html2pdf from 'html2pdf.js';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
+
+// Inisialisasi API Key Gemini
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+let genAI = null;
+if (apiKey) {
+  genAI = new GoogleGenerativeAI(apiKey);
+}
 
 // =====================================================================
 // UTILITY: CACHING LOKAL (BRANKAS BROWSER)
@@ -153,6 +165,11 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState('');
+
+  // STATE UNTUK MODAL AI
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [aiResult, setAiResult] = useState(null);
 
   // --- FETCH DATA (Membaca Chunks Sekolah Agregasi Langsung) ---
   useEffect(() => {
@@ -317,7 +334,135 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
     }, { sek_n: 0, rombel_n: 0, sek_s: 0, rombel_s: 0, total_sek: 0, total_rombel: 0 });
   }, [tab1Data]);
 
-  // --- EXCEL ---
+  // --- LOGIKA AI GEMINI (FALLBACK MODEL + JSON PARSING) ---
+  const handleAnalisisAI = async () => {
+    if (!genAI) {
+      alert("API Key Gemini belum disetting di .env (VITE_GEMINI_API_KEY)");
+      return;
+    }
+    
+    setIsModalOpen(true);
+    setIsAnalyzing(true);
+    setAiResult(null);
+
+    try {
+      const payloadTabel1 = tab1Data.map(r => ({
+        jenjang: r.jenjang,
+        total_sekolah: r.total_sek,
+        total_rombel: r.total_rombel,
+        rasio_aktual: r.total_sek > 0 ? (r.total_rombel / r.total_sek).toFixed(1) : 0
+      }));
+
+      const tipeWilayah = isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan';
+      const payloadTabel2 = tab2DataDisplay.map(r => {
+        let rowData = { wilayah: r.group_label };
+        activeColumns.forEach(k => {
+           rowData[`${k}_sek`] = r[`${k}_sek`];
+           rowData[`${k}_rombel`] = r[`${k}_rombel`];
+           rowData[`${k}_rasio`] = r[`${k}_sek`] > 0 ? (r[`${k}_rombel`] / r[`${k}_sek`]).toFixed(1) : 0;
+        });
+        return rowData;
+      });
+
+      const prompt = `
+        Kamu adalah AI Analis Data Pendidikan di aplikasi SITAKA 2026. Gunakan bahasa formal standar laporan.
+        Saya memiliki data Rasio Sekolah berbanding Rombongan Belajar (Rombel) untuk Provinsi Kalimantan Barat.
+        Tahun Data: ${selectedYear}. Wilayah Filter saat ini: ${filterWilayah}. Kategori Jenjang: ${activeKategori}.
+        
+        Aturan Standar Rombel dalam 1 Sekolah (Permendikdasmen No 14 Tahun 2026):
+        - TK/KB/SPS/TPA: Min 1/2 Rombel - Max 16 Rombel
+        - SD: Min 6 Rombel - Max 24 Rombel
+        - SMP: Min 3 Rombel - Max 33 Rombel
+        - SMA/SMK: Min 3 Rombel - Max 36 (SMA) / Max 72 (SMK)
+        - SLB: Min 3 Rombel - Max 30 Rombel
+        - Non Formal: Min 3 Rombel - Max 36 Rombel
+
+        Berikut adalah data Tabel 1 (Ringkasan per Jenjang):
+        ${JSON.stringify(payloadTabel1)}
+
+        Berikut adalah data Tabel 2 (Sebaran per ${tipeWilayah}):
+        ${JSON.stringify(payloadTabel2)}
+
+        Berdasarkan data di atas, berikan analisa ringkas dan tajam buat kesimpulan dengan bahasa formal untuk laporan.
+        KEMBALIKAN HANYA FORMAT JSON YANG VALID TANPA MARKDOWN sesuai struktur berikut ini:
+        {
+          "kesimpulanUmum": "Dua paragraf padat tentang kondisi umum rasio rombel berbanding sekolah berdasarkan data.",
+          "jenjangTertinggi": [ { "jenjang": "Nama", "alasan": "Penjelasan ringkas rasio aktual vs ideal" } ],
+          "jenjangTerendah": [ { "jenjang": "Nama", "alasan": "Penjelasan ringkas rasio aktual vs ideal" } ],
+          "wilayahTertinggi": [ { "wilayah": "Nama Wilayah", "alasan": "Sebutkan jenjang spesifik yang membuat rasio wilayah ini paling ideal/memadai" } ],
+          "wilayahTerendah": [ { "wilayah": "Nama Wilayah", "alasan": "Sebutkan jenjang spesifik yang membuat wilayah ini tidak ideal (kekurangan rombel atau overload)" } ]
+        }
+        Catatan: Array maksimal berisi 3 data. Gunakan bahasa Indonesia formal. "Tertinggi" berarti pemenuhan paling ideal/baik (sesuai standar min-max), "Terendah" berarti paling kurang ideal (kurang dari standar atau overload).
+      `;
+
+      // DAFTAR MODEL CADANGAN
+      const modelsToTry = [
+        "gemini-2.5-flash", 
+        "gemini-2.0-flash", 
+        "gemini-1.5-pro", 
+        "gemini-1.5-flash-latest", 
+        "gemini-1.5-flash"
+      ];
+
+      let responseText = "";
+      let success = false;
+      let lastError = null;
+
+      // LOOPING MENCOBA MODEL SATU PER SATU
+      for (const modelName of modelsToTry) {
+        try {
+          const model = genAI.getGenerativeModel({ 
+            model: modelName,
+            generationConfig: {
+              responseMimeType: "application/json",
+              temperature: 0.2
+            }
+          });
+          
+          const result = await model.generateContent(prompt);
+          responseText = result.response.text();
+          success = true;
+          break; // Jika berhasil, keluar dari loop
+        } catch (err) {
+          lastError = err;
+          if (err.message && (err.message.includes("API_KEY") || err.message.includes("403"))) {
+            break; 
+          }
+        }
+      }
+
+      if (!success) {
+        throw lastError || new Error("Semua model Gemini gagal diakses.");
+      }
+      
+      // Sanitasi JSON murni
+      responseText = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsedData = JSON.parse(responseText);
+      
+      setAiResult(parsedData);
+    } catch (error) {
+      console.error("Gagal menganalisis data:", error);
+      alert("Terjadi kesalahan saat menghubungi AI: " + error.message);
+      setIsModalOpen(false);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleDownloadPDF = () => {
+    const element = document.getElementById('pdf-ai-content');
+    const opt = {
+      margin:       0.4,
+      filename:     `Laporan_AI_Rasio_Rombel_SITAKA_${filterWilayah}_${selectedYear}.pdf`,
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true },
+      jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+    };
+
+    html2pdf().set(opt).from(element).save();
+  };
+
+  // --- EXCEL EXPORTS ---
   const handleUnduhTab1 = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Rekap Sekolah & Rombel');
@@ -414,9 +559,24 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100">
         <div>
           <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">Sekolah <span className="text-rose-500">VS</span> Rombel</h2>
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mt-1">Modul Analisa Ketersediaan Ruang Kelas</p>
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mt-1 mb-2">Modul Analisa Ketersediaan Ruang Kelas</p>
+          {/* Teks Penjelasan Baru (TIPS) */}
+          <p className="text-sm font-bold text-rose-600 bg-rose-50 px-3 py-1 rounded-lg inline-block shadow-sm">
+            TIPS: Klik tombol "Analisa Data" untuk mendapatkan ringkasan dan hasil analisis data yang ditampilkan ini.
+          </p>
         </div>
         <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+          
+          {/* TOMBOL AI DENGAN HIGHLIGHT PULSE */}
+          <button 
+            onClick={handleAnalisisAI}
+            disabled={tab1Data.length === 0}
+            className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-pink-600 text-white font-black uppercase text-sm px-5 py-2.5 rounded-2xl hover:scale-105 transition-all shadow-[0_0_15px_rgba(225,29,72,0.5)] animate-pulse hover:animate-none focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-rose-500 disabled:opacity-50 disabled:scale-100 disabled:cursor-not-allowed disabled:animate-none"
+          >
+            <Sparkles size={18} />
+            Analisa Data
+          </button>
+
           {/* FILTER JENJANG/KATEGORI BARU */}
           <div className="flex items-center bg-gray-50 border border-gray-200 rounded-2xl px-4 py-2 shadow-sm w-full sm:w-auto focus-within:ring-2 focus-within:ring-rose-200">
             <GraduationCap size={18} className="text-rose-600 mr-3" />
@@ -608,6 +768,138 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
           </div>
         </div>
       </div>
+
+      {/* MODAL AI ANALISIS MENEMPEL DI HALAMAN INI */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden relative">
+            
+            {/* Header Modal AI */}
+            <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-gradient-to-r from-rose-50 to-pink-50 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="bg-rose-600 p-2 rounded-xl text-white"><Sparkles size={24} /></div>
+                <div>
+                  <h3 className="font-black text-xl text-rose-900 uppercase">Laporan Eksekutif</h3>
+                  <p className="text-xs font-bold text-rose-600">SITAKA 2026 - Analisa Rasio Sekolah VS Rombel</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                {aiResult && (
+                  <button onClick={handleDownloadPDF} className="flex items-center gap-2 bg-rose-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-rose-700 transition-colors shadow-md">
+                    <FileText size={16} /> Unduh PDF
+                  </button>
+                )}
+                <button onClick={() => setIsModalOpen(false)} className="p-2 bg-white rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all shadow-sm">
+                  <X size={24} />
+                </button>
+              </div>
+            </div>
+
+            {/* Body Modal AI yang Bisa Di-scroll & Di-print ke PDF */}
+            <div className="p-8 overflow-y-auto flex-1 bg-gray-50/50" id="pdf-ai-content">
+              {isAnalyzing ? (
+                <div className="flex flex-col items-center justify-center h-64 opacity-70">
+                  <Sparkles size={64} className="text-rose-500 animate-pulse mb-4" />
+                  <p className="font-black text-xl uppercase tracking-widest text-rose-800">Tunggu, Sedang Berpikir...</p>
+                  <p className="text-sm font-bold text-gray-400 mt-2">Menganalisis Data Rasio Sekolah VS Rombongan Belajar</p>
+                </div>
+              ) : aiResult ? (
+                <div className="flex flex-col gap-8 pb-10">
+                  
+                  {/* KOP LAPORAN UNTUK PDF */}
+                  <div className="text-center pb-4 border-b-2 border-rose-100">
+                    <h2 className="text-2xl font-black text-rose-900 uppercase">Ringkasan Analitik</h2>
+                    <p className="text-sm font-bold text-gray-500 mt-1">Data Agregasi Rasio Sekolah vs Rombel ({selectedYear})</p>
+                    <p className="text-xs font-medium text-gray-400 mt-1">Wilayah: {filterWilayah} | Kategori: {activeKategori}</p>
+                  </div>
+
+                  {/* Kesimpulan */}
+                  <div className="bg-white p-6 rounded-2xl border border-rose-100 shadow-sm">
+                    <h4 className="font-black text-lg text-rose-900 mb-3 flex items-center gap-2">
+                       <Info size={20} /> KESIMPULAN UMUM
+                    </h4>
+                    <p className="text-gray-700 leading-relaxed font-medium text-justify whitespace-pre-wrap">{aiResult.kesimpulanUmum}</p>
+                  </div>
+
+                  {/* Grafik Tabel 1 (Recharts) */}
+                  <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm h-80">
+                     <h4 className="font-black text-sm text-gray-800 mb-4 uppercase text-center">Grafik Ketersediaan Rombel per Jenjang</h4>
+                     <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={tab1Data} margin={{ top: 5, right: 20, left: 20, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                          <XAxis dataKey="jenjang" axisLine={false} tickLine={false} tick={{ fontSize: 12, fontWeight: 'bold' }} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
+                          <Tooltip cursor={{ fill: '#F3F4F6' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                          <Legend wrapperStyle={{ paddingTop: '20px', fontWeight: 'bold', fontSize: '12px' }} />
+                          <Bar dataKey="total_rombel" name="Total Rombongan Belajar" fill="#E11D48" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                     </ResponsiveContainer>
+                  </div>
+
+                  {/* Grid Jenjang Terpadat / Kekurangan */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="bg-emerald-50 p-5 rounded-2xl border border-emerald-100">
+                      <h4 className="font-black text-emerald-800 uppercase mb-3">Jenjang Paling Ideal</h4>
+                      <ul className="flex flex-col gap-3">
+                        {aiResult.jenjangTertinggi?.map((item, i) => (
+                          <li key={i} className="bg-white p-3 rounded-xl shadow-sm text-sm border border-emerald-50 flex flex-col gap-1">
+                            <span className="font-black text-emerald-600 text-base">{item.jenjang}</span>
+                            <span className="text-gray-600 font-medium leading-tight">{item.alasan}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="bg-red-50 p-5 rounded-2xl border border-red-100">
+                      <h4 className="font-black text-red-800 uppercase mb-3">Jenjang Kurang Ideal</h4>
+                      <ul className="flex flex-col gap-3">
+                        {aiResult.jenjangTerendah?.map((item, i) => (
+                          <li key={i} className="bg-white p-3 rounded-xl shadow-sm text-sm border border-red-50 flex flex-col gap-1">
+                            <span className="font-black text-red-600 text-base">{item.jenjang}</span>
+                            <span className="text-gray-600 font-medium leading-tight">{item.alasan}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                  
+                  {/* Grid Wilayah Terpadat / Kekurangan */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="bg-teal-50 p-5 rounded-2xl border border-teal-100">
+                      <h4 className="font-black text-teal-800 uppercase mb-3">Wilayah Paling Ideal</h4>
+                      <ul className="flex flex-col gap-3">
+                        {aiResult.wilayahTertinggi?.map((item, i) => (
+                          <li key={i} className="bg-white p-3 rounded-xl shadow-sm text-sm border border-teal-50 flex flex-col gap-1">
+                            <span className="font-black text-teal-600 text-base">{item.wilayah}</span>
+                            <span className="text-gray-600 font-medium leading-tight">{item.alasan}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="bg-orange-50 p-5 rounded-2xl border border-orange-100">
+                      <h4 className="font-black text-orange-800 uppercase mb-3">Wilayah Kurang Ideal</h4>
+                      <ul className="flex flex-col gap-3">
+                        {aiResult.wilayahTerendah?.map((item, i) => (
+                          <li key={i} className="bg-white p-3 rounded-xl shadow-sm text-sm border border-orange-50 flex flex-col gap-1">
+                            <span className="font-black text-orange-600 text-base">{item.wilayah}</span>
+                            <span className="text-gray-600 font-medium leading-tight">{item.alasan}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+
+                  {/* Footer Tanda Tangan AI */}
+                  <div className="mt-8 pt-4 border-t border-gray-200 flex justify-between items-end text-xs font-bold text-gray-400">
+                    <p>Digenerasi oleh: Gemini AI - SITAKA Engine</p>
+                    <p>Dicetak pada: {new Date().toLocaleDateString('id-ID')}</p>
+                  </div>
+
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { MapPin, Layers, Activity, Search, Download, Loader2, School, GraduationCap, Users, Sparkles, X, FileText, Info } from 'lucide-react';
+import { MapPin, Layers, Activity, Search, Download, Loader2, School, GraduationCap, Users, Sparkles, X, FileText, Info, RefreshCw } from 'lucide-react';
 import { db } from '../../../firebase/config';
-import { collection, getDocs, getDoc, doc, query, where } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, query, where, setDoc } from 'firebase/firestore';
 import ExcelJS from 'exceljs';
 
 // --- TAMBAHAN LIBRARY UNTUK AI & CETAK PDF ---
@@ -26,7 +26,12 @@ const CACHE_EXPIRY_HOURS = 12;
 const initDB = () => {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = (e) => e.target.result.createObjectStore(STORE_NAME);
+    request.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME);
+        }
+    };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
@@ -170,6 +175,7 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiResult, setAiResult] = useState(null);
+  const [aiLastUpdated, setAiLastUpdated] = useState(null);
 
   // --- FETCH DATA (Membaca Chunks Sekolah Agregasi Langsung) ---
   useEffect(() => {
@@ -334,8 +340,8 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
     }, { sek_n: 0, rombel_n: 0, sek_s: 0, rombel_s: 0, total_sek: 0, total_rombel: 0 });
   }, [tab1Data]);
 
-  // --- LOGIKA AI GEMINI (FALLBACK MODEL + JSON PARSING) ---
-  const handleAnalisisAI = async () => {
+  // --- LOGIKA AI GEMINI (FALLBACK MODEL + FIREBASE CACHE + ANTI-SERI) ---
+  const handleAnalisisAI = async (forceRefresh = false) => {
     if (!genAI) {
       alert("API Key Gemini belum disetting di .env (VITE_GEMINI_API_KEY)");
       return;
@@ -343,9 +349,26 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
     
     setIsModalOpen(true);
     setIsAnalyzing(true);
-    setAiResult(null);
+
+    const formatIdKategori = activeKategori.replace(/\s+/g, '');
+    const formatIdWilayah = filterWilayah.replace(/\s+/g, '');
+    const docId = `sekolah_rombel_${selectedYear}_${formatIdKategori}_${formatIdWilayah}_${filterStatusTab2}`;
 
     try {
+      // 1. Cek Firebase Cache
+      if (!forceRefresh) {
+        const cachedRef = doc(db, 'laporan_ai_rasio', docId);
+        const cachedSnap = await getDoc(cachedRef);
+        if (cachedSnap.exists()) {
+           const data = cachedSnap.data();
+           setAiResult(data.result);
+           setAiLastUpdated(data.last_updated);
+           setIsAnalyzing(false);
+           return; 
+        }
+      }
+
+      // 2. Persiapkan Data & Prompt jika belum ada di Firebase / Force Refresh
       const payloadTabel1 = tab1Data.map(r => ({
         jenjang: r.jenjang,
         total_sekolah: r.total_sek,
@@ -365,7 +388,7 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
       });
 
       const prompt = `
-        Kamu adalah AI Analis Data Pendidikan di aplikasi SITAKA 2026. Gunakan bahasa formal standar laporan.
+        Kamu adalah AI Analis Data Pendidikan di aplikasi SITAKA 2026. Gunakan bahasa formal standar laporan eksekutif.
         Saya memiliki data Rasio Sekolah berbanding Rombongan Belajar (Rombel) untuk Provinsi Kalimantan Barat.
         Tahun Data: ${selectedYear}. Wilayah Filter saat ini: ${filterWilayah}. Kategori Jenjang: ${activeKategori}.
         
@@ -383,19 +406,18 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
         Berikut adalah data Tabel 2 (Sebaran per ${tipeWilayah}):
         ${JSON.stringify(payloadTabel2)}
 
-        Berdasarkan data di atas, berikan analisa ringkas dan tajam buat kesimpulan dengan bahasa formal untuk laporan.
+        Berdasarkan data di atas, berikan analisa ringkas dan tajam dengan output format JSON murni.
         KEMBALIKAN HANYA FORMAT JSON YANG VALID TANPA MARKDOWN sesuai struktur berikut ini:
         {
-          "kesimpulanUmum": "Dua paragraf padat tentang kondisi umum rasio rombel berbanding sekolah berdasarkan data.",
-          "jenjangTertinggi": [ { "jenjang": "Nama", "alasan": "Penjelasan ringkas rasio aktual vs ideal" } ],
-          "jenjangTerendah": [ { "jenjang": "Nama", "alasan": "Penjelasan ringkas rasio aktual vs ideal" } ],
-          "wilayahTertinggi": [ { "wilayah": "Nama Wilayah", "alasan": "Sebutkan jenjang spesifik yang membuat rasio wilayah ini paling ideal/memadai" } ],
-          "wilayahTerendah": [ { "wilayah": "Nama Wilayah", "alasan": "Sebutkan jenjang spesifik yang membuat wilayah ini tidak ideal (kekurangan rombel atau overload)" } ]
+          "kesimpulanUmum": "Dua paragraf padat tentang kondisi umum rasio rombel berbanding sekolah berdasarkan data menggunakan bahasa Indonesia formal laporan.",
+          "jenjangTertinggi": [ { "jenjang": "Nama Jenjang", "alasan": "Penjelasan ringkas rasio aktual vs ideal" } ],
+          "jenjangTerendah": [ { "jenjang": "Nama Jenjang", "alasan": "Penjelasan ringkas rasio aktual vs ideal" } ],
+          "wilayahTertinggi": [ { "wilayah": "Nama Wilayah", "alasan": "Sebutkan alasan spesifik yang membuat wilayah ini rasio paling ideal/memadai" } ],
+          "wilayahTerendah": [ { "wilayah": "Nama Wilayah", "alasan": "Sebutkan alasan spesifik yang membuat wilayah ini rasio kurang ideal (kekurangan rombel atau overload)" } ]
         }
-        Catatan: Array maksimal berisi 3 data. Gunakan bahasa Indonesia formal. "Tertinggi" berarti pemenuhan paling ideal/baik (sesuai standar min-max), "Terendah" berarti paling kurang ideal (kurang dari standar atau overload).
+        Catatan: Jika terdapat beberapa jenjang atau wilayah dengan nilai rasio yang sama (seri) pada posisi tertinggi atau terendah, TAMPILKAN SEMUANYA (bisa lebih dari 3) agar adil dan representatif. Gunakan bahasa Indonesia formal untuk instansi pemerintahan. "Tertinggi" berarti pemenuhan paling ideal/baik (sesuai standar min-max), "Terendah" berarti paling kurang ideal (kurang dari standar atau overload).
       `;
 
-      // DAFTAR MODEL CADANGAN
       const modelsToTry = [
         "gemini-2.5-flash", 
         "gemini-2.0-flash", 
@@ -408,7 +430,6 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
       let success = false;
       let lastError = null;
 
-      // LOOPING MENCOBA MODEL SATU PER SATU
       for (const modelName of modelsToTry) {
         try {
           const model = genAI.getGenerativeModel({ 
@@ -422,7 +443,7 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
           const result = await model.generateContent(prompt);
           responseText = result.response.text();
           success = true;
-          break; // Jika berhasil, keluar dari loop
+          break; 
         } catch (err) {
           lastError = err;
           if (err.message && (err.message.includes("API_KEY") || err.message.includes("403"))) {
@@ -435,11 +456,19 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
         throw lastError || new Error("Semua model Gemini gagal diakses.");
       }
       
-      // Sanitasi JSON murni
       responseText = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
       const parsedData = JSON.parse(responseText);
+
+      // 3. Simpan Hasil ke Firebase agar Konsisten
+      const timestamp = new Date().toISOString();
+      await setDoc(doc(db, 'laporan_ai_rasio', docId), {
+         result: parsedData,
+         last_updated: timestamp
+      });
       
       setAiResult(parsedData);
+      setAiLastUpdated(timestamp);
+
     } catch (error) {
       console.error("Gagal menganalisis data:", error);
       alert("Terjadi kesalahan saat menghubungi AI: " + error.message);
@@ -453,13 +482,21 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
     const element = document.getElementById('pdf-ai-content');
     const opt = {
       margin:       0.4,
-      filename:     `Laporan_AI_Rasio_Rombel_SITAKA_${filterWilayah}_${selectedYear}.pdf`,
+      filename:     `Laporan_AI_Rasio_Sekolah_Vs_Rombel_${filterWilayah}_${selectedYear}.pdf`,
       image:        { type: 'jpeg', quality: 0.98 },
       html2canvas:  { scale: 2, useCORS: true },
       jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
     };
 
     html2pdf().set(opt).from(element).save();
+  };
+
+  // Format helper untuk tanggal laporan
+  const formatAiDate = (isoString) => {
+    if (!isoString) return '';
+    const d = new Date(isoString);
+    const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+    return `${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()} - ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')} WIB`;
   };
 
   // --- EXCEL EXPORTS ---
@@ -569,7 +606,7 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
           
           {/* TOMBOL AI DENGAN HIGHLIGHT PULSE */}
           <button 
-            onClick={handleAnalisisAI}
+            onClick={() => handleAnalisisAI(false)}
             disabled={tab1Data.length === 0}
             className="flex items-center gap-2 bg-gradient-to-r from-rose-500 to-pink-600 text-white font-black uppercase text-sm px-5 py-2.5 rounded-2xl hover:scale-105 transition-all shadow-[0_0_15px_rgba(225,29,72,0.5)] animate-pulse hover:animate-none focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-rose-500 disabled:opacity-50 disabled:scale-100 disabled:cursor-not-allowed disabled:animate-none"
           >
@@ -785,6 +822,11 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
               </div>
               <div className="flex items-center gap-3">
                 {aiResult && (
+                  <button onClick={() => handleAnalisisAI(true)} title="Analisa Ulang" className="flex items-center gap-2 bg-white border border-gray-200 text-gray-600 text-xs font-bold px-3 py-2 rounded-xl hover:bg-gray-50 transition-colors shadow-sm">
+                    <RefreshCw size={16} className={isAnalyzing ? 'animate-spin' : ''} />
+                  </button>
+                )}
+                {aiResult && (
                   <button onClick={handleDownloadPDF} className="flex items-center gap-2 bg-rose-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-rose-700 transition-colors shadow-md">
                     <FileText size={16} /> Unduh PDF
                   </button>
@@ -821,17 +863,22 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
                     <p className="text-gray-700 leading-relaxed font-medium text-justify whitespace-pre-wrap">{aiResult.kesimpulanUmum}</p>
                   </div>
 
-                  {/* Grafik Tabel 1 (Recharts) */}
+                  {/* Grafik Tabel 1 (Recharts) DUAL Y-AXIS */}
                   <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm h-80">
-                     <h4 className="font-black text-sm text-gray-800 mb-4 uppercase text-center">Grafik Ketersediaan Rombel per Jenjang</h4>
+                     <h4 className="font-black text-sm text-gray-800 mb-4 uppercase text-center">Grafik Ketersediaan Sekolah vs Rombel per Jenjang</h4>
                      <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={tab1Data} margin={{ top: 5, right: 20, left: 20, bottom: 5 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
                           <XAxis dataKey="jenjang" axisLine={false} tickLine={false} tick={{ fontSize: 12, fontWeight: 'bold' }} />
-                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
+                          {/* Sumbu Y Kiri untuk Rombel (Jumlahnya lebih besar) */}
+                          <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
+                          {/* Sumbu Y Kanan untuk Sekolah (Jumlahnya lebih kecil) */}
+                          <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
                           <Tooltip cursor={{ fill: '#F3F4F6' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
                           <Legend wrapperStyle={{ paddingTop: '20px', fontWeight: 'bold', fontSize: '12px' }} />
-                          <Bar dataKey="total_rombel" name="Total Rombongan Belajar" fill="#E11D48" radius={[4, 4, 0, 0]} />
+                          {/* Mapping Bar ke masing-masing sumbu Y */}
+                          <Bar yAxisId="left" dataKey="total_rombel" name="Total Rombongan Belajar" fill="#F97316" radius={[4, 4, 0, 0]} />
+                          <Bar yAxisId="right" dataKey="total_sek" name="Total Sekolah" fill="#E11D48" radius={[4, 4, 0, 0]} />
                         </BarChart>
                      </ResponsiveContainer>
                   </div>
@@ -890,7 +937,10 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
 
                   {/* Footer Tanda Tangan AI */}
                   <div className="mt-8 pt-4 border-t border-gray-200 flex justify-between items-end text-xs font-bold text-gray-400">
-                    <p>Digenerasi oleh: Gemini AI - SITAKA Engine</p>
+                    <div>
+                        <p>Digenerasi oleh: Gemini AI - SITAKA Engine</p>
+                        {aiLastUpdated && <p className="text-[10px] opacity-70 mt-1">Terakhir dianalisa: {formatAiDate(aiLastUpdated)}</p>}
+                    </div>
                     <p>Dicetak pada: {new Date().toLocaleDateString('id-ID')}</p>
                   </div>
 

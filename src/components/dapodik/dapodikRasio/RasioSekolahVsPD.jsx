@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { MapPin, Info, Search, Download, Loader2, Activity, School, GraduationCap, Users, Sparkles, X, FileText } from 'lucide-react';
+import { MapPin, Info, Search, Download, Loader2, Activity, School, GraduationCap, Users, Sparkles, X, FileText, RefreshCw } from 'lucide-react';
 import { db } from '../../../firebase/config';
-import { collection, getDocs, getDoc, doc, query, where } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, query, where, setDoc } from 'firebase/firestore';
 import ExcelJS from 'exceljs';
 
 // --- TAMBAHAN LIBRARY UNTUK AI & CETAK PDF ---
@@ -168,6 +168,7 @@ export default function RasioSekolahVsPD({ selectedYear }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiResult, setAiResult] = useState(null);
+  const [aiLastUpdated, setAiLastUpdated] = useState(null);
 
   // --- FETCH DATA DARI TAHAP 3 (SISWA AGREGASI) ---
   useEffect(() => {
@@ -354,8 +355,8 @@ export default function RasioSekolahVsPD({ selectedYear }) {
     }, { sek_n: 0, pd_n: 0, sek_s: 0, pd_s: 0, total_sek: 0, total_pd: 0 });
   }, [tab1Data]);
 
-  // --- LOGIKA AI GEMINI (UPDATED DENGAN FALLBACK) ---
-  const handleAnalisisAI = async () => {
+  // --- LOGIKA AI GEMINI (DENGAN FIREBASE CACHING & FALLBACK) ---
+  const handleAnalisisAI = async (forceRefresh = false) => {
     if (!genAI) {
       alert("API Key Gemini belum disetting di .env (VITE_GEMINI_API_KEY)");
       return;
@@ -363,9 +364,26 @@ export default function RasioSekolahVsPD({ selectedYear }) {
     
     setIsModalOpen(true);
     setIsAnalyzing(true);
-    setAiResult(null);
+
+    const formatIdKategori = activeKategori.replace(/\s+/g, '');
+    const formatIdWilayah = filterWilayah.replace(/\s+/g, '');
+    const docId = `sekolah_pd_${selectedYear}_${formatIdKategori}_${formatIdWilayah}_${filterStatusTab2}`;
 
     try {
+      // 1. Cek Firebase Cache terlebih dahulu
+      if (!forceRefresh) {
+        const cachedRef = doc(db, 'laporan_ai_rasio', docId);
+        const cachedSnap = await getDoc(cachedRef);
+        if (cachedSnap.exists()) {
+           const data = cachedSnap.data();
+           setAiResult(data.result);
+           setAiLastUpdated(data.last_updated);
+           setIsAnalyzing(false);
+           return; 
+        }
+      }
+
+      // 2. Persiapkan Data & Prompt jika belum ada di Firebase / Force Refresh
       const payloadTabel1 = tab1Data.map(r => ({
         jenjang: r.jenjang,
         total_sekolah: r.total_sek,
@@ -385,7 +403,7 @@ export default function RasioSekolahVsPD({ selectedYear }) {
       });
 
       const prompt = `
-        Kamu adalah AI Analis Data Pendidikan di aplikasi SITAKA 2026 gunakan bahasa formal standar laporan.
+        Kamu adalah AI Analis Data Pendidikan di aplikasi SITAKA 2026. Gunakan bahasa formal standar laporan eksekutif.
         Saya memiliki data Rasio Sekolah berbanding Peserta Didik (PD) untuk Provinsi Kalimantan Barat.
         Tahun Data: ${selectedYear}. Wilayah Filter saat ini: ${filterWilayah}. Kategori Jenjang: ${activeKategori}.
         
@@ -403,19 +421,20 @@ export default function RasioSekolahVsPD({ selectedYear }) {
         Berikut adalah data Tabel 2 (Sebaran per ${tipeWilayah}):
         ${JSON.stringify(payloadTabel2)}
 
-        Berdasarkan data di atas, berikan analisa ringkas dan tajam buat kesimpulan dengan bahasa formal untuk laporan.
-        KEMBALIKAN HANYA FORMAT JSON YANG VALID sesuai struktur berikut ini:
+        Berdasarkan data di atas, berikan analisa ringkas dan tajam dengan output format JSON murni.
+        KEMBALIKAN HANYA FORMAT JSON YANG VALID TANPA MARKDOWN sesuai struktur berikut ini:
         {
-          "kesimpulanUmum": "Dua paragraf padat tentang kondisi umum daya tampung sekolah berdasarkan data.",
-          "jenjangTertinggi": [ { "jenjang": "Nama", "alasan": "Penjelasan ringkas rasio aktual vs ideal" } ],
-          "jenjangTerendah": [ { "jenjang": "Nama", "alasan": "Penjelasan ringkas rasio aktual vs ideal" } ],
-          "wilayahTertinggi": [ { "wilayah": "Nama Wilayah", "alasan": "Sebutkan jenjang spesifik yang membuat wilayah ini terpadat" } ],
-          "wilayahTerendah": [ { "wilayah": "Nama Wilayah", "alasan": "Sebutkan jenjang spesifik yang membuat wilayah ini sepi" } ]
+          "kesimpulanUmum": "Dua paragraf padat tentang kondisi umum daya tampung sekolah berdasarkan data menggunakan bahasa Indonesia formal laporan.",
+          "jenjangTertinggi": [ { "jenjang": "Nama Jenjang", "alasan": "Penjelasan ringkas rasio aktual vs ideal" } ],
+          "jenjangTerendah": [ { "jenjang": "Nama Jenjang", "alasan": "Penjelasan ringkas rasio aktual vs ideal" } ],
+          "wilayahTertinggi": [ { "wilayah": "Nama Wilayah", "alasan": "Sebutkan alasan spesifik yang membuat wilayah ini rasio daya tampungnya paling terpadat" } ],
+          "wilayahTerendah": [ { "wilayah": "Nama Wilayah", "alasan": "Sebutkan alasan spesifik yang membuat wilayah ini rasio daya tampungnya sepi/kurang" } ]
         }
-        Catatan: Array maksimal berisi 3 data. Gunakan bahasa Indonesia formal.
+        Catatan Penting: 
+        1. Setiap Array (jenjang/wilayah) standarnya berisi 3 data tertinggi/terendah. 
+        2. ATURAN SERI (TIE-BREAKER): Jika terdapat beberapa jenjang atau wilayah dengan nilai rasio yang sama (seri) pada batas posisi ke-3, maka masukkan SEMUANYA meskipun array tersebut akhirnya berisi lebih dari 3 data (misal 4 atau 5).
       `;
 
-      // DAFTAR MODEL CADANGAN
       const modelsToTry = [
         "gemini-2.5-flash", 
         "gemini-2.0-flash", 
@@ -428,7 +447,6 @@ export default function RasioSekolahVsPD({ selectedYear }) {
       let success = false;
       let lastError = null;
 
-      // LOOPING MENCOBA MODEL SATU PER SATU
       for (const modelName of modelsToTry) {
         try {
           const model = genAI.getGenerativeModel({ 
@@ -442,26 +460,32 @@ export default function RasioSekolahVsPD({ selectedYear }) {
           const result = await model.generateContent(prompt);
           responseText = result.response.text();
           success = true;
-          break; // Jika berhasil, keluar dari loop
+          break; 
         } catch (err) {
           lastError = err;
-          // Jika error terkait autentikasi API Key, langsung hentikan pencarian
           if (err.message && (err.message.includes("API_KEY") || err.message.includes("403"))) {
             break; 
           }
         }
       }
 
-      // JIKA SEMUA MODEL GAGAL
       if (!success) {
         throw lastError || new Error("Semua model Gemini gagal diakses.");
       }
       
-      // Sanitasi JSON murni
       responseText = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
       const parsedData = JSON.parse(responseText);
       
+      // 3. Simpan Hasil ke Firebase agar Konsisten
+      const timestamp = new Date().toISOString();
+      await setDoc(doc(db, 'laporan_ai_rasio', docId), {
+         result: parsedData,
+         last_updated: timestamp
+      });
+
       setAiResult(parsedData);
+      setAiLastUpdated(timestamp);
+
     } catch (error) {
       console.error("Gagal menganalisis data:", error);
       alert("Terjadi kesalahan saat menghubungi AI: " + error.message);
@@ -475,13 +499,21 @@ export default function RasioSekolahVsPD({ selectedYear }) {
     const element = document.getElementById('pdf-ai-content');
     const opt = {
       margin:       0.4,
-      filename:     `Laporan_AI_Rasio_SITAKA_${filterWilayah}_${selectedYear}.pdf`,
+      filename:     `Laporan_AI_Rasio_Sekolah_Vs_PD_${filterWilayah}_${selectedYear}.pdf`,
       image:        { type: 'jpeg', quality: 0.98 },
       html2canvas:  { scale: 2, useCORS: true },
       jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
     };
 
     html2pdf().set(opt).from(element).save();
+  };
+
+  // Format helper untuk tanggal laporan
+  const formatAiDate = (isoString) => {
+    if (!isoString) return '';
+    const d = new Date(isoString);
+    const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+    return `${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()} - ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')} WIB`;
   };
 
   // --- EXCEL EXPORTS ---
@@ -513,7 +545,7 @@ export default function RasioSekolahVsPD({ selectedYear }) {
 
   const handleUnduhTab2 = async () => {
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Analisa Rasio Sekolah VS Peserta Didik');
+    const worksheet = workbook.addWorksheet('Analisa Rasio Daya Tampung');
     worksheet.columns = [
       { header: isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan', key: 'wilayah_label', width: 30 },
       ...activeColumns.map(k => ({ header: k, key: k, width: 15 })),
@@ -571,7 +603,6 @@ export default function RasioSekolahVsPD({ selectedYear }) {
         <div>
           <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">Sekolah <span className="text-blue-500">VS</span> Peserta Didik</h2>
           <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mt-1 mb-2">Modul Analisa Proporsi & Daya Tampung</p>
-          {/* Teks Penjelasan Baru */}
           <p className="text-sm font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-lg inline-block shadow-sm">
             TIPS: Klik tombol "Analisa Data" untuk mendapatkan ringkasan dan hasil analisis data yang ditampilkan ini.
           </p>
@@ -580,7 +611,7 @@ export default function RasioSekolahVsPD({ selectedYear }) {
           
           {/* TOMBOL AI DENGAN HIGHLIGHT */}
           <button 
-            onClick={handleAnalisisAI}
+            onClick={() => handleAnalisisAI(false)}
             disabled={tab1Data.length === 0}
             className="flex items-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-black uppercase text-sm px-5 py-2.5 rounded-2xl hover:scale-105 transition-all shadow-[0_0_15px_rgba(124,58,237,0.5)] animate-pulse hover:animate-none focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50 disabled:scale-100 disabled:cursor-not-allowed disabled:animate-none"
           >
@@ -795,6 +826,11 @@ export default function RasioSekolahVsPD({ selectedYear }) {
               </div>
               <div className="flex items-center gap-3">
                 {aiResult && (
+                  <button onClick={() => handleAnalisisAI(true)} title="Analisa Ulang" className="flex items-center gap-2 bg-white border border-gray-200 text-gray-600 text-xs font-bold px-3 py-2 rounded-xl hover:bg-gray-50 transition-colors shadow-sm">
+                    <RefreshCw size={16} className={isAnalyzing ? 'animate-spin' : ''} />
+                  </button>
+                )}
+                {aiResult && (
                   <button onClick={handleDownloadPDF} className="flex items-center gap-2 bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 transition-colors shadow-md">
                     <FileText size={16} /> Unduh PDF
                   </button>
@@ -811,14 +847,14 @@ export default function RasioSekolahVsPD({ selectedYear }) {
                 <div className="flex flex-col items-center justify-center h-64 opacity-70">
                   <Sparkles size={64} className="text-purple-500 animate-pulse mb-4" />
                   <p className="font-black text-xl uppercase tracking-widest text-purple-800">Tunggu, Sedang Berpikir...</p>
-                  <p className="text-sm font-bold text-gray-400 mt-2">Menganalisis Data Rasio Sekolah VS Peserta Didik</p>
+                  <p className="text-sm font-bold text-gray-400 mt-2">Menganalisis Permendikdasmen No 14 Tahun 2026</p>
                 </div>
               ) : aiResult ? (
                 <div className="flex flex-col gap-8 pb-10">
                   
                   {/* KOP LAPORAN UNTUK PDF */}
                   <div className="text-center pb-4 border-b-2 border-indigo-100">
-                    <h2 className="text-2xl font-black text-indigo-900 uppercase">Ringkasan Analitik</h2>
+                    <h2 className="text-2xl font-black text-indigo-900 uppercase">Ringkasan Analitik Daya Tampung</h2>
                     <p className="text-sm font-bold text-gray-500 mt-1">Data Agregasi Rasio Sekolah vs Peserta Didik ({selectedYear})</p>
                     <p className="text-xs font-medium text-gray-400 mt-1">Wilayah: {filterWilayah} | Kategori: {activeKategori}</p>
                   </div>
@@ -828,20 +864,27 @@ export default function RasioSekolahVsPD({ selectedYear }) {
                     <h4 className="font-black text-lg text-indigo-900 mb-3 flex items-center gap-2">
                        <Info size={20} /> KESIMPULAN UMUM
                     </h4>
-                    <p className="text-gray-700 leading-relaxed font-medium text-justify">{aiResult.kesimpulanUmum}</p>
+                    <p className="text-gray-700 leading-relaxed font-medium text-justify whitespace-pre-wrap">{aiResult.kesimpulanUmum}</p>
                   </div>
 
-                  {/* Grafik Tabel 1 (Recharts) */}
+                  {/* Grafik Tabel 1 (Recharts) dengan Dual Y-Axis */}
                   <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm h-80">
-                     <h4 className="font-black text-sm text-gray-800 mb-4 uppercase text-center">Grafik Ketersediaan Peserta Didik per Jenjang</h4>
+                     <h4 className="font-black text-sm text-gray-800 mb-4 uppercase text-center">Grafik Perbandingan Sekolah vs Peserta Didik</h4>
                      <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={tab1Data} margin={{ top: 5, right: 20, left: 20, bottom: 5 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
                           <XAxis dataKey="jenjang" axisLine={false} tickLine={false} tick={{ fontSize: 12, fontWeight: 'bold' }} />
-                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
+                          {/* Y-Axis Kiri untuk Sekolah */}
+                          <YAxis yAxisId="left" orientation="left" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#8b5cf6' }} />
+                          {/* Y-Axis Kanan untuk Peserta Didik */}
+                          <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#4F46E5' }} />
+                          
                           <Tooltip cursor={{ fill: '#F3F4F6' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
                           <Legend wrapperStyle={{ paddingTop: '20px', fontWeight: 'bold', fontSize: '12px' }} />
-                          <Bar dataKey="total_pd" name="Total Peserta Didik" fill="#4F46E5" radius={[4, 4, 0, 0]} />
+                          
+                          {/* Hubungkan batang dengan yAxisId yang sesuai */}
+                          <Bar yAxisId="left" dataKey="total_sek" name="Total Sekolah" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                          <Bar yAxisId="right" dataKey="total_pd" name="Total Peserta Didik" fill="#4F46E5" radius={[4, 4, 0, 0]} />
                         </BarChart>
                      </ResponsiveContainer>
                   </div>
@@ -860,7 +903,7 @@ export default function RasioSekolahVsPD({ selectedYear }) {
                       </ul>
                     </div>
                     <div className="bg-blue-50 p-5 rounded-2xl border border-blue-100">
-                      <h4 className="font-black text-blue-800 uppercase mb-3">Jenjang Kekurangan Murid</h4>
+                      <h4 className="font-black text-blue-800 uppercase mb-3">Jenjang Jumlah Murid Ideal (Optimal)</h4>
                       <ul className="flex flex-col gap-3">
                         {aiResult.jenjangTerendah?.map((item, i) => (
                           <li key={i} className="bg-white p-3 rounded-xl shadow-sm text-sm border border-blue-50 flex flex-col gap-1">
@@ -886,7 +929,7 @@ export default function RasioSekolahVsPD({ selectedYear }) {
                       </ul>
                     </div>
                     <div className="bg-emerald-50 p-5 rounded-2xl border border-emerald-100">
-                      <h4 className="font-black text-emerald-800 uppercase mb-3">Wilayah Paling Sepi</h4>
+                      <h4 className="font-black text-emerald-800 uppercase mb-3">Wilayah Paling Ideal</h4>
                       <ul className="flex flex-col gap-3">
                         {aiResult.wilayahTerendah?.map((item, i) => (
                           <li key={i} className="bg-white p-3 rounded-xl shadow-sm text-sm border border-emerald-50 flex flex-col gap-1">
@@ -900,7 +943,10 @@ export default function RasioSekolahVsPD({ selectedYear }) {
 
                   {/* Footer Tanda Tangan AI */}
                   <div className="mt-8 pt-4 border-t border-gray-200 flex justify-between items-end text-xs font-bold text-gray-400">
-                    <p>Digenerasi oleh: Gemini AI - SITAKA Engine</p>
+                    <div>
+                        <p>Digenerasi oleh: Gemini AI - SITAKA Engine</p>
+                        {aiLastUpdated && <p className="text-[10px] opacity-70 mt-1">Terakhir dianalisa: {formatAiDate(aiLastUpdated)}</p>}
+                    </div>
                     <p>Dicetak pada: {new Date().toLocaleDateString('id-ID')}</p>
                   </div>
 

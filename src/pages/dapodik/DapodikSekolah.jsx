@@ -107,7 +107,8 @@ const JENJANG_GROUPS = {
   'SMP': ['SMP', 'SPK SMP'],
   'SMA': ['SMA', 'SPK SMA'],
   'SMK': ['SMK'],
-  'SLB (Inklusif)': ['SLB'],
+  'SLB (Inklusif)': ['SLB'], // <- KEMBALIKAN YANG INI
+  'SLB': ['SLB'],            // <- BIARKAN YANG INI SEBAGAI FALLBACK
   'NON FORMAL': ['PKBM', 'SKB']
 };
 
@@ -277,9 +278,11 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
   const rawKategori = searchParams.get('kategori') ? searchParams.get('kategori').toUpperCase() : 'SEMUA';
   const activeKategori = Object.keys(TABS_MAPPING).includes(rawKategori) ? rawKategori : 'SEMUA'; 
 
-  const rawTab = searchParams.get('jenjang') ? searchParams.get('jenjang').toUpperCase() : 'SEMUA';
+  // PERBAIKAN BUG TAB INKLUSIF: Validasi case-insensitive agar tidak bocor
+  const urlJenjang = searchParams.get('jenjang') || 'SEMUA';
   const validTabs = TABS_MAPPING[activeKategori] || [];
-  const activeTab = (rawTab === 'SEMUA' || validTabs.includes(rawTab)) ? rawTab : 'SEMUA';
+  const matchedTab = validTabs.find(t => t.toUpperCase() === urlJenjang.toUpperCase());
+  const activeTab = matchedTab || 'SEMUA';
 
   const [isPending, startTransition] = useTransition();
   const [modalOpen, setModalOpen] = useState(false);

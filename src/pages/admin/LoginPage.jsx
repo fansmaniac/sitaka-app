@@ -14,6 +14,8 @@ export default function LoginPage({ onBack }) {
     e.preventDefault();
     setLoading(true);
     setError('');
+    
+    console.log("🔥 1. Tombol login ditekan. Memulai proses...");
 
     try {
       // --- LOGIKA ALIAS USERNAME ---
@@ -21,15 +23,19 @@ export default function LoginPage({ onBack }) {
       const emailToLogin = username.toLowerCase() === 'admin' 
         ? 'admin@bpmpkalbar.id' 
         : username;
+        
+      console.log(`Mencoba login Firebase Auth dengan email: ${emailToLogin}`);
 
-      // Eksekusi Login Firebase
-      await signInWithEmailAndPassword(auth, emailToLogin, password);
+      // Eksekusi Login Firebase dan simpan hasilnya ke variabel
+      const userCredential = await signInWithEmailAndPassword(auth, emailToLogin, password);
       
-      // Jika berhasil, tidak perlu callback navigate karena 
-      // onAuthStateChanged di App.jsx akan otomatis mengarahkan ke dashboard
+      console.log("✅ 2. Login Firebase Auth Berhasil! UID:", userCredential.user.uid);
+      // Jika berhasil, onAuthStateChanged di App.jsx akan otomatis mengarahkan ke dashboard
+      
     } catch (err) {
-      console.error("Error login:", err);
-      setError('Username atau Password salah!');
+      console.error("❌ 3. ERROR LOGIN AUTH:", err.code, err.message);
+      // Menampilkan pesan error asli dari Firebase ke UI agar ketahuan masalahnya
+      setError(`Username/Password salah atau: ${err.message}`);
     } finally {
       setLoading(false);
     }

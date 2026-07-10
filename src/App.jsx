@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, useNavigate } from 'react-router-dom';
+// TAMBAHAN: Import 'Navigate' untuk proteksi rute
+import { BrowserRouter as Router, Routes, Route, useNavigate, Navigate } from 'react-router-dom';
 import { 
   Database, 
   FileText, 
@@ -14,7 +15,6 @@ import {
 } from 'lucide-react';
 
 // --- IMPORT FIREBASE AUTH ---
-// Pastikan path './firebase/config' ini sudah sesuai dengan lokasi file config Firebase kamu
 import { auth } from './firebase/config'; 
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 
@@ -204,8 +204,6 @@ function AppContent() {
   );
 
   // --- LOGIKA ROUTING ---
-  // Perhatikan Route login sekarang tidak lagi memerlukan fungsi handleLoginSuccess
-  // karena Firebase akan memicu perubahan State secara otomatis
   return (
     <Routes>
       <Route path="/" element={<HomePage />} />
@@ -213,8 +211,18 @@ function AppContent() {
       <Route path="/rapor-pendidikan" element={<RaporPendidikanPage onBack={() => navigate('/')} Header={Header} />} />
       <Route path="/data-ats" element={<DataATSPage onBack={() => navigate('/')} Header={Header} />} />
       <Route path="/data-sarpras" element={<DataSarprasPage onBack={() => navigate('/')} Header={Header} />} />
-      <Route path="/login" element={<LoginPage onBack={() => navigate('/')} />} />
-      <Route path="/admin-dashboard" element={<AdminDashboard Header={Header} />} />
+      
+      {/* UPDATE 1: Cegah akses login jika sudah login (otomatis dilempar ke dashboard) */}
+      <Route 
+        path="/login" 
+        element={!isLoggedIn ? <LoginPage onBack={() => navigate('/')} /> : <Navigate to="/admin-dashboard" replace />} 
+      />
+      
+      {/* UPDATE 2: Proteksi Halaman Admin & Menambahkan '/*' untuk mendukung Nested Routes hasil pemecahan kode */}
+      <Route 
+        path="/admin-dashboard/*" 
+        element={isLoggedIn ? <AdminDashboard Header={Header} /> : <Navigate to="/login" replace />} 
+      />
     </Routes>
   );
 }

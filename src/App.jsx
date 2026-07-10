@@ -13,13 +13,15 @@ import {
   Map
 } from 'lucide-react';
 
+// --- IMPORT FIREBASE AUTH ---
+// Pastikan path './firebase/config' ini sudah sesuai dengan lokasi file config Firebase kamu
+import { auth } from './firebase/config'; 
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+
 // --- IMPORT PATHS ---
-// Jika Vite masih error 404, artinya file-file ini belum benar-benar dipindahkan ke sub-foldernya.
-// Pastikan folder dapodik, rapor, dataATS, admin sudah dibuat dan filenya dimasukkan ke sana.
 import DapodikPage from './pages/dapodik/DapodikPage';
 import RaporPendidikanPage from './pages/rapor/RaporPendidikanPage';
 import DataATSPage from './pages/dataATS/DataATSPage';
-// Sesuaikan kembali jika DataSarprasPage belum dipindah. Di screenshot awal dia ada di src/pages/DataSarprasPage.jsx
 import DataSarprasPage from './pages/dataSarpras/DataSarprasPage'; 
 import LoginPage from './pages/admin/LoginPage';
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -28,23 +30,43 @@ import AdminDashboard from './pages/admin/AdminDashboard';
 function AppContent() {
   const navigate = useNavigate();
 
-  // --- STATE DENGAN LOCAL STORAGE UNTUK LOGIN ---
-  const [isLoggedIn, setIsLoggedIn] = useState(() => {
-    return localStorage.getItem('sitaka_isLoggedIn') === 'true';
-  });
+  // --- STATE FIREBASE AUTH ---
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isAuthReady, setIsAuthReady] = useState(false); // Mencegah kedipan UI saat loading auth
 
-  // Fungsi login & logout yang otomatis menyimpan status & mengubah URL
-  const handleLoginSuccess = () => {
-    setIsLoggedIn(true);
-    localStorage.setItem('sitaka_isLoggedIn', 'true');
-    navigate('/admin-dashboard');
+  // Listener untuk mengecek status login dari Firebase server secara real-time
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setIsLoggedIn(true);
+      } else {
+        setIsLoggedIn(false);
+      }
+      setIsAuthReady(true); // Selesai mengecek sesi
+    });
+
+    return () => unsubscribe(); // Cleanup listener saat komponen di-unmount
+  }, []);
+
+  // Fungsi Logout dengan Firebase
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      navigate('/');
+    } catch (error) {
+      console.error("Gagal logout:", error);
+    }
   };
 
-  const handleLogout = () => {
-    setIsLoggedIn(false);
-    localStorage.setItem('sitaka_isLoggedIn', 'false');
-    navigate('/');
-  };
+  // Tampilkan layar loading saat Firebase sedang memverifikasi token sesi login
+  if (!isAuthReady) {
+    return (
+      <div className="h-screen w-full bg-blue-700 flex flex-col items-center justify-center">
+        <School className="w-16 h-16 text-white mb-4 animate-bounce" />
+        <span className="text-white font-black text-2xl animate-pulse tracking-widest">MEMUAT SITAKA...</span>
+      </div>
+    );
+  }
 
   // --- KOMPONEN HEADER ---
   const Header = () => (
@@ -182,6 +204,8 @@ function AppContent() {
   );
 
   // --- LOGIKA ROUTING ---
+  // Perhatikan Route login sekarang tidak lagi memerlukan fungsi handleLoginSuccess
+  // karena Firebase akan memicu perubahan State secara otomatis
   return (
     <Routes>
       <Route path="/" element={<HomePage />} />
@@ -189,7 +213,7 @@ function AppContent() {
       <Route path="/rapor-pendidikan" element={<RaporPendidikanPage onBack={() => navigate('/')} Header={Header} />} />
       <Route path="/data-ats" element={<DataATSPage onBack={() => navigate('/')} Header={Header} />} />
       <Route path="/data-sarpras" element={<DataSarprasPage onBack={() => navigate('/')} Header={Header} />} />
-      <Route path="/login" element={<LoginPage onLoginSuccess={handleLoginSuccess} onBack={() => navigate('/')} />} />
+      <Route path="/login" element={<LoginPage onBack={() => navigate('/')} />} />
       <Route path="/admin-dashboard" element={<AdminDashboard Header={Header} />} />
     </Routes>
   );

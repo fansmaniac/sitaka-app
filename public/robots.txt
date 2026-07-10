@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+
+# Jangan indeks halaman admin dashboard (sesuaikan dengan path URL admin kamu)
+Disallow: /admin
+Disallow: /admin-dashboard

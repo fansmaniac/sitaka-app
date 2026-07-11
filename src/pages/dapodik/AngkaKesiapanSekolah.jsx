@@ -31,10 +31,17 @@ const JENJANG_GROUPS = {
 export default function AngkaKesiapanSekolah() {
   const [searchParams, setSearchParams] = useSearchParams();
   
+  // ===================================================================== //
+  // VALIDASI URL PARAMS AGAR DEFAULT TAB SELALU SD JIKA URL TIDAK VALID   //
+  // ===================================================================== //
+  const validTabs = ['SD', 'SMP', 'SMA', 'SMK'];
+  const initialJenjang = searchParams.get('jenjang');
+  const defaultTab = validTabs.includes(initialJenjang) ? initialJenjang : 'SD';
+
   // --- STATE MANAGEMENT ---
   const [selectedYear, setSelectedYear] = useState(searchParams.get('tahun') || '2026');
   const [filterWilayah, setFilterWilayah] = useState(searchParams.get('wilayah') || 'SEMUA');
-  const [activeTab, setActiveTab] = useState(searchParams.get('jenjang') || 'SD'); // Default SD
+  const [activeTab, setActiveTab] = useState(defaultTab); // Menggunakan validasi defaultTab
   const [filterStatus, setFilterStatus] = useState('SEMUA'); // SEMUA, NEGERI, SWASTA
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -62,8 +69,8 @@ export default function AngkaKesiapanSekolah() {
       tahun: selectedYear,
       wilayah: filterWilayah,
       jenjang: activeTab
-    });
-  }, [selectedYear, filterWilayah, activeTab]);
+    }, { replace: true }); // Tambahkan replace agar history browser rapi
+  }, [selectedYear, filterWilayah, activeTab, setSearchParams]);
 
   // ===================================================================== //
   // FETCH DATA PRE-CALCULATED DARI FIRESTORE                              //
@@ -73,7 +80,6 @@ export default function AngkaKesiapanSekolah() {
       setLoading(true);
       setError(null);
       try {
-        // Nanti di AdminMesinKalkulasi kita simpan dengan nama ini
         const docRef = doc(db, 'dapodik_agregasi', `kesiapan_sekolah_${selectedYear}`);
         const docSnap = await getDoc(docRef);
         

@@ -3,10 +3,11 @@ import { MapPin, Info, Search, Download, Loader2, Activity, School, GraduationCa
 import { db } from '../../../firebase/config';
 import { collection, getDocs, getDoc, doc, query, where, setDoc } from 'firebase/firestore';
 import ExcelJS from 'exceljs';
+import { PDFDownloadLink } from '@react-pdf/renderer';
+import LaporanEksekutifPDF from '../../../utils/LaporanEksekutifPDF'; 
 
-// --- TAMBAHAN LIBRARY UNTUK AI & CETAK PDF ---
+// --- TAMBAHAN LIBRARY UNTUK AI ---
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import html2pdf from 'html2pdf.js';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 
 // Inisialisasi API Key Gemini
@@ -495,19 +496,6 @@ export default function RasioSekolahVsPD({ selectedYear }) {
     }
   };
 
-  const handleDownloadPDF = () => {
-    const element = document.getElementById('pdf-ai-content');
-    const opt = {
-      margin:       0.4,
-      filename:     `Laporan_AI_Rasio_Sekolah_Vs_PD_${filterWilayah}_${selectedYear}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2, useCORS: true },
-      jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
-    };
-
-    html2pdf().set(opt).from(element).save();
-  };
-
   // Format helper untuk tanggal laporan
   const formatAiDate = (isoString) => {
     if (!isoString) return '';
@@ -684,10 +672,10 @@ export default function RasioSekolahVsPD({ selectedYear }) {
                 <tr key={idx} className="bg-white shadow-sm hover:shadow-md transition-all group">
                   <td className="px-4 py-3 rounded-l-xl font-bold text-gray-400 text-xs border-y border-l border-gray-100">{idx + 1}</td>
                   <td className="px-4 py-3 font-black text-gray-800 text-sm uppercase text-left border-y border-gray-100">{row.jenjang}</td>
-                  <td className="px-4 py-3 font-bold text-blue-700 bg-blue-50/30 border-y border-l border-gray-100">{row.sek_n.toLocaleString()}</td>
-                  <td className="px-4 py-3 font-black text-blue-700 bg-blue-50/30 border-y border-gray-100">{row.pd_n.toLocaleString()}</td>
-                  <td className="px-4 py-3 font-bold text-orange-700 bg-orange-50/20 border-y border-l border-gray-100">{row.sek_s.toLocaleString()}</td>
-                  <td className="px-4 py-3 font-black text-orange-700 bg-orange-50/20 border-y border-gray-100">{row.pd_s.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-bold text-blue-700 bg-blue-50 border-y border-l border-gray-100">{row.sek_n.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-black text-blue-700 bg-blue-50 border-y border-gray-100">{row.pd_n.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-bold text-orange-700 bg-orange-50 border-y border-l border-gray-100">{row.sek_s.toLocaleString()}</td>
+                  <td className="px-4 py-3 font-black text-orange-700 bg-orange-50 border-y border-gray-100">{row.pd_s.toLocaleString()}</td>
                   <td className="px-4 py-3 font-bold text-gray-700 bg-gray-50 border-y border-l border-gray-100">{row.total_sek.toLocaleString()}</td>
                   <td className="px-4 py-3 font-black text-gray-800 text-base bg-gray-100 border-y border-r border-gray-100 rounded-r-xl">{row.total_pd.toLocaleString()}</td>
                 </tr>
@@ -704,7 +692,7 @@ export default function RasioSekolahVsPD({ selectedYear }) {
                   <td className="px-4 py-4 text-orange-800 border-y border-blue-200">{grandTotalTab1.sek_s.toLocaleString()}</td>
                   <td className="px-4 py-4 text-orange-900 border-y border-blue-200">{grandTotalTab1.pd_s.toLocaleString()}</td>
                   <td className="px-4 py-4 text-blue-950 border-y border-blue-200">{grandTotalTab1.total_sek.toLocaleString()}</td>
-                  <td className="px-4 py-4 text-blue-950 text-base border-y border-r border-blue-200 rounded-r-2xl bg-blue-200/50">{grandTotalTab1.total_pd.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-blue-950 text-base border-y border-r border-blue-200 rounded-r-2xl bg-blue-100">{grandTotalTab1.total_pd.toLocaleString()}</td>
                 </tr>
               </tfoot>
             )}
@@ -726,7 +714,7 @@ export default function RasioSekolahVsPD({ selectedYear }) {
           </div>
           
           <div className="flex items-center gap-3 w-full md:w-auto">
-            <div className="flex items-center bg-white/10 border border-blue-700/50 rounded-xl px-3 py-1.5 shadow-sm transition-all focus-within:ring-2 focus-within:ring-blue-400 w-full md:w-auto">
+            <div className="flex items-center bg-blue-800 border border-blue-700 rounded-xl px-3 py-1.5 shadow-sm transition-all focus-within:ring-2 focus-within:ring-blue-400 w-full md:w-auto">
               <School size={16} className="text-blue-300 mr-2" />
               <select 
                 value={filterStatusTab2} 
@@ -746,7 +734,7 @@ export default function RasioSekolahVsPD({ selectedYear }) {
         <div className="overflow-x-auto p-4">
           <table className="w-full text-center border-separate border-spacing-y-2">
             <thead className="sticky top-0 bg-white z-10 shadow-sm rounded-xl">
-              <tr className="text-[10px] font-black uppercase text-gray-500 bg-blue-50/50">
+              <tr className="text-[10px] font-black uppercase text-gray-500 bg-blue-50">
                 <th className="px-4 py-4 rounded-l-xl w-12">No</th>
                 <th className="px-4 py-4 text-left">{isModeSemua ? 'Kabupaten/Kota' : 'Kecamatan'}</th>
                 {activeColumns.map(k => (
@@ -764,7 +752,7 @@ export default function RasioSekolahVsPD({ selectedYear }) {
                   {activeColumns.map((k, kIdx) => {
                     const isLast = kIdx === activeColumns.length - 1;
                     return (
-                      <td key={k} className={`px-2 py-4 border-y border-l border-gray-100 bg-gray-50/30 text-sm ${isLast ? 'rounded-r-xl border-r' : ''}`}>
+                      <td key={k} className={`px-2 py-4 border-y border-l border-gray-100 bg-gray-50 text-sm ${isLast ? 'rounded-r-xl border-r' : ''}`}>
                         {renderRatio(row[`${k}_sek`], row[`${k}_pd`], k)}
                       </td>
                     );
@@ -803,7 +791,7 @@ export default function RasioSekolahVsPD({ selectedYear }) {
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> SLB: Optimal 24 PD / Sekolah</div>
             <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500"></div> NON FORMAL: Optimal 90 PD / Sekolah</div>
           </div>
-          <div className="mt-4 pt-4 border-t border-blue-200/50 text-xs italic opacity-80 font-bold">
+          <div className="mt-4 pt-4 border-t border-blue-200 text-xs italic font-bold">
             * Format Rasio <span className="text-blue-700 font-black">1 : X</span>. Angka <span className="text-blue-700 font-black">1</span> adalah 1 Sekolah, dan <span className="text-blue-700 font-black">X</span> adalah Rata-rata PD Aktual. <br/>
             Warna <span className="text-emerald-600 font-black">Hijau</span> = Ideal. Warna <span className="text-blue-600 font-black">Biru</span> = Kekurangan Murid (Di bawah minimal). Warna <span className="text-red-600 font-black">Merah</span> = Overload (Kapasitas siswa berlebih).
           </div>
@@ -812,7 +800,7 @@ export default function RasioSekolahVsPD({ selectedYear }) {
 
       {/* MODAL AI ANALISIS MENEMPEL DI HALAMAN INI */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden relative">
             
             {/* Header Modal AI */}
@@ -830,46 +818,75 @@ export default function RasioSekolahVsPD({ selectedYear }) {
                     <RefreshCw size={16} className={isAnalyzing ? 'animate-spin' : ''} />
                   </button>
                 )}
+                
+                {/* --- UPDATE: TOMBOL UNDUH PDF DENGAN REACT-PDF --- */}
                 {aiResult && (
-                  <button onClick={handleDownloadPDF} className="flex items-center gap-2 bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 transition-colors shadow-md">
-                    <FileText size={16} /> Unduh PDF
-                  </button>
+                  <PDFDownloadLink
+                    document={
+                    <LaporanEksekutifPDF
+                      judulLaporan="Laporan Eksekutif Daya Tampung"
+                      deskripsiLaporan={`SITAKA - Agregasi Rasio Sekolah vs Peserta Didik Tahun ${selectedYear}`}
+                      tahun={selectedYear}
+                      wilayah={filterWilayah}
+                      kategori={activeKategori}
+                      dataAI={aiResult}
+                      // --- TAMBAHAN PROPS UNTUK GRAFIK SISWA ---
+                      chartData={tab1Data.map(d => ({ label: d.jenjang, v1: d.total_sek, v2: d.total_pd }))}
+                      label1="Total Sekolah"
+                      label2="Total Murid"
+                    />
+                    }
+                    fileName={`Laporan_AI_Rasio_Sekolah_Vs_PD_${filterWilayah}_${selectedYear}.pdf`}
+                    className="flex items-center gap-2 bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 transition-colors shadow-md hover:shadow-lg disabled:opacity-70 disabled:cursor-not-allowed"
+                  >
+                    {({ loading }) =>
+                      loading ? (
+                        <><Loader2 size={16} className="animate-spin" /> Memproses...</>
+                      ) : (
+                        <><FileText size={16} /> Unduh PDF</>
+                      )
+                    }
+                  </PDFDownloadLink>
                 )}
+                
                 <button onClick={() => setIsModalOpen(false)} className="p-2 bg-white rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all shadow-sm">
                   <X size={24} />
                 </button>
               </div>
             </div>
 
-            {/* Body Modal AI yang Bisa Di-scroll & Di-print ke PDF */}
-            <div className="p-8 overflow-y-auto flex-1 bg-gray-50/50" id="pdf-ai-content">
+            {/* Body Modal AI yang Bisa Di-scroll */}
+            <div 
+              className="p-8 overflow-y-auto flex-1" 
+              style={{ backgroundColor: '#f9fafb', color: '#1f2937' }}
+            >
               {isAnalyzing ? (
                 <div className="flex flex-col items-center justify-center h-64 opacity-70">
-                  <Sparkles size={64} className="text-purple-500 animate-pulse mb-4" />
-                  <p className="font-black text-xl uppercase tracking-widest text-purple-800">Tunggu, Sedang Berpikir...</p>
-                  <p className="text-sm font-bold text-gray-400 mt-2">Menganalisis Permendikdasmen No 14 Tahun 2026</p>
+                  <Sparkles size={64} style={{ color: '#a855f7' }} className="animate-pulse mb-4" />
+                  <p className="font-black text-xl uppercase tracking-widest" style={{ color: '#6b21a8' }}>Tunggu, Sedang Berpikir...</p>
+                  <p className="text-sm font-bold mt-2" style={{ color: '#9ca3af' }}>Menganalisis Permendikdasmen No 14 Tahun 2026</p>
                 </div>
               ) : aiResult ? (
                 <div className="flex flex-col gap-8 pb-10">
                   
                   {/* KOP LAPORAN UNTUK PDF */}
-                  <div className="text-center pb-4 border-b-2 border-indigo-100">
-                    <h2 className="text-2xl font-black text-indigo-900 uppercase">Ringkasan Analitik Daya Tampung</h2>
-                    <p className="text-sm font-bold text-gray-500 mt-1">Data Agregasi Rasio Sekolah vs Peserta Didik ({selectedYear})</p>
-                    <p className="text-xs font-medium text-gray-400 mt-1">Wilayah: {filterWilayah} | Kategori: {activeKategori}</p>
+                  <div className="text-center pb-4 border-b-2" style={{ borderColor: '#e0e7ff' }}>
+                    <h2 className="text-2xl font-black uppercase" style={{ color: '#312e81' }}>Ringkasan Analitik Daya Tampung</h2>
+                    <p className="text-sm font-bold mt-1" style={{ color: '#6b7280' }}>Data Agregasi Rasio Sekolah vs Peserta Didik ({selectedYear})</p>
+                    <p className="text-xs font-medium mt-1" style={{ color: '#9ca3af' }}>Wilayah: {filterWilayah} | Kategori: {activeKategori}</p>
                   </div>
 
                   {/* Kesimpulan */}
-                  <div className="bg-white p-6 rounded-2xl border border-indigo-100 shadow-sm">
-                    <h4 className="font-black text-lg text-indigo-900 mb-3 flex items-center gap-2">
+                  <div className="p-6 rounded-2xl border" style={{ backgroundColor: '#ffffff', borderColor: '#e0e7ff' }}>
+                    <h4 className="font-black text-lg mb-3 flex items-center gap-2" style={{ color: '#312e81' }}>
                        <Info size={20} /> KESIMPULAN UMUM
                     </h4>
-                    <p className="text-gray-700 leading-relaxed font-medium text-justify whitespace-pre-wrap">{aiResult.kesimpulanUmum}</p>
+                    <p className="leading-relaxed font-medium text-justify whitespace-pre-wrap" style={{ color: '#374151' }}>{aiResult.kesimpulanUmum}</p>
                   </div>
 
                   {/* Grafik Tabel 1 (Recharts) dengan Dual Y-Axis */}
-                  <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm h-80">
-                     <h4 className="font-black text-sm text-gray-800 mb-4 uppercase text-center">Grafik Perbandingan Sekolah vs Peserta Didik</h4>
+                  <div className="p-6 rounded-2xl border h-80" style={{ backgroundColor: '#ffffff', borderColor: '#f3f4f6' }}>
+                     <h4 className="font-black text-sm mb-4 uppercase text-center" style={{ color: '#1f2937' }}>Grafik Perbandingan Sekolah vs Peserta Didik</h4>
                      <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={tab1Data} margin={{ top: 5, right: 20, left: 20, bottom: 5 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
@@ -879,10 +896,9 @@ export default function RasioSekolahVsPD({ selectedYear }) {
                           {/* Y-Axis Kanan untuk Peserta Didik */}
                           <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#4F46E5' }} />
                           
-                          <Tooltip cursor={{ fill: '#F3F4F6' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                          <Tooltip cursor={{ fill: '#F3F4F6' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
                           <Legend wrapperStyle={{ paddingTop: '20px', fontWeight: 'bold', fontSize: '12px' }} />
                           
-                          {/* Hubungkan batang dengan yAxisId yang sesuai */}
                           <Bar yAxisId="left" dataKey="total_sek" name="Total Sekolah" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
                           <Bar yAxisId="right" dataKey="total_pd" name="Total Peserta Didik" fill="#4F46E5" radius={[4, 4, 0, 0]} />
                         </BarChart>
@@ -891,24 +907,24 @@ export default function RasioSekolahVsPD({ selectedYear }) {
 
                   {/* Grid Jenjang Terpadat / Kekurangan */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="bg-red-50 p-5 rounded-2xl border border-red-100">
-                      <h4 className="font-black text-red-800 uppercase mb-3">Jenjang Terpadat (Overload)</h4>
+                    <div className="p-5 rounded-2xl border" style={{ backgroundColor: '#fef2f2', borderColor: '#fee2e2' }}>
+                      <h4 className="font-black uppercase mb-3" style={{ color: '#991b1b' }}>Jenjang Terpadat (Overload)</h4>
                       <ul className="flex flex-col gap-3">
                         {aiResult.jenjangTertinggi?.map((item, i) => (
-                          <li key={i} className="bg-white p-3 rounded-xl shadow-sm text-sm border border-red-50 flex flex-col gap-1">
-                            <span className="font-black text-red-600 text-base">{item.jenjang}</span>
-                            <span className="text-gray-600 font-medium leading-tight">{item.alasan}</span>
+                          <li key={i} className="p-3 rounded-xl text-sm border flex flex-col gap-1" style={{ backgroundColor: '#ffffff', borderColor: '#fef2f2' }}>
+                            <span className="font-black text-base" style={{ color: '#dc2626' }}>{item.jenjang}</span>
+                            <span className="font-medium leading-tight" style={{ color: '#4b5563' }}>{item.alasan}</span>
                           </li>
                         ))}
                       </ul>
                     </div>
-                    <div className="bg-blue-50 p-5 rounded-2xl border border-blue-100">
-                      <h4 className="font-black text-blue-800 uppercase mb-3">Jenjang Jumlah Murid Ideal (Optimal)</h4>
+                    <div className="p-5 rounded-2xl border" style={{ backgroundColor: '#eff6ff', borderColor: '#dbeafe' }}>
+                      <h4 className="font-black uppercase mb-3" style={{ color: '#1e40af' }}>Jenjang Jumlah Murid Ideal (Optimal)</h4>
                       <ul className="flex flex-col gap-3">
                         {aiResult.jenjangTerendah?.map((item, i) => (
-                          <li key={i} className="bg-white p-3 rounded-xl shadow-sm text-sm border border-blue-50 flex flex-col gap-1">
-                            <span className="font-black text-blue-600 text-base">{item.jenjang}</span>
-                            <span className="text-gray-600 font-medium leading-tight">{item.alasan}</span>
+                          <li key={i} className="p-3 rounded-xl text-sm border flex flex-col gap-1" style={{ backgroundColor: '#ffffff', borderColor: '#eff6ff' }}>
+                            <span className="font-black text-base" style={{ color: '#2563eb' }}>{item.jenjang}</span>
+                            <span className="font-medium leading-tight" style={{ color: '#4b5563' }}>{item.alasan}</span>
                           </li>
                         ))}
                       </ul>
@@ -917,24 +933,24 @@ export default function RasioSekolahVsPD({ selectedYear }) {
                   
                   {/* Grid Wilayah Terpadat / Kekurangan */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="bg-orange-50 p-5 rounded-2xl border border-orange-100">
-                      <h4 className="font-black text-orange-800 uppercase mb-3">Wilayah Terpadat</h4>
+                    <div className="p-5 rounded-2xl border" style={{ backgroundColor: '#fff7ed', borderColor: '#ffedd5' }}>
+                      <h4 className="font-black uppercase mb-3" style={{ color: '#9a3412' }}>Wilayah Terpadat</h4>
                       <ul className="flex flex-col gap-3">
                         {aiResult.wilayahTertinggi?.map((item, i) => (
-                          <li key={i} className="bg-white p-3 rounded-xl shadow-sm text-sm border border-orange-50 flex flex-col gap-1">
-                            <span className="font-black text-orange-600 text-base">{item.wilayah}</span>
-                            <span className="text-gray-600 font-medium leading-tight">{item.alasan}</span>
+                          <li key={i} className="p-3 rounded-xl text-sm border flex flex-col gap-1" style={{ backgroundColor: '#ffffff', borderColor: '#fff7ed' }}>
+                            <span className="font-black text-base" style={{ color: '#ea580c' }}>{item.wilayah}</span>
+                            <span className="font-medium leading-tight" style={{ color: '#4b5563' }}>{item.alasan}</span>
                           </li>
                         ))}
                       </ul>
                     </div>
-                    <div className="bg-emerald-50 p-5 rounded-2xl border border-emerald-100">
-                      <h4 className="font-black text-emerald-800 uppercase mb-3">Wilayah Paling Ideal</h4>
+                    <div className="p-5 rounded-2xl border" style={{ backgroundColor: '#ecfdf5', borderColor: '#d1fae5' }}>
+                      <h4 className="font-black uppercase mb-3" style={{ color: '#065f46' }}>Wilayah Paling Ideal</h4>
                       <ul className="flex flex-col gap-3">
                         {aiResult.wilayahTerendah?.map((item, i) => (
-                          <li key={i} className="bg-white p-3 rounded-xl shadow-sm text-sm border border-emerald-50 flex flex-col gap-1">
-                            <span className="font-black text-emerald-600 text-base">{item.wilayah}</span>
-                            <span className="text-gray-600 font-medium leading-tight">{item.alasan}</span>
+                          <li key={i} className="p-3 rounded-xl text-sm border flex flex-col gap-1" style={{ backgroundColor: '#ffffff', borderColor: '#ecfdf5' }}>
+                            <span className="font-black text-base" style={{ color: '#059669' }}>{item.wilayah}</span>
+                            <span className="font-medium leading-tight" style={{ color: '#4b5563' }}>{item.alasan}</span>
                           </li>
                         ))}
                       </ul>
@@ -942,10 +958,10 @@ export default function RasioSekolahVsPD({ selectedYear }) {
                   </div>
 
                   {/* Footer Tanda Tangan AI */}
-                  <div className="mt-8 pt-4 border-t border-gray-200 flex justify-between items-end text-xs font-bold text-gray-400">
+                  <div className="mt-8 pt-4 border-t flex justify-between items-end text-xs font-bold" style={{ borderColor: '#e5e7eb', color: '#9ca3af' }}>
                     <div>
                         <p>Digenerasi oleh: Gemini AI - SITAKA Engine</p>
-                        {aiLastUpdated && <p className="text-[10px] opacity-70 mt-1">Terakhir dianalisa: {formatAiDate(aiLastUpdated)}</p>}
+                        {aiLastUpdated && <p className="text-[10px] mt-1">Terakhir dianalisa: {formatAiDate(aiLastUpdated)}</p>}
                     </div>
                     <p>Dicetak pada: {new Date().toLocaleDateString('id-ID')}</p>
                   </div>

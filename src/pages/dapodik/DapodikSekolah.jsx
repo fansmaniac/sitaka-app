@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import { db } from '../../firebase/config';
-import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs, limit, doc, getDoc } from 'firebase/firestore';
 
 // IMPORT KOMPONEN MODAL RINCIAN
 import RincianStatusSekolah from '../../components/dapodik/dapodikSekolah/RincianStatusSekolah';
@@ -15,7 +15,6 @@ import RincianRombelSekolah from '../../components/dapodik/dapodikSekolah/Rincia
 
 // =====================================================================
 // UTILITY: CACHING LOKAL (BRANKAS BROWSER)
-// Menggunakan database baru khusus agregasi
 // =====================================================================
 const DB_NAME = "SitakaCacheDB_SekolahModul_Agregasi";
 const STORE_NAME = "sekolahDataAgg";
@@ -23,12 +22,10 @@ const CACHE_EXPIRY_HOURS = 12;
 
 const initDB = () => {
   return new Promise((resolve, reject) => {
-    // Kita tetap gunakan versi 2, tetapi handle onupgradeneeded dengan aman
     const request = indexedDB.open(DB_NAME, 2); 
     
     request.onupgradeneeded = (e) => {
         const db = e.target.result;
-        // Hanya buat jika belum ada
         if (!db.objectStoreNames.contains(STORE_NAME)) {
             db.createObjectStore(STORE_NAME);
         }
@@ -97,22 +94,19 @@ const getKabupatenRank = (kabName) => {
 };
 
 // =====================================================================
-// MAPPING STRUKTUR JENJANG DAN TAB MENU (UPDATE BARU)
+// MAPPING STRUKTUR JENJANG DAN TAB MENU
 // =====================================================================
-
-// Digunakan ketika user memilih tab spesifik di mode Kategori "SEMUA"
 const JENJANG_GROUPS = {
   'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
   'SD': ['SD', 'SPK SD'],
   'SMP': ['SMP', 'SPK SMP'],
   'SMA': ['SMA', 'SPK SMA'],
   'SMK': ['SMK'],
-  'SLB (Inklusif)': ['SLB'], // <- KEMBALIKAN YANG INI
-  'SLB': ['SLB'],            // <- BIARKAN YANG INI SEBAGAI FALLBACK
+  'SLB (Inklusif)': ['SLB'],
+  'SLB': ['SLB'],
   'NON FORMAL': ['PKBM', 'SKB']
 };
 
-// Digunakan untuk filter massal jika user memilih kategori tertentu tapi memilih tab "SEMUA (Kategori)"
 const KATEGORI_BENTUK = {
   'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
   'DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
@@ -121,12 +115,11 @@ const KATEGORI_BENTUK = {
   'NON FORMAL': ['PKBM', 'SKB']
 };
 
-// Daftar Tab Menu berdasarkan Kategori yang aktif di Dropdown
 const TABS_MAPPING = {
   'SEMUA': ['PAUD', 'SD', 'SMP', 'SMA', 'SMK', 'SLB (Inklusif)', 'NON FORMAL'],
   'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
-  'DASAR': ['SD', 'SMP'], // Update: Menghilangkan SPK dari List Tab Karena sudah digabung
-  'MENENGAH': ['SMA', 'SMK'], // Update: Menghilangkan SPK dari List Tab Karena sudah digabung
+  'DASAR': ['SD', 'SMP'],
+  'MENENGAH': ['SMA', 'SMK'],
   'INKLUSIF': ['SLB'],
   'NON FORMAL': ['PKBM', 'SKB']
 };
@@ -264,21 +257,19 @@ const PremiumPieChart = ({ segments, total }) => {
 
 
 // =====================================================================
-// MAIN COMPONENT: DAPODIK SEKOLAH (VERSI AGREGASI SUPER RINGAN)
+// MAIN COMPONENT: DAPODIK SEKOLAH
 // =====================================================================
 export default function DapodikSekolah({ selectedYear = '2026' }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [dataSekolah, setDataSekolah] = useState([]);
   const [loading, setLoading] = useState(true);
   
-  // Baca parameter dari URL, jika kotor reset ke default
   const rawView = searchParams.get('view') ? searchParams.get('view').toUpperCase() : 'STATUS';
   const activeView = ['STATUS', 'AKREDITASI', 'ROMBEL'].includes(rawView) ? rawView : 'STATUS';
 
   const rawKategori = searchParams.get('kategori') ? searchParams.get('kategori').toUpperCase() : 'SEMUA';
   const activeKategori = Object.keys(TABS_MAPPING).includes(rawKategori) ? rawKategori : 'SEMUA'; 
 
-  // PERBAIKAN BUG TAB INKLUSIF: Validasi case-insensitive agar tidak bocor
   const urlJenjang = searchParams.get('jenjang') || 'SEMUA';
   const validTabs = TABS_MAPPING[activeKategori] || [];
   const matchedTab = validTabs.find(t => t.toUpperCase() === urlJenjang.toUpperCase());
@@ -289,13 +280,12 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
   const [selectedWilayah, setSelectedWilayah] = useState('SEMUA');
   const [fetchedDate, setFetchedDate] = useState('');
 
-  // Fungsi pengubah URL state yang sinkron
   const setActiveView = (val) => setSearchParams(prev => { prev.set('view', val); return prev; });
   const setActiveKategori = (val) => setSearchParams(prev => { prev.set('kategori', val); prev.set('jenjang', 'SEMUA'); return prev; });
   const setActiveTab = (val) => setSearchParams(prev => { prev.set('jenjang', val); return prev; });
 
   // -------------------------------------------------------------------------
-  // MENGAMBIL DATA DARI KOLEKSI "sekolah_agregasi" YANG SUDAH DI-COMPRESS
+  // FETCH AGREGASI
   // -------------------------------------------------------------------------
   useEffect(() => {
     const fetchDataAgregasi = async () => {
@@ -303,35 +293,36 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
       const cacheKey = `sekolah_agregasi_v1_${selectedYear}`;
       
       try {
-        const cachedData = await getFromCache(cacheKey);
+        // 1. Tarik Dokumen Summary dari Firebase untuk dapatkan tanggal ter-update
+        const summaryRef = doc(db, 'sekolah_agregasi', `summary_${selectedYear}`);
+        const summarySnap = await getDoc(summaryRef);
         
-        // PENANGANAN BUG CACHE BENTROK: Memeriksa apakah Array atau Objek
-        if (cachedData) {
-          if (Array.isArray(cachedData)) {
-             setDataSekolah(cachedData); // Jika formatnya Array (dari modul Rasio)
-             setFetchedDate(''); 
-          } else {
-             setDataSekolah(cachedData.data || []); // Jika formatnya Objek (format asli)
-             setFetchedDate(cachedData.date || '');
-          }
-          setLoading(false);
-          return;
-        }
-
-        // Ambil info master summary untuk tracking tanggal update
-        const summarySnap = await getDocs(query(collection(db, 'sekolah_agregasi'), where('__name__', '==', `summary_${selectedYear}`)));
         let lastUpdatedStr = '';
-        if (!summarySnap.empty) {
-          const docData = summarySnap.docs[0].data();
+        if (summarySnap.exists()) {
+          const docData = summarySnap.data();
           if (docData.last_updated) {
             const d = new Date(docData.last_updated);
             const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
             lastUpdatedStr = `${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()} Pukul ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-            setFetchedDate(lastUpdatedStr);
+            setFetchedDate(lastUpdatedStr); // Langsung set tanggal ke state
           }
         }
 
-        // Fetch semua chunks agregasi
+        // 2. Cek Cache Lokal untuk Data Tabel
+        const cachedData = await getFromCache(cacheKey);
+        
+        if (cachedData) {
+          // Jika ada cache, render dari cache
+          if (Array.isArray(cachedData)) {
+             setDataSekolah(cachedData); 
+          } else {
+             setDataSekolah(cachedData.data || []); 
+          }
+          setLoading(false);
+          return; // Berhenti di sini, tidak perlu unduh chunk lagi
+        }
+
+        // 3. Jika tidak ada Cache, baru fetch chunk dari Firebase
         const qChunks = query(collection(db, 'sekolah_agregasi'), where('tahun_data', '==', selectedYear));
         const snapChunks = await getDocs(qChunks);
         
@@ -344,11 +335,12 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
         });
 
         setDataSekolah(allData);
+        // Simpan data beserta tanggal update terbarunya ke cache
         await saveToCache(cacheKey, { data: allData, date: lastUpdatedStr });
 
       } catch (e) {
         console.error("Gagal menarik data sekolah agregasi", e);
-        setDataSekolah([]); // Failsafe
+        setDataSekolah([]); 
       } finally {
         setLoading(false);
       }
@@ -358,8 +350,6 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
   }, [selectedYear]);
 
   const displayLastUpdated = fetchedDate || 'Belum Di-Kalkulasi oleh Admin';
-
-  // Failsafe ekstra: Jika dataSekolah kosong, defaultkan menjadi array kosong agar .map tidak error
   const safeDataSekolah = Array.isArray(dataSekolah) ? dataSekolah : [];
 
   const listKabupaten = useMemo(() => {
@@ -367,12 +357,11 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
     return unik.filter(Boolean).sort((a, b) => getKabupatenRank(a) - getKabupatenRank(b));
   }, [safeDataSekolah]);
 
-  // ENGINE AGREGASI UNTUK KETIGA VIEW BERDASARKAN FILTER TAB & KATEGORI
+  // ENGINE AGREGASI MATRIKS 
   const aggregatedData = useMemo(() => {
     const filteredData = safeDataSekolah.filter(item => {
       const bentukDb = String(item.bentuk_pendidikan || '').trim().toUpperCase();
       
-      // LOGIKA FILTER BERDASARKAN KATEGORI & TAB
       if (activeKategori === 'SEMUA') {
          if (activeTab === 'SEMUA') return true;
          const allowed = JENJANG_GROUPS[activeTab] || [];
@@ -382,7 +371,6 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
             const allowed = KATEGORI_BENTUK[activeKategori] || [];
             return allowed.includes(bentukDb);
          } else {
-            // PERBAIKAN: Jika pengguna memilih tab spesifik (misal 'SD', pastikan SPK SD juga masuk)
             const allowed = JENJANG_GROUPS[activeTab] || [];
             if (allowed.length > 0) return allowed.includes(bentukDb);
             return bentukDb === activeTab;
@@ -397,7 +385,15 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
         status_n: 0, status_s: 0, 
         akr_a: 0, akr_b: 0, akr_c: 0, akr_tt: 0, akr_belum: 0, 
         rombel_n: 0, rombel_s: 0,
-        total_sek: 0, total_rombel: 0 
+        total_sek: 0, total_rombel: 0,
+        // Properti Khusus View Semua Jenjang (Dipecah N dan S)
+        j_paud_n: 0, j_paud_s: 0, 
+        j_sd_n: 0, j_sd_s: 0, 
+        j_smp_n: 0, j_smp_s: 0, 
+        j_sma_n: 0, j_sma_s: 0, 
+        j_smk_n: 0, j_smk_s: 0, 
+        j_slb_n: 0, j_slb_s: 0, 
+        j_nonformal_n: 0, j_nonformal_s: 0
       });
     });
 
@@ -409,6 +405,7 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
        const isNegeri = item.status_sekolah === 'NEGERI';
        const akr = item.akreditasi;
        const rombelTotal = item.rombel_total || 0;
+       const bentukDb = String(item.bentuk_pendidikan || '').trim().toUpperCase();
 
        // 1. STATUS SEKOLAH
        if (isNegeri) row.status_n++; else row.status_s++;
@@ -422,6 +419,15 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
 
        // 3. ROMBEL
        if (isNegeri) row.rombel_n += rombelTotal; else row.rombel_s += rombelTotal;
+
+       // 4. PEMETAAN JENJANG (Khusus Tampilan "Semua Jenjang")
+       if (JENJANG_GROUPS['PAUD'].includes(bentukDb)) { isNegeri ? row.j_paud_n++ : row.j_paud_s++; }
+       else if (JENJANG_GROUPS['SD'].includes(bentukDb)) { isNegeri ? row.j_sd_n++ : row.j_sd_s++; }
+       else if (JENJANG_GROUPS['SMP'].includes(bentukDb)) { isNegeri ? row.j_smp_n++ : row.j_smp_s++; }
+       else if (JENJANG_GROUPS['SMA'].includes(bentukDb)) { isNegeri ? row.j_sma_n++ : row.j_sma_s++; }
+       else if (JENJANG_GROUPS['SMK'].includes(bentukDb)) { isNegeri ? row.j_smk_n++ : row.j_smk_s++; }
+       else if (JENJANG_GROUPS['SLB (Inklusif)'].includes(bentukDb) || JENJANG_GROUPS['SLB'].includes(bentukDb)) { isNegeri ? row.j_slb_n++ : row.j_slb_s++; }
+       else if (JENJANG_GROUPS['NON FORMAL'].includes(bentukDb)) { isNegeri ? row.j_nonformal_n++ : row.j_nonformal_s++; }
 
        row.total_sek++;
        row.total_rombel += rombelTotal;
@@ -443,14 +449,24 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
       acc.rombel_s += curr.rombel_s;
       acc.total_sek += curr.total_sek;
       acc.total_rombel += curr.total_rombel;
+      
+      acc.j_paud_n += curr.j_paud_n; acc.j_paud_s += curr.j_paud_s;
+      acc.j_sd_n += curr.j_sd_n; acc.j_sd_s += curr.j_sd_s;
+      acc.j_smp_n += curr.j_smp_n; acc.j_smp_s += curr.j_smp_s;
+      acc.j_sma_n += curr.j_sma_n; acc.j_sma_s += curr.j_sma_s;
+      acc.j_smk_n += curr.j_smk_n; acc.j_smk_s += curr.j_smk_s;
+      acc.j_slb_n += curr.j_slb_n; acc.j_slb_s += curr.j_slb_s;
+      acc.j_nonformal_n += curr.j_nonformal_n; acc.j_nonformal_s += curr.j_nonformal_s;
+      
       return acc;
     }, { 
       status_n: 0, status_s: 0, akr_a: 0, akr_b: 0, akr_c: 0, akr_tt: 0, akr_belum: 0, 
-      rombel_n: 0, rombel_s: 0, total_sek: 0, total_rombel: 0 
+      rombel_n: 0, rombel_s: 0, total_sek: 0, total_rombel: 0,
+      j_paud_n: 0, j_paud_s: 0, j_sd_n: 0, j_sd_s: 0, j_smp_n: 0, j_smp_s: 0,
+      j_sma_n: 0, j_sma_s: 0, j_smk_n: 0, j_smk_s: 0, j_slb_n: 0, j_slb_s: 0, j_nonformal_n: 0, j_nonformal_s: 0
     });
   }, [aggregatedData]);
 
-  // PENENTUAN LABEL UNTUK EKSPOR DAN JUDUL PIE CHART
   let activeLabel = 'SEMUA';
   if (activeKategori === 'SEMUA') {
       activeLabel = activeTab;
@@ -458,7 +474,6 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
       activeLabel = activeTab === 'SEMUA' ? activeKategori : activeTab;
   }
 
-  // DINAMIKA PIE CHART BERDASARKAN MODE
   let pieSegments = [];
   let pieTotal = 0;
   
@@ -490,8 +505,29 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
     const safeLabel = activeLabel.replace(/\//g, '-');
     const worksheet = workbook.addWorksheet(`Rekap ${activeView} - ${safeLabel}`);
 
-    if (activeView === 'STATUS') {
+    if (activeKategori === 'SEMUA' && activeTab === 'SEMUA') {
+        worksheet.columns = [
+          { header: 'No', key: 'no', width: 5 },
+          { header: 'Wilayah (Kabupaten/Kota)', key: 'wilayah', width: 30 },
+          { header: 'PAUD Negeri', key: 'j_paud_n', width: 12 },
+          { header: 'PAUD Swasta', key: 'j_paud_s', width: 12 },
+          { header: 'SD Negeri', key: 'j_sd_n', width: 12 },
+          { header: 'SD Swasta', key: 'j_sd_s', width: 12 },
+          { header: 'SMP Negeri', key: 'j_smp_n', width: 12 },
+          { header: 'SMP Swasta', key: 'j_smp_s', width: 12 },
+          { header: 'SMA Negeri', key: 'j_sma_n', width: 12 },
+          { header: 'SMA Swasta', key: 'j_sma_s', width: 12 },
+          { header: 'SMK Negeri', key: 'j_smk_n', width: 12 },
+          { header: 'SMK Swasta', key: 'j_smk_s', width: 12 },
+          { header: 'SLB Negeri', key: 'j_slb_n', width: 12 },
+          { header: 'SLB Swasta', key: 'j_slb_s', width: 12 },
+          { header: 'Non Formal Negeri', key: 'j_nonformal_n', width: 15 },
+          { header: 'Non Formal Swasta', key: 'j_nonformal_s', width: 15 },
+          { header: 'Total Sekolah', key: 'total_sek', width: 15 },
+        ];
+    } else if (activeView === 'STATUS') {
        worksheet.columns = [
+         { header: 'No', key: 'no', width: 5 },
          { header: 'Wilayah (Kabupaten/Kota)', key: 'wilayah', width: 30 },
          { header: 'Negeri', key: 'status_n', width: 15 },
          { header: 'Swasta', key: 'status_s', width: 15 },
@@ -499,6 +535,7 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
        ];
     } else if (activeView === 'AKREDITASI') {
        worksheet.columns = [
+         { header: 'No', key: 'no', width: 5 },
          { header: 'Wilayah (Kabupaten/Kota)', key: 'wilayah', width: 30 },
          { header: 'Akreditasi A', key: 'akr_a', width: 15 },
          { header: 'Akreditasi B', key: 'akr_b', width: 15 },
@@ -509,6 +546,7 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
        ];
     } else if (activeView === 'ROMBEL') {
        worksheet.columns = [
+         { header: 'No', key: 'no', width: 5 },
          { header: 'Wilayah (Kabupaten/Kota)', key: 'wilayah', width: 30 },
          { header: 'Rombel Negeri', key: 'rombel_n', width: 15 },
          { header: 'Rombel Swasta', key: 'rombel_s', width: 15 },
@@ -516,18 +554,17 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
        ];
     }
 
-    aggregatedData.forEach(item => worksheet.addRow(item));
+    aggregatedData.forEach((item, idx) => worksheet.addRow({ ...item, no: idx + 1 }));
 
-    const totalRowData = { wilayah: 'TOTAL KESELURUHAN' };
-    if (activeView === 'STATUS') {
+    const totalRowData = { no: '', wilayah: 'TOTAL KESELURUHAN' };
+    
+    if (activeKategori === 'SEMUA' && activeTab === 'SEMUA') {
+        Object.assign(totalRowData, grandTotals);
+    } else if (activeView === 'STATUS') {
        totalRowData.status_n = grandTotals.status_n; totalRowData.status_s = grandTotals.status_s; totalRowData.total_sek = grandTotals.total_sek;
     } else if (activeView === 'AKREDITASI') {
-       totalRowData.akr_a = grandTotals.akr_a; 
-       totalRowData.akr_b = grandTotals.akr_b; 
-       totalRowData.akr_c = grandTotals.akr_c; 
-       totalRowData.akr_tt = grandTotals.akr_tt; 
-       totalRowData.akr_belum = grandTotals.akr_belum; 
-       totalRowData.total_sek = grandTotals.total_sek;
+       totalRowData.akr_a = grandTotals.akr_a; totalRowData.akr_b = grandTotals.akr_b; totalRowData.akr_c = grandTotals.akr_c; 
+       totalRowData.akr_tt = grandTotals.akr_tt; totalRowData.akr_belum = grandTotals.akr_belum; totalRowData.total_sek = grandTotals.total_sek;
     } else if (activeView === 'ROMBEL') {
        totalRowData.rombel_n = grandTotals.rombel_n; totalRowData.rombel_s = grandTotals.rombel_s; totalRowData.total_rombel = grandTotals.total_rombel;
     }
@@ -552,16 +589,15 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
     setModalOpen(true);
   };
 
-  // Helper Card untuk Right Sidebar Panel
   const StatCard = ({ label, value, percentage, colorClasses }) => (
-    <div className={`flex flex-col justify-between ${colorClasses.bg} p-4 rounded-2xl border ${colorClasses.border} transition-colors ${colorClasses.hover}`}>
+    <div className={`flex flex-col justify-between ${colorClasses.bg} p-4 rounded-2xl border ${colorClasses.border} transition-colors ${colorClasses.hover} h-full`}>
        <div className="flex items-center gap-2 mb-2">
           <div className={`w-3 h-3 rounded-full ${colorClasses.dot} shadow-inner`}></div>
-          <span className={`font-black text-[11px] ${colorClasses.textMain} uppercase leading-tight tracking-wide`}>{label}</span>
+          <span className={`font-black text-[11px] md:text-xs ${colorClasses.textMain} uppercase leading-tight tracking-wide`}>{label}</span>
        </div>
        <div className="flex items-end justify-between">
-          <span className={`font-black text-xl ${colorClasses.textVal} leading-none`}>{value.toLocaleString()}</span>
-          <span className={`font-bold text-[11px] ${colorClasses.textPct}`}>({percentage}%)</span>
+          <span className={`font-black text-xl md:text-2xl ${colorClasses.textVal} leading-none`}>{value.toLocaleString()}</span>
+          <span className={`font-bold text-[11px] md:text-sm ${colorClasses.textPct}`}>({percentage}%)</span>
        </div>
     </div>
   );
@@ -584,11 +620,14 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
     );
   }
 
+  // Apakah Mode "Semua Jenjang" Aktif?
+  const isSemuaJenjangView = activeKategori === 'SEMUA' && activeTab === 'SEMUA';
+
   return (
-    <div className="h-full flex flex-col animate-in fade-in duration-500">
+    <div className="min-h-screen flex flex-col bg-slate-50 animate-in fade-in duration-500">
       
       {/* TABS HEADER: FILTER KATEGORI & VIEW */}
-      <div className="bg-white px-4 md:px-6 py-4 border-b border-gray-100 flex flex-col gap-4 shrink-0 shadow-sm z-20">
+      <div className="bg-white px-4 md:px-6 py-4 border-b border-gray-100 flex flex-col gap-4 shrink-0 shadow-sm z-20 sticky top-0">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
            {/* MAIN VIEW TOGGLE */}
            <div className="flex items-center bg-gray-100 p-1.5 rounded-2xl w-full md:w-auto overflow-x-auto">
@@ -646,153 +685,244 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col lg:flex-row min-h-0 bg-gray-50/50">
-        
-        {/* KOLOM KIRI: TABEL REKAPITULASI */}
-        <div className="flex-1 lg:w-2/3 p-4 md:p-6 flex flex-col min-h-0 overflow-hidden border-r border-gray-200">
-          <div className="bg-white rounded-3xl shadow-sm border border-gray-100 flex-1 flex flex-col overflow-hidden relative">
-            <div className="flex-1 overflow-auto p-4 custom-scrollbar">
-              <table className="w-full text-center border-separate border-spacing-y-2">
-                <thead className="sticky top-0 bg-gray-50 z-10 shadow-sm rounded-xl">
-                  <tr className="text-[10px] font-black uppercase text-gray-500 whitespace-nowrap">
-                    <th className="px-4 py-3 text-left rounded-l-xl">Wilayah</th>
-                    
-                    {activeView === 'STATUS' && (
-                      <><th className="px-4 py-3 text-blue-600">Negeri</th><th className="px-4 py-3 text-orange-600">Swasta</th><th className="px-4 py-3 text-gray-800">Jumlah Unit</th></>
-                    )}
-                    
-                    {activeView === 'AKREDITASI' && (
-                      <><th className="px-2 py-3 text-emerald-600">A</th><th className="px-2 py-3 text-blue-600">B</th><th className="px-2 py-3 text-amber-600">C</th><th className="px-2 py-3 text-red-600">TT</th><th className="px-2 py-3 text-slate-500">Belum</th><th className="px-4 py-3 text-gray-800">Total Unit</th></>
-                    )}
+      {/* TOP SECTION: PREMIUM PIE CHART & CARDS */}
+      <div className="bg-white border-b border-gray-200 py-6 px-4 md:px-8 shrink-0">
+         {/* DIGANTI max-w-7xl menjadi max-w-[98%] agar memaksimalkan ruang kosong */}
+         <div className="w-full max-w-[98%] mx-auto flex flex-col lg:flex-row items-center justify-between gap-8">
+            {/* Judul & Visualisasi */}
+            <div className="flex-1 w-full max-w-sm flex flex-col items-center lg:items-start text-center lg:text-left">
+               <h2 className="text-2xl md:text-3xl font-black text-gray-800 uppercase tracking-tighter leading-tight">
+                 Proporsi {activeView}
+               </h2>
+               <p className="text-sm md:text-base font-bold text-gray-400 uppercase tracking-widest mt-1 mb-6">
+                 Jenjang {activeLabel}
+               </p>
+               <div className="w-full h-full min-h-[220px]">
+                  <PremiumPieChart segments={pieSegments} total={pieTotal} />
+               </div>
+            </div>
 
-                    {activeView === 'ROMBEL' && (
-                      <><th className="px-4 py-3 text-blue-600">Rombel Negeri</th><th className="px-4 py-3 text-orange-600">Rombel Swasta</th><th className="px-4 py-3 text-gray-800">Total Rombel</th></>
-                    )}
+            {/* Rekap Statistik / Cards */}
+            <div className="flex-1 w-full lg:max-w-2xl">
+               {activeView === 'STATUS' && (
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <StatCard label="Sekolah Negeri" value={grandTotals.status_n} percentage={pieTotal > 0 ? ((grandTotals.status_n/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
+                    <StatCard label="Sekolah Swasta" value={grandTotals.status_s} percentage={pieTotal > 0 ? ((grandTotals.status_s/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.orange} />
+                 </div>
+               )}
 
-                    <th className="px-4 py-3 rounded-r-xl">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {aggregatedData.map((row, idx) => (
-                    <tr key={idx} className="bg-white shadow-sm hover:shadow-md hover:scale-[1.01] transition-all group">
-                      <td className="px-4 py-3 rounded-l-2xl font-black text-gray-800 uppercase text-left border-y border-l border-gray-100 whitespace-nowrap">{row.wilayah}</td>
-                      
+               {activeView === 'AKREDITASI' && (
+                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+                    <StatCard label="Akreditasi A" value={grandTotals.akr_a} percentage={pieTotal > 0 ? ((grandTotals.akr_a/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.emerald} />
+                    <StatCard label="Akreditasi B" value={grandTotals.akr_b} percentage={pieTotal > 0 ? ((grandTotals.akr_b/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
+                    <StatCard label="Akreditasi C" value={grandTotals.akr_c} percentage={pieTotal > 0 ? ((grandTotals.akr_c/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.amber} />
+                    <StatCard label="Tidak Terakred (TT)" value={grandTotals.akr_tt} percentage={pieTotal > 0 ? ((grandTotals.akr_tt/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.red} />
+                    <StatCard label="Belum Terakred" value={grandTotals.akr_belum} percentage={pieTotal > 0 ? ((grandTotals.akr_belum/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.slate} />
+                 </div>
+               )}
+
+               {activeView === 'ROMBEL' && (
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <StatCard label="Rombel Negeri" value={grandTotals.rombel_n} percentage={pieTotal > 0 ? ((grandTotals.rombel_n/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
+                    <StatCard label="Rombel Swasta" value={grandTotals.rombel_s} percentage={pieTotal > 0 ? ((grandTotals.rombel_s/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.orange} />
+                 </div>
+               )}
+            </div>
+         </div>
+      </div>
+
+      {/* BOTTOM SECTION: MAIN TABLE */}
+      {/* Container dibuat lebar penuh dengan max-w-[98%] dan px-4 */}
+      <div className="flex-1 w-full max-w-[98%] mx-auto p-4 md:p-6 mb-12">
+        <div className="bg-white rounded-3xl shadow-sm border border-gray-200 overflow-hidden">
+          {/* max-h-[600px] dihapus agar tabel tidak perlu di-scroll secara internal dan menyesuaikan tinggi aslinya */}
+          <div className="overflow-x-auto custom-scrollbar">
+            <table className="w-full text-center border-separate border-spacing-0">
+              <thead className="sticky top-0 bg-gray-50 z-10 shadow-sm">
+                
+                <tr className="text-[10px] md:text-xs font-black uppercase text-gray-500 whitespace-nowrap">
+                  <th rowSpan={isSemuaJenjangView ? 2 : 1} className="px-4 py-4 text-center border-b-2 border-gray-200 bg-gray-50 text-gray-700 w-16">Nomor</th>
+                  <th rowSpan={isSemuaJenjangView ? 2 : 1} className="px-4 py-4 text-left border-b-2 border-gray-200 bg-gray-50 text-gray-700 sticky left-0 z-20 w-48 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] border-r">Kabupaten / Kota</th>
+                  
+                  {isSemuaJenjangView ? (
+                    <>
+                       <th colSpan="2" className="px-3 py-3 border-b-2 border-gray-200 hover:bg-gray-100 transition-colors text-pink-600 border-x">PAUD</th>
+                       <th colSpan="2" className="px-3 py-3 border-b-2 border-gray-200 hover:bg-gray-100 transition-colors text-red-600 border-r">SD</th>
+                       <th colSpan="2" className="px-3 py-3 border-b-2 border-gray-200 hover:bg-gray-100 transition-colors text-blue-600 border-r">SMP</th>
+                       <th colSpan="2" className="px-3 py-3 border-b-2 border-gray-200 hover:bg-gray-100 transition-colors text-slate-600 border-r">SMA</th>
+                       <th colSpan="2" className="px-3 py-3 border-b-2 border-gray-200 hover:bg-gray-100 transition-colors text-violet-600 border-r">SMK</th>
+                       <th colSpan="2" className="px-3 py-3 border-b-2 border-gray-200 hover:bg-gray-100 transition-colors text-emerald-600 border-r">SLB</th>
+                       <th colSpan="2" className="px-3 py-3 border-b-2 border-gray-200 hover:bg-gray-100 transition-colors text-orange-600 border-r">Non Formal</th>
+                       <th rowSpan="2" className="px-4 py-4 border-b-2 border-gray-200 text-gray-900 bg-gray-100">Total Sekolah</th>
+                    </>
+                  ) : (
+                    <>
                       {activeView === 'STATUS' && (
-                        <>
-                          <td className="px-4 py-3 font-black text-blue-600 text-base border-y border-gray-100 bg-blue-50/30">{row.status_n.toLocaleString()}</td>
-                          <td className="px-4 py-3 font-black text-orange-600 text-base border-y border-gray-100 bg-orange-50/30">{row.status_s.toLocaleString()}</td>
-                          <td className="px-4 py-3 font-black text-gray-800 text-lg border-y border-gray-100 bg-gray-50/50">{row.total_sek.toLocaleString()}</td>
-                        </>
+                        <><th className="px-4 py-4 border-b-2 border-gray-200 text-blue-600">Negeri</th><th className="px-4 py-4 border-b-2 border-gray-200 text-orange-600">Swasta</th><th className="px-4 py-4 border-b-2 border-gray-200 text-gray-800">Jumlah Unit</th></>
                       )}
-
+                      
                       {activeView === 'AKREDITASI' && (
-                        <>
-                          <td className="px-2 py-3 font-black text-emerald-600 text-sm border-y border-gray-100 bg-emerald-50/30">{row.akr_a.toLocaleString()}</td>
-                          <td className="px-2 py-3 font-black text-blue-600 text-sm border-y border-gray-100 bg-blue-50/30">{row.akr_b.toLocaleString()}</td>
-                          <td className="px-2 py-3 font-black text-amber-600 text-sm border-y border-gray-100 bg-amber-50/30">{row.akr_c.toLocaleString()}</td>
-                          <td className="px-2 py-3 font-bold text-red-500 text-sm border-y border-gray-100 bg-red-50/20">{row.akr_tt.toLocaleString()}</td>
-                          <td className="px-2 py-3 font-bold text-slate-500 text-sm border-y border-gray-100 bg-slate-50/50">{row.akr_belum.toLocaleString()}</td>
-                          <td className="px-4 py-3 font-black text-gray-800 text-base border-y border-gray-100 bg-gray-50/50">{row.total_sek.toLocaleString()}</td>
-                        </>
+                        <><th className="px-3 py-4 border-b-2 border-gray-200 text-emerald-600">A</th><th className="px-3 py-4 border-b-2 border-gray-200 text-blue-600">B</th><th className="px-3 py-4 border-b-2 border-gray-200 text-amber-600">C</th><th className="px-3 py-4 border-b-2 border-gray-200 text-red-600">TT</th><th className="px-3 py-4 border-b-2 border-gray-200 text-slate-500">Belum</th><th className="px-4 py-4 border-b-2 border-gray-200 text-gray-800">Total Unit</th></>
                       )}
 
                       {activeView === 'ROMBEL' && (
-                        <>
-                          <td className="px-4 py-3 font-black text-blue-600 text-base border-y border-gray-100 bg-blue-50/30">{row.rombel_n.toLocaleString()}</td>
-                          <td className="px-4 py-3 font-black text-orange-600 text-base border-y border-gray-100 bg-orange-50/30">{row.rombel_s.toLocaleString()}</td>
-                          <td className="px-4 py-3 font-black text-gray-800 text-lg border-y border-gray-100 bg-gray-50/50">{row.total_rombel.toLocaleString()}</td>
-                        </>
+                        <><th className="px-4 py-4 border-b-2 border-gray-200 text-blue-600">Rombel Negeri</th><th className="px-4 py-4 border-b-2 border-gray-200 text-orange-600">Rombel Swasta</th><th className="px-4 py-4 border-b-2 border-gray-200 text-gray-800">Total Rombel</th></>
+                      )}
+                    </>
+                  )}
+
+                  {!isSemuaJenjangView && <th className="px-4 py-4 border-b-2 border-gray-200 w-32">Aksi</th>}
+                </tr>
+
+                {/* BARIS KEDUA KHUSUS SEMUA JENJANG */}
+                {isSemuaJenjangView && (
+                  <tr className="text-[10px] font-black uppercase text-gray-500 whitespace-nowrap bg-white">
+                    <th className="px-2 py-2 border-b-2 border-gray-200 text-blue-600 border-l border-r border-gray-100">Negeri</th>
+                    <th className="px-2 py-2 border-b-2 border-gray-200 text-orange-600 border-r border-gray-100">Swasta</th>
+                    <th className="px-2 py-2 border-b-2 border-gray-200 text-blue-600 border-r border-gray-100">Negeri</th>
+                    <th className="px-2 py-2 border-b-2 border-gray-200 text-orange-600 border-r border-gray-100">Swasta</th>
+                    <th className="px-2 py-2 border-b-2 border-gray-200 text-blue-600 border-r border-gray-100">Negeri</th>
+                    <th className="px-2 py-2 border-b-2 border-gray-200 text-orange-600 border-r border-gray-100">Swasta</th>
+                    <th className="px-2 py-2 border-b-2 border-gray-200 text-blue-600 border-r border-gray-100">Negeri</th>
+                    <th className="px-2 py-2 border-b-2 border-gray-200 text-orange-600 border-r border-gray-100">Swasta</th>
+                    <th className="px-2 py-2 border-b-2 border-gray-200 text-blue-600 border-r border-gray-100">Negeri</th>
+                    <th className="px-2 py-2 border-b-2 border-gray-200 text-orange-600 border-r border-gray-100">Swasta</th>
+                    <th className="px-2 py-2 border-b-2 border-gray-200 text-blue-600 border-r border-gray-100">Negeri</th>
+                    <th className="px-2 py-2 border-b-2 border-gray-200 text-orange-600 border-r border-gray-100">Swasta</th>
+                    <th className="px-2 py-2 border-b-2 border-gray-200 text-blue-600 border-r border-gray-100">Negeri</th>
+                    <th className="px-2 py-2 border-b-2 border-gray-200 text-orange-600 border-r border-gray-100">Swasta</th>
+                  </tr>
+                )}
+              </thead>
+              
+              <tbody className="divide-y divide-gray-100">
+                {aggregatedData.map((row, idx) => (
+                  <tr key={idx} className="hover:bg-blue-50/30 transition-colors group">
+                    <td className="px-4 py-3 font-bold text-xs md:text-sm text-gray-500 text-center">{idx + 1}</td>
+                    <td className="px-4 py-3 font-black text-xs md:text-sm text-gray-800 uppercase text-left sticky left-0 bg-white group-hover:bg-blue-50/30 z-10 whitespace-nowrap shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] border-r border-gray-100">{row.wilayah}</td>
+                    
+                    {isSemuaJenjangView ? (
+                      <>
+                        <td className="px-2 py-3 font-bold text-blue-600 border-l border-r border-gray-50">{row.j_paud_n > 0 ? row.j_paud_n.toLocaleString() : '-'}</td>
+                        <td className="px-2 py-3 font-bold text-orange-600 border-r border-gray-50">{row.j_paud_s > 0 ? row.j_paud_s.toLocaleString() : '-'}</td>
+                        <td className="px-2 py-3 font-bold text-blue-600 border-r border-gray-50">{row.j_sd_n > 0 ? row.j_sd_n.toLocaleString() : '-'}</td>
+                        <td className="px-2 py-3 font-bold text-orange-600 border-r border-gray-50">{row.j_sd_s > 0 ? row.j_sd_s.toLocaleString() : '-'}</td>
+                        <td className="px-2 py-3 font-bold text-blue-600 border-r border-gray-50">{row.j_smp_n > 0 ? row.j_smp_n.toLocaleString() : '-'}</td>
+                        <td className="px-2 py-3 font-bold text-orange-600 border-r border-gray-50">{row.j_smp_s > 0 ? row.j_smp_s.toLocaleString() : '-'}</td>
+                        <td className="px-2 py-3 font-bold text-blue-600 border-r border-gray-50">{row.j_sma_n > 0 ? row.j_sma_n.toLocaleString() : '-'}</td>
+                        <td className="px-2 py-3 font-bold text-orange-600 border-r border-gray-50">{row.j_sma_s > 0 ? row.j_sma_s.toLocaleString() : '-'}</td>
+                        <td className="px-2 py-3 font-bold text-blue-600 border-r border-gray-50">{row.j_smk_n > 0 ? row.j_smk_n.toLocaleString() : '-'}</td>
+                        <td className="px-2 py-3 font-bold text-orange-600 border-r border-gray-50">{row.j_smk_s > 0 ? row.j_smk_s.toLocaleString() : '-'}</td>
+                        <td className="px-2 py-3 font-bold text-blue-600 border-r border-gray-50">{row.j_slb_n > 0 ? row.j_slb_n.toLocaleString() : '-'}</td>
+                        <td className="px-2 py-3 font-bold text-orange-600 border-r border-gray-50">{row.j_slb_s > 0 ? row.j_slb_s.toLocaleString() : '-'}</td>
+                        <td className="px-2 py-3 font-bold text-blue-600 border-r border-gray-50">{row.j_nonformal_n > 0 ? row.j_nonformal_n.toLocaleString() : '-'}</td>
+                        <td className="px-2 py-3 font-bold text-orange-600 border-r border-gray-50">{row.j_nonformal_s > 0 ? row.j_nonformal_s.toLocaleString() : '-'}</td>
+                        
+                        <td className="px-4 py-3 font-black text-gray-900 bg-gray-50 group-hover:bg-gray-100 transition-colors border-l border-gray-200">{row.total_sek.toLocaleString()}</td>
+                      </>
+                    ) : (
+                      <>
+                        {activeView === 'STATUS' && (
+                          <>
+                            <td className="px-4 py-3 font-bold text-blue-600">{row.status_n.toLocaleString()}</td>
+                            <td className="px-4 py-3 font-bold text-orange-600">{row.status_s.toLocaleString()}</td>
+                            <td className="px-4 py-3 font-black text-gray-800 bg-gray-50">{row.total_sek.toLocaleString()}</td>
+                          </>
+                        )}
+
+                        {activeView === 'AKREDITASI' && (
+                          <>
+                            <td className="px-3 py-3 font-bold text-emerald-600">{row.akr_a.toLocaleString()}</td>
+                            <td className="px-3 py-3 font-bold text-blue-600">{row.akr_b.toLocaleString()}</td>
+                            <td className="px-3 py-3 font-bold text-amber-600">{row.akr_c.toLocaleString()}</td>
+                            <td className="px-3 py-3 font-bold text-red-500">{row.akr_tt.toLocaleString()}</td>
+                            <td className="px-3 py-3 font-bold text-slate-500">{row.akr_belum.toLocaleString()}</td>
+                            <td className="px-4 py-3 font-black text-gray-800 bg-gray-50">{row.total_sek.toLocaleString()}</td>
+                          </>
+                        )}
+
+                        {activeView === 'ROMBEL' && (
+                          <>
+                            <td className="px-4 py-3 font-bold text-blue-600">{row.rombel_n.toLocaleString()}</td>
+                            <td className="px-4 py-3 font-bold text-orange-600">{row.rombel_s.toLocaleString()}</td>
+                            <td className="px-4 py-3 font-black text-gray-800 bg-gray-50">{row.total_rombel.toLocaleString()}</td>
+                          </>
+                        )}
+
+                        <td className="px-4 py-3 border-l border-gray-100">
+                           <button onClick={() => handleBukaRincian(row.wilayah)} className="flex items-center justify-center gap-1.5 bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-black uppercase hover:bg-blue-600 hover:text-white transition-colors mx-auto">
+                             <Eye size={14} /> Rincian
+                           </button>
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+              
+              <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
+                <tr className="bg-gray-100 text-center font-black uppercase text-[10px] md:text-xs border-t-2 border-gray-300">
+                  <td className="px-4 py-4 border-t-2 border-gray-300"></td>
+                  <td className="px-4 py-4 text-left text-gray-900 border-t-2 border-gray-300 sticky left-0 bg-gray-100 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] border-r">TOTAL KALBAR</td>
+                  
+                  {isSemuaJenjangView ? (
+                    <>
+                       <td className="px-2 py-4 border-t-2 border-gray-300 border-l border-gray-200 text-blue-700">{grandTotals.j_paud_n.toLocaleString()}</td>
+                       <td className="px-2 py-4 border-t-2 border-gray-300 border-r border-gray-200 text-orange-700">{grandTotals.j_paud_s.toLocaleString()}</td>
+                       
+                       <td className="px-2 py-4 border-t-2 border-gray-300 text-blue-700">{grandTotals.j_sd_n.toLocaleString()}</td>
+                       <td className="px-2 py-4 border-t-2 border-gray-300 border-r border-gray-200 text-orange-700">{grandTotals.j_sd_s.toLocaleString()}</td>
+                       
+                       <td className="px-2 py-4 border-t-2 border-gray-300 text-blue-700">{grandTotals.j_smp_n.toLocaleString()}</td>
+                       <td className="px-2 py-4 border-t-2 border-gray-300 border-r border-gray-200 text-orange-700">{grandTotals.j_smp_s.toLocaleString()}</td>
+                       
+                       <td className="px-2 py-4 border-t-2 border-gray-300 text-blue-700">{grandTotals.j_sma_n.toLocaleString()}</td>
+                       <td className="px-2 py-4 border-t-2 border-gray-300 border-r border-gray-200 text-orange-700">{grandTotals.j_sma_s.toLocaleString()}</td>
+                       
+                       <td className="px-2 py-4 border-t-2 border-gray-300 text-blue-700">{grandTotals.j_smk_n.toLocaleString()}</td>
+                       <td className="px-2 py-4 border-t-2 border-gray-300 border-r border-gray-200 text-orange-700">{grandTotals.j_smk_s.toLocaleString()}</td>
+                       
+                       <td className="px-2 py-4 border-t-2 border-gray-300 text-blue-700">{grandTotals.j_slb_n.toLocaleString()}</td>
+                       <td className="px-2 py-4 border-t-2 border-gray-300 border-r border-gray-200 text-orange-700">{grandTotals.j_slb_s.toLocaleString()}</td>
+                       
+                       <td className="px-2 py-4 border-t-2 border-gray-300 text-blue-700">{grandTotals.j_nonformal_n.toLocaleString()}</td>
+                       <td className="px-2 py-4 border-t-2 border-gray-300 border-r border-gray-200 text-orange-700">{grandTotals.j_nonformal_s.toLocaleString()}</td>
+                       
+                       <td className="px-4 py-4 border-t-2 border-gray-300 text-gray-900 bg-gray-200/50 text-sm">{grandTotals.total_sek.toLocaleString()}</td>
+                    </>
+                  ) : (
+                    <>
+                      {activeView === 'STATUS' && (
+                        <><td className="px-4 py-4 text-blue-700 border-t-2 border-gray-300">{grandTotals.status_n.toLocaleString()}</td><td className="px-4 py-4 text-orange-700 border-t-2 border-gray-300">{grandTotals.status_s.toLocaleString()}</td><td className="px-4 py-4 text-gray-900 border-t-2 border-gray-300 text-sm bg-gray-200/50">{grandTotals.total_sek.toLocaleString()}</td></>
                       )}
 
-                      <td className="px-4 py-3 rounded-r-2xl border-y border-r border-gray-100">
-                         <button onClick={() => handleBukaRincian(row.wilayah)} className="flex items-center justify-center gap-2 bg-blue-50 text-blue-600 px-4 py-1.5 rounded-xl text-[10px] font-black uppercase hover:bg-blue-600 hover:text-white transition-colors mx-auto">
-                           <Eye size={14} /> Rincian
+                      {activeView === 'AKREDITASI' && (
+                        <><td className="px-3 py-4 text-emerald-700 border-t-2 border-gray-300">{grandTotals.akr_a.toLocaleString()}</td><td className="px-3 py-4 text-blue-700 border-t-2 border-gray-300">{grandTotals.akr_b.toLocaleString()}</td><td className="px-3 py-4 text-amber-700 border-t-2 border-gray-300">{grandTotals.akr_c.toLocaleString()}</td><td className="px-3 py-4 text-red-700 border-t-2 border-gray-300">{grandTotals.akr_tt.toLocaleString()}</td><td className="px-3 py-4 text-slate-700 border-t-2 border-gray-300">{grandTotals.akr_belum.toLocaleString()}</td><td className="px-4 py-4 text-gray-900 border-t-2 border-gray-300 text-sm bg-gray-200/50">{grandTotals.total_sek.toLocaleString()}</td></>
+                      )}
+
+                      {activeView === 'ROMBEL' && (
+                        <><td className="px-4 py-4 text-blue-700 border-t-2 border-gray-300">{grandTotals.rombel_n.toLocaleString()}</td><td className="px-4 py-4 text-orange-700 border-t-2 border-gray-300">{grandTotals.rombel_s.toLocaleString()}</td><td className="px-4 py-4 text-gray-900 border-t-2 border-gray-300 text-sm bg-gray-200/50">{grandTotals.total_rombel.toLocaleString()}</td></>
+                      )}
+
+                      <td className="px-4 py-4 border-t-2 border-gray-300 border-l border-gray-200">
+                         <button onClick={() => handleBukaRincian('SEMUA')} className="flex items-center justify-center gap-1.5 bg-gray-800 text-white px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-black uppercase hover:bg-gray-900 transition-colors mx-auto shadow-md">
+                           <Search size={14} /> Semua
                          </button>
                       </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
-                  <tr className="bg-gray-100 text-center font-black uppercase text-xs border-t-2 border-gray-300">
-                    <td className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-gray-300 text-gray-900">TOTAL KALIMANTAN BARAT</td>
-                    
-                    {activeView === 'STATUS' && (
-                      <><td className="px-4 py-4 text-blue-700 border-y border-gray-300">{grandTotals.status_n.toLocaleString()}</td><td className="px-4 py-4 text-orange-700 border-y border-gray-300">{grandTotals.status_s.toLocaleString()}</td><td className="px-4 py-4 text-gray-900 border-y border-gray-300 text-base">{grandTotals.total_sek.toLocaleString()}</td></>
-                    )}
-
-                    {activeView === 'AKREDITASI' && (
-                      <><td className="px-2 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.akr_a.toLocaleString()}</td><td className="px-2 py-4 text-blue-700 border-y border-gray-300">{grandTotals.akr_b.toLocaleString()}</td><td className="px-2 py-4 text-amber-700 border-y border-gray-300">{grandTotals.akr_c.toLocaleString()}</td><td className="px-2 py-4 text-red-700 border-y border-gray-300">{grandTotals.akr_tt.toLocaleString()}</td><td className="px-2 py-4 text-slate-700 border-y border-gray-300">{grandTotals.akr_belum.toLocaleString()}</td><td className="px-4 py-4 text-gray-900 border-y border-gray-300 text-base">{grandTotals.total_sek.toLocaleString()}</td></>
-                    )}
-
-                    {activeView === 'ROMBEL' && (
-                      <><td className="px-4 py-4 text-blue-700 border-y border-gray-300">{grandTotals.rombel_n.toLocaleString()}</td><td className="px-4 py-4 text-orange-700 border-y border-gray-300">{grandTotals.rombel_s.toLocaleString()}</td><td className="px-4 py-4 text-gray-900 border-y border-gray-300 text-base">{grandTotals.total_rombel.toLocaleString()}</td></>
-                    )}
-
-                    <td className="px-4 py-4 rounded-r-2xl border-y border-r border-gray-300">
-                       <button onClick={() => handleBukaRincian('SEMUA')} className="flex items-center justify-center gap-2 bg-gray-800 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-gray-900 transition-colors mx-auto shadow-md">
-                         <Search size={14} /> Semua
-                       </button>
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-              <div className="mt-4 px-2 text-right text-xs font-bold italic text-gray-400 pb-2">
-                 Sumber : Data Dapodik Update Pada Tanggal : {displayLastUpdated}
-              </div>
-            </div>
+                    </>
+                  )}
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div className="bg-gray-50 px-4 py-3 text-right text-xs font-bold italic text-gray-400 border-t border-gray-200">
+              Sumber : Data Dapodik Update Pada Tanggal : {displayLastUpdated}
           </div>
         </div>
-
-        {/* KOLOM KANAN: PREMIUM PIE CHART & KARTU REKAP */}
-        <div className="lg:w-1/3 flex flex-col bg-white border-l border-gray-100 relative overflow-y-auto custom-scrollbar">
-          
-          <div className="text-center w-full px-4 pt-6 pb-2 shrink-0">
-            <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">Proporsi {activeView}</h2>
-            <p className="text-sm font-bold text-gray-400 uppercase tracking-widest mt-1">
-              Jenjang {activeLabel}
-            </p>
-          </div>
-
-          <div className="flex-1 flex items-center justify-center min-h-[250px] relative px-4 shrink-0">
-             <PremiumPieChart segments={pieSegments} total={pieTotal} />
-          </div>
-
-          <div className="px-6 pb-8 pt-4 w-full shrink-0">
-             {activeView === 'STATUS' && (
-                <div className="flex flex-col gap-3">
-                   <StatCard label="Sekolah Negeri" value={grandTotals.status_n} percentage={pieTotal > 0 ? ((grandTotals.status_n/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
-                   <StatCard label="Sekolah Swasta" value={grandTotals.status_s} percentage={pieTotal > 0 ? ((grandTotals.status_s/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.orange} />
-                </div>
-             )}
-
-             {activeView === 'AKREDITASI' && (
-                <div className="flex flex-col gap-3">
-                  <div className="grid grid-cols-2 gap-3">
-                     <StatCard label="Akreditasi A" value={grandTotals.akr_a} percentage={pieTotal > 0 ? ((grandTotals.akr_a/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.emerald} />
-                     <StatCard label="Akreditasi B" value={grandTotals.akr_b} percentage={pieTotal > 0 ? ((grandTotals.akr_b/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
-                  </div>
-                  <StatCard label="Akreditasi C" value={grandTotals.akr_c} percentage={pieTotal > 0 ? ((grandTotals.akr_c/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.amber} />
-                  <div className="grid grid-cols-2 gap-3">
-                     <StatCard label="TT" value={grandTotals.akr_tt} percentage={pieTotal > 0 ? ((grandTotals.akr_tt/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.red} />
-                     <StatCard label="Belum" value={grandTotals.akr_belum} percentage={pieTotal > 0 ? ((grandTotals.akr_belum/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.slate} />
-                  </div>
-                </div>
-             )}
-
-             {activeView === 'ROMBEL' && (
-                <div className="flex flex-col gap-3">
-                   <StatCard label="Rombel Sekolah Negeri" value={grandTotals.rombel_n} percentage={pieTotal > 0 ? ((grandTotals.rombel_n/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
-                   <StatCard label="Rombel Sekolah Swasta" value={grandTotals.rombel_s} percentage={pieTotal > 0 ? ((grandTotals.rombel_s/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.orange} />
-                </div>
-             )}
-          </div>
-
-        </div>
-
       </div>
 
       {/* KONDISIONAL RENDER MODAL BERDASARKAN ACTIVE VIEW */}
-      {activeView === 'STATUS' && (
+      {!isSemuaJenjangView && activeView === 'STATUS' && (
         <RincianStatusSekolah 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
@@ -803,7 +933,7 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
         />
       )}
 
-      {activeView === 'AKREDITASI' && (
+      {!isSemuaJenjangView && activeView === 'AKREDITASI' && (
         <RincianAkreditasiSekolah 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}
@@ -814,7 +944,7 @@ export default function DapodikSekolah({ selectedYear = '2026' }) {
         />
       )}
 
-      {activeView === 'ROMBEL' && (
+      {!isSemuaJenjangView && activeView === 'ROMBEL' && (
         <RincianRombelSekolah 
           isOpen={modalOpen} 
           onClose={() => setModalOpen(false)}

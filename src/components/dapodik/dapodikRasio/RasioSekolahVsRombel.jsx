@@ -3,10 +3,11 @@ import { MapPin, Layers, Activity, Search, Download, Loader2, School, Graduation
 import { db } from '../../../firebase/config';
 import { collection, getDocs, getDoc, doc, query, where, setDoc } from 'firebase/firestore';
 import ExcelJS from 'exceljs';
+import { PDFDownloadLink } from '@react-pdf/renderer';
+import LaporanEksekutifPDF from '../../../utils/LaporanEksekutifPDF';
 
-// --- TAMBAHAN LIBRARY UNTUK AI & CETAK PDF ---
+// --- TAMBAHAN LIBRARY UNTUK AI ---
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import html2pdf from 'html2pdf.js';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 
 // Inisialisasi API Key Gemini
@@ -478,19 +479,6 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
     }
   };
 
-  const handleDownloadPDF = () => {
-    const element = document.getElementById('pdf-ai-content');
-    const opt = {
-      margin:       0.4,
-      filename:     `Laporan_AI_Rasio_Sekolah_Vs_Rombel_${filterWilayah}_${selectedYear}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2, useCORS: true },
-      jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
-    };
-
-    html2pdf().set(opt).from(element).save();
-  };
-
   // Format helper untuk tanggal laporan
   const formatAiDate = (isoString) => {
     if (!isoString) return '';
@@ -826,10 +814,33 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
                     <RefreshCw size={16} className={isAnalyzing ? 'animate-spin' : ''} />
                   </button>
                 )}
+                {/* --- TOMBOL UNDUH PDF DENGAN REACT-PDF --- */}
                 {aiResult && (
-                  <button onClick={handleDownloadPDF} className="flex items-center gap-2 bg-rose-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-rose-700 transition-colors shadow-md">
-                    <FileText size={16} /> Unduh PDF
-                  </button>
+                  <PDFDownloadLink
+                    document={
+                      <LaporanEksekutifPDF
+                        judulLaporan="Analisa Rasio Sekolah VS Rombel"
+                        deskripsiLaporan={`Tahun ${selectedYear} - Analisa Ketersediaan Ruang Kelas Berdasarkan Standar Permendikdasmen`}
+                        tahun={selectedYear}
+                        wilayah={filterWilayah}
+                        kategori={activeKategori}
+                        dataAI={aiResult}
+                        chartData={tab1Data.map(d => ({ label: d.jenjang, v1: d.total_sek, v2: d.total_rombel }))}
+                        label1="Total Sekolah"
+                        label2="Total Rombongan Belajar"
+                      />
+                    }
+                    fileName={`Laporan_AI_Rasio_Sekolah_Vs_Rombel_${filterWilayah}_${selectedYear}.pdf`}
+                    className="flex items-center gap-2 bg-rose-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-rose-700 transition-colors shadow-md disabled:opacity-70 disabled:cursor-not-allowed"
+                  >
+                    {({ loading }) =>
+                      loading ? (
+                        <><Loader2 size={16} className="animate-spin" /> Memproses...</>
+                      ) : (
+                        <><FileText size={16} /> Unduh PDF</>
+                      )
+                    }
+                  </PDFDownloadLink>
                 )}
                 <button onClick={() => setIsModalOpen(false)} className="p-2 bg-white rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all shadow-sm">
                   <X size={24} />
@@ -837,7 +848,7 @@ export default function RasioSekolahVsRombel({ selectedYear }) {
               </div>
             </div>
 
-            {/* Body Modal AI yang Bisa Di-scroll & Di-print ke PDF */}
+            {/* Body Modal AI yang Bisa Di-scroll */}
             <div className="p-8 overflow-y-auto flex-1 bg-gray-50/50" id="pdf-ai-content">
               {isAnalyzing ? (
                 <div className="flex flex-col items-center justify-center h-64 opacity-70">

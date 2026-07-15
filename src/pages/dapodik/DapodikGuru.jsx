@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import { db } from '../../firebase/config';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 
 // IMPORT SELURUH KOMPONEN MODAL RINCIAN
 import RincianStatusSekolahGuru from '../../components/dapodik/dapodikGuru/RincianStatusSekolahGuru';
@@ -256,34 +256,36 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
       const cacheKey = `guru_agregasi_v1_${selectedYear}`;
       
       try {
-        const cachedData = await getFromCache(cacheKey);
-        // ANTI-CRASH: Cek apakah cachedData adalah Array atau Object (terhindar dari error Undefined Map)
-        if (cachedData) {
-          if (Array.isArray(cachedData)) {
-             setDataGuru(cachedData); 
-             setFetchedDate(''); 
-          } else {
-             setDataGuru(cachedData.data || []); 
-             setFetchedDate(cachedData.date || '');
-          }
-          setLoading(false);
-          return;
-        }
-
-        // Ambil info master summary untuk tracking tanggal update
-        const summarySnap = await getDocs(query(collection(db, 'guru_agregasi'), where('__name__', '==', `summary_${selectedYear}`)));
+        // 1. Tarik Dokumen Summary dari Firebase untuk dapatkan tanggal ter-update
+        const summaryRef = doc(db, 'guru_agregasi', `summary_${selectedYear}`);
+        const summarySnap = await getDoc(summaryRef);
+        
         let lastUpdatedStr = '';
-        if (!summarySnap.empty) {
-          const docData = summarySnap.docs[0].data();
+        if (summarySnap.exists()) {
+          const docData = summarySnap.data();
           if (docData.last_updated) {
             const d = new Date(docData.last_updated);
             const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
             lastUpdatedStr = `${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()} Pukul ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-            setFetchedDate(lastUpdatedStr);
+            setFetchedDate(lastUpdatedStr); // Langsung set tanggal ke state
           }
         }
 
-        // Fetch semua chunks agregasi
+        // 2. Cek Cache Lokal untuk Data Tabel
+        const cachedData = await getFromCache(cacheKey);
+        
+        // ANTI-CRASH: Cek apakah cachedData adalah Array atau Object
+        if (cachedData) {
+          if (Array.isArray(cachedData)) {
+             setDataGuru(cachedData); 
+          } else {
+             setDataGuru(cachedData.data || []); 
+          }
+          setLoading(false);
+          return; // Berhenti di sini, tidak perlu unduh chunk lagi
+        }
+
+        // 3. Jika tidak ada Cache, fetch semua chunks agregasi
         const qChunks = query(collection(db, 'guru_agregasi'), where('tahun_data', '==', selectedYear));
         const snapChunks = await getDocs(qChunks);
         
@@ -296,6 +298,7 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
         });
 
         setDataGuru(allData);
+        // Simpan data beserta tanggal update terbarunya ke cache
         await saveToCache(cacheKey, { data: allData, date: lastUpdatedStr });
 
       } catch (e) {

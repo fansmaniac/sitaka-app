@@ -18,10 +18,11 @@ import {
 import { db } from '../../../firebase/config';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import ExcelJS from 'exceljs';
+import { PDFDownloadLink } from '@react-pdf/renderer';
+import LaporanEksekutifPDF from '../../../utils/LaporanEksekutifPDF';
 
-// --- TAMBAHAN LIBRARY UNTUK AI & CETAK PDF ---
+// --- TAMBAHAN LIBRARY UNTUK AI ---
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import html2pdf from 'html2pdf.js';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 
 // Inisialisasi API Key Gemini
@@ -456,17 +457,12 @@ export default function RasioRombelVsGuru({ selectedYear }) {
     }
   };
 
-  const handleDownloadPDF = () => {
-    const element = document.getElementById('pdf-ai-content');
-    const opt = {
-      margin:       0.4,
-      filename:     `Laporan_AI_Rasio_Rombel_Vs_Guru_${filterWilayah}_${selectedYear}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2, useCORS: true },
-      jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
-    };
-
-    html2pdf().set(opt).from(element).save();
+  // Format helper untuk tanggal laporan
+  const formatAiDate = (isoString) => {
+    if (!isoString) return '';
+    const d = new Date(isoString);
+    const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+    return `${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()} - ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')} WIB`;
   };
 
   if (loading) {
@@ -719,11 +715,36 @@ export default function RasioRombelVsGuru({ selectedYear }) {
                     <RefreshCw size={16} className={isAnalyzing ? 'animate-spin' : ''} />
                   </button>
                 )}
+                
+                {/* --- UPDATE: TOMBOL UNDUH PDF DENGAN REACT-PDF --- */}
                 {aiResult && (
-                  <button onClick={handleDownloadPDF} className="flex items-center gap-2 bg-purple-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-purple-700 transition-colors shadow-md">
-                    <FileText size={16} /> Unduh PDF
-                  </button>
+                  <PDFDownloadLink
+                    document={
+                      <LaporanEksekutifPDF
+                        judulLaporan="Analisa Rasio Rombel VS Guru"
+                        deskripsiLaporan={`Tahun ${selectedYear} - Analisa Ketersediaan Tenaga Pendidik Terhadap Rombongan Belajar`}
+                        tahun={selectedYear}
+                        wilayah={filterWilayah}
+                        kategori={activeKategori}
+                        dataAI={aiResult}
+                        chartData={tab1Data.map(d => ({ label: d.jenjang, v1: d.total_rombel, v2: d.total_guru }))}
+                        label1="Total Rombongan Belajar"
+                        label2="Total Tenaga Pendidik (Guru)"
+                      />
+                    }
+                    fileName={`Laporan_AI_Rasio_Rombel_Vs_Guru_${filterWilayah}_${selectedYear}.pdf`}
+                    className="flex items-center gap-2 bg-purple-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-purple-700 transition-colors shadow-md disabled:opacity-70 disabled:cursor-not-allowed"
+                  >
+                    {({ loading }) =>
+                      loading ? (
+                        <><Loader2 size={16} className="animate-spin" /> Memproses...</>
+                      ) : (
+                        <><FileText size={16} /> Unduh PDF</>
+                      )
+                    }
+                  </PDFDownloadLink>
                 )}
+
                 <button onClick={() => setIsModalOpen(false)} className="p-2 bg-white rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all shadow-sm">
                   <X size={24} />
                 </button>
@@ -834,7 +855,7 @@ export default function RasioRombelVsGuru({ selectedYear }) {
                   <div className="mt-8 pt-4 border-t border-gray-200 flex justify-between items-end text-xs font-bold text-gray-400">
                     <div>
                         <p>Digenerasi oleh: Gemini AI - SITAKA Engine</p>
-                        {aiLastUpdated && <p className="text-[10px] opacity-70 mt-1">Terakhir dianalisa: {aiLastUpdated}</p>}
+                        {aiLastUpdated && <p className="text-[10px] opacity-70 mt-1">Terakhir dianalisa: {formatAiDate(aiLastUpdated)}</p>}
                     </div>
                     <p>Dicetak pada: {new Date().toLocaleDateString('id-ID')}</p>
                   </div>

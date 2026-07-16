@@ -27,10 +27,9 @@ const CACHE_EXPIRY_HOURS = 12;
 
 const initDB = () => {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 2); // VERSI 2 UNTUK MEMBERSIHKAN CACHE LAMA
+    const request = indexedDB.open(DB_NAME, 2); 
     request.onupgradeneeded = (e) => {
         const db = e.target.result;
-        // ANTI-CRASH: Cek dulu apakah nama store sudah ada
         if (!db.objectStoreNames.contains(STORE_NAME)) {
             db.createObjectStore(STORE_NAME);
         }
@@ -75,7 +74,7 @@ const getFromCache = async (key) => {
 };
 
 // =====================================================================
-// UTILITY FUNCTIONS
+// UTILITY FUNCTIONS & CONFIG
 // =====================================================================
 const getKabupatenRank = (kabName) => {
   const name = String(kabName).toUpperCase();
@@ -96,7 +95,6 @@ const getKabupatenRank = (kabName) => {
   return 99;
 };
 
-// Hitung Umur Real-time
 const calculateAge = (birthDateString) => {
   if (!birthDateString || birthDateString === '-') return null;
   const today = new Date();
@@ -110,9 +108,6 @@ const calculateAge = (birthDateString) => {
   return age;
 };
 
-// =====================================================================
-// PENGELOMPOKAN KATEGORI DROPDOWN
-// =====================================================================
 const KATEGORI_MAPPING = {
   'PAUD': ['TK', 'KB', 'TPA', 'SPS'],
   'PENDIDIKAN DASAR': ['SD', 'SPK SD', 'SMP', 'SPK SMP'],
@@ -129,6 +124,70 @@ const SEMUA_SUBTABS_MAPPING = {
   'SMK': ['SMK'],
   'SLB (Inklusif)': ['SLB', 'SDLB', 'SMPLB', 'SMALB'],
   'NON FORMAL': ['PKBM', 'SKB']
+};
+
+const JENJANG_LABELS = [
+  {id: 'PAUD', label: 'PAUD'},
+  {id: 'SD', label: 'SD'},
+  {id: 'SMP', label: 'SMP'},
+  {id: 'SMA', label: 'SMA'},
+  {id: 'SMK', label: 'SMK'},
+  {id: 'SLB', label: 'SLB'},
+  {id: 'NF', label: 'Non Formal'}
+];
+
+const BASE_KEYS = [
+  'status_n', 'status_s', 'gen_l', 'gen_p', 
+  'kual_s1', 'kual_s2', 'kual_kurang', 'kual_lain', 
+  'peg_pns', 'peg_pppk', 'peg_gty', 'peg_honor', 'peg_lain', 
+  'sert_sudah', 'sert_belum', 
+  'usia_30', 'usia_40', 'usia_50', 'usia_51', 
+  'pens_5', 'pens_4', 'pens_3', 'pens_2', 'pens_1'
+];
+
+// Helper untuk Render Kolom Dinamis berdasarkan View
+const getColumnsForView = (viewId, prefix = '') => {
+  switch(viewId) {
+      case 'STATUS': return [
+          {key: `${prefix}status_n`, label: 'Negeri', color: 'text-blue-600'},
+          {key: `${prefix}status_s`, label: 'Swasta', color: 'text-orange-600'}
+      ];
+      case 'GENDER': return [
+          {key: `${prefix}gen_l`, label: 'Laki-laki', color: 'text-blue-600'},
+          {key: `${prefix}gen_p`, label: 'Perempuan', color: 'text-pink-600'}
+      ];
+      case 'KUALIFIKASI': return [
+          {key: `${prefix}kual_s1`, label: 'S1/D4', color: 'text-emerald-600'},
+          {key: `${prefix}kual_s2`, label: 'S2/S3', color: 'text-blue-600'},
+          {key: `${prefix}kual_kurang`, label: '< S1', color: 'text-amber-600'},
+          {key: `${prefix}kual_lain`, label: 'Lainnya', color: 'text-slate-500'}
+      ];
+      case 'KEPEGAWAIAN': return [
+          {key: `${prefix}peg_pns`, label: 'PNS', color: 'text-blue-600'},
+          {key: `${prefix}peg_pppk`, label: 'PPPK', color: 'text-emerald-600'},
+          {key: `${prefix}peg_gty`, label: 'GTY/PTY', color: 'text-orange-600'},
+          {key: `${prefix}peg_honor`, label: 'Honor', color: 'text-red-600'},
+          {key: `${prefix}peg_lain`, label: 'Lainnya', color: 'text-slate-500'}
+      ];
+      case 'SERTIFIKASI': return [
+          {key: `${prefix}sert_sudah`, label: 'Sertifikasi', color: 'text-emerald-600'},
+          {key: `${prefix}sert_belum`, label: 'Belum', color: 'text-red-600'}
+      ];
+      case 'USIA': return [
+          {key: `${prefix}usia_30`, label: '<= 30', color: 'text-emerald-600'},
+          {key: `${prefix}usia_40`, label: '31-40', color: 'text-blue-600'},
+          {key: `${prefix}usia_50`, label: '41-50', color: 'text-amber-600'},
+          {key: `${prefix}usia_51`, label: '>= 51', color: 'text-red-600'}
+      ];
+      case 'PENSIUN': return [
+          {key: `${prefix}pens_5`, label: 'Usia 56', color: 'text-emerald-600'},
+          {key: `${prefix}pens_4`, label: 'Usia 57', color: 'text-blue-600'},
+          {key: `${prefix}pens_3`, label: 'Usia 58', color: 'text-amber-600'},
+          {key: `${prefix}pens_2`, label: 'Usia 59', color: 'text-orange-600'},
+          {key: `${prefix}pens_1`, label: 'Usia 60', color: 'text-red-600'}
+      ];
+      default: return [];
+  }
 };
 
 // =====================================================================
@@ -194,7 +253,7 @@ const PremiumPieChart = ({ segments, total }) => {
   }).filter(Boolean);
 
   return (
-    <div className="w-full max-w-[280px] aspect-square relative flex items-center justify-center mx-auto drop-shadow-xl hover:scale-105 transition-transform duration-300">
+    <div className="w-full max-w-[280px] md:max-w-[320px] aspect-square relative flex items-center justify-center mx-auto drop-shadow-xl hover:scale-105 transition-transform duration-300">
       <svg viewBox="-1.8 -1.5 3.6 3" className="w-full h-full max-h-[300px] overflow-visible drop-shadow-xl">
         <g transform="rotate(-90)">
           {chartData.map((data) => (
@@ -212,8 +271,8 @@ const PremiumPieChart = ({ segments, total }) => {
               <circle cx={data.lineEndX} cy={data.lineEndY} r="0.03" fill={data.color} />
               <g transform={`rotate(90 ${data.textX} ${data.lineEndY})`}>
                 <text x={data.textX} y={data.lineEndY - 0.04} textAnchor={data.textAnchor} fill={data.color} className="font-black text-[0.14px] uppercase">{data.percentage}%</text>
-                <text x={data.textX} y={data.lineEndY + 0.12} textAnchor={data.textAnchor} fill="#4B5563" className="font-bold text-[0.09px] tracking-widest">
-                  {data.name}
+                <text x={data.textX} y={data.lineEndY + 0.12} textAnchor={data.textAnchor} fill="#4B5563" className="font-bold text-[0.1px] tracking-widest">
+                  {data.name} ({data.value.toLocaleString()})
                 </text>
               </g>
             </g>
@@ -247,8 +306,10 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
   const [selectedWilayah, setSelectedWilayah] = useState('SEMUA');
   const [fetchedDate, setFetchedDate] = useState('');
 
+  const isSemuaJenjangView = activeKategori === 'SEMUA' && activeBentuk === 'SEMUA';
+
   // -------------------------------------------------------------------------
-  // MENGAMBIL DATA DARI KOLEKSI "guru_agregasi" YANG SUDAH DI-COMPRESS
+  // MENGAMBIL DATA DARI KOLEKSI "guru_agregasi"
   // -------------------------------------------------------------------------
   useEffect(() => {
     const fetchDataAgregasi = async () => {
@@ -256,7 +317,6 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
       const cacheKey = `guru_agregasi_v1_${selectedYear}`;
       
       try {
-        // 1. Tarik Dokumen Summary dari Firebase untuk dapatkan tanggal ter-update
         const summaryRef = doc(db, 'guru_agregasi', `summary_${selectedYear}`);
         const summarySnap = await getDoc(summaryRef);
         
@@ -267,14 +327,11 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
             const d = new Date(docData.last_updated);
             const monthNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
             lastUpdatedStr = `${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()} Pukul ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-            setFetchedDate(lastUpdatedStr); // Langsung set tanggal ke state
+            setFetchedDate(lastUpdatedStr); 
           }
         }
 
-        // 2. Cek Cache Lokal untuk Data Tabel
         const cachedData = await getFromCache(cacheKey);
-        
-        // ANTI-CRASH: Cek apakah cachedData adalah Array atau Object
         if (cachedData) {
           if (Array.isArray(cachedData)) {
              setDataGuru(cachedData); 
@@ -282,10 +339,9 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
              setDataGuru(cachedData.data || []); 
           }
           setLoading(false);
-          return; // Berhenti di sini, tidak perlu unduh chunk lagi
+          return; 
         }
 
-        // 3. Jika tidak ada Cache, fetch semua chunks agregasi
         const qChunks = query(collection(db, 'guru_agregasi'), where('tahun_data', '==', selectedYear));
         const snapChunks = await getDocs(qChunks);
         
@@ -298,12 +354,11 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
         });
 
         setDataGuru(allData);
-        // Simpan data beserta tanggal update terbarunya ke cache
         await saveToCache(cacheKey, { data: allData, date: lastUpdatedStr });
 
       } catch (e) {
         console.error("Gagal menarik data guru agregasi", e);
-        setDataGuru([]); // Failsafe agar tidak map dari undefined
+        setDataGuru([]); 
       } finally {
         setLoading(false);
       }
@@ -313,8 +368,6 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
   }, [selectedYear]);
 
   const displayLastUpdated = fetchedDate || 'Belum Di-Kalkulasi oleh Admin';
-
-  // ANTI-CRASH MEMO: Selalu kembalikan Array kosong jika undefined
   const safeDataGuru = Array.isArray(dataGuru) ? dataGuru : [];
 
   const listKabupaten = useMemo(() => {
@@ -324,10 +377,12 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
 
   const activeLabel = activeKategori === 'SEMUA' ? (activeBentuk === 'SEMUA' ? 'SEMUA JENJANG' : activeBentuk) : (activeBentuk === 'SEMUA' ? activeKategori : activeBentuk);
 
+  // -------------------------------------------------------------------------
+  // ENGINE AGREGASI DATA (DI-UPGRADE UNTUK MENDUKUNG NESTED HEADERS)
+  // -------------------------------------------------------------------------
   const aggregatedData = useMemo(() => {
     const filteredData = safeDataGuru.filter(item => {
       const bentukDb = String(item.bentuk_pendidikan || '').trim().toUpperCase();
-      
       if (activeKategori === 'SEMUA') {
          if (activeBentuk !== 'SEMUA') {
             const allowed = SEMUA_SUBTABS_MAPPING[activeBentuk] || [];
@@ -346,17 +401,15 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
 
     const mapAgg = new Map();
     listKabupaten.forEach(kab => {
-      mapAgg.set(kab, { 
-        wilayah: kab, 
-        status_n: 0, status_s: 0, 
-        gen_l: 0, gen_p: 0,
-        kual_s1: 0, kual_s2: 0, kual_kurang: 0, kual_lain: 0,
-        peg_pns: 0, peg_pppk: 0, peg_gty: 0, peg_honor: 0, peg_lain: 0,
-        sert_sudah: 0, sert_belum: 0,
-        usia_30: 0, usia_40: 0, usia_50: 0, usia_51: 0,
-        pens_5: 0, pens_4: 0, pens_3: 0, pens_2: 0, pens_1: 0,
-        total: 0 
+      const row = { wilayah: kab, total: 0 };
+      // Init base keys
+      BASE_KEYS.forEach(k => row[k] = 0);
+      // Init jenjang specific keys
+      JENJANG_LABELS.forEach(j => {
+          row[`${j.id}_total`] = 0;
+          BASE_KEYS.forEach(k => row[`${j.id}_${k}`] = 0);
       });
+      mapAgg.set(kab, row);
     });
 
     filteredData.forEach(item => {
@@ -364,70 +417,80 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
        if (!mapAgg.has(kab)) return; 
        const row = mapAgg.get(kab);
 
+       const bentukDb = String(item.bentuk_pendidikan || '').trim().toUpperCase();
+       let jGroup = '';
+       if (KATEGORI_MAPPING['PAUD'].includes(bentukDb)) jGroup = 'PAUD';
+       else if (['SD', 'SPK SD'].includes(bentukDb)) jGroup = 'SD';
+       else if (['SMP', 'SPK SMP'].includes(bentukDb)) jGroup = 'SMP';
+       else if (['SMA', 'SPK SMA'].includes(bentukDb)) jGroup = 'SMA';
+       else if (['SMK'].includes(bentukDb)) jGroup = 'SMK';
+       else if (['SLB', 'SDLB', 'SMPLB', 'SMALB'].includes(bentukDb)) jGroup = 'SLB';
+       else if (['PKBM', 'SKB'].includes(bentukDb)) jGroup = 'NF';
+
+       const inc = (key) => {
+           row[key]++;
+           if (jGroup) row[`${jGroup}_${key}`]++;
+       };
+
        const isNegeri = String(item.status_sekolah).toUpperCase() === 'NEGERI';
-       if (isNegeri) row.status_n++; else row.status_s++;
+       if (isNegeri) inc('status_n'); else inc('status_s');
 
        const gender = String(item.gender).trim().toUpperCase();
-       if (gender === 'L' || gender === 'LAKI-LAKI') row.gen_l++;
-       else if (gender === 'P' || gender === 'PEREMPUAN') row.gen_p++;
+       if (gender === 'L' || gender === 'LAKI-LAKI') inc('gen_l');
+       else if (gender === 'P' || gender === 'PEREMPUAN') inc('gen_p');
 
        const pend = String(item.pendidikan || '').toUpperCase();
-       if (pend.includes('S1') || pend.includes('D4')) row.kual_s1++;
-       else if (pend.includes('S2') || pend.includes('S3')) row.kual_s2++;
-       else if (pend.includes('D1') || pend.includes('D2') || pend.includes('D3') || pend.includes('SMA') || pend.includes('SMK')) row.kual_kurang++;
-       else row.kual_lain++;
+       if (pend.includes('S1') || pend.includes('D4')) inc('kual_s1');
+       else if (pend.includes('S2') || pend.includes('S3')) inc('kual_s2');
+       else if (pend.includes('D1') || pend.includes('D2') || pend.includes('D3') || pend.includes('SMA') || pend.includes('SMK')) inc('kual_kurang');
+       else inc('kual_lain');
 
        const peg = String(item.status_kepegawaian || '').toUpperCase();
-       if (peg === 'PNS') row.peg_pns++;
-       else if (peg === 'PPPK') row.peg_pppk++;
-       else if (peg.includes('GTY') || peg.includes('PTY')) row.peg_gty++;
-       else if (peg.includes('HONOR')) row.peg_honor++;
-       else row.peg_lain++;
+       if (peg === 'PNS') inc('peg_pns');
+       else if (peg === 'PPPK') inc('peg_pppk');
+       else if (peg.includes('GTY') || peg.includes('PTY')) inc('peg_gty');
+       else if (peg.includes('HONOR')) inc('peg_honor');
+       else inc('peg_lain');
 
        const sert = String(item.bidang_studi_sertifikasi || '').trim();
-       if (sert && sert !== '-' && sert !== '0') row.sert_sudah++;
-       else row.sert_belum++;
+       if (sert && sert !== '-' && sert !== '0') inc('sert_sudah');
+       else inc('sert_belum');
 
        const tglLahir = item.tanggal_lahir;
        const age = calculateAge(tglLahir);
        if (age !== null) {
-          if (age <= 30) row.usia_30++;
-          else if (age <= 40) row.usia_40++;
-          else if (age <= 50) row.usia_50++;
-          else row.usia_51++;
+          if (age <= 30) inc('usia_30');
+          else if (age <= 40) inc('usia_40');
+          else if (age <= 50) inc('usia_50');
+          else inc('usia_51');
 
-          if (age === 56) row.pens_5++;
-          else if (age === 57) row.pens_4++;
-          else if (age === 58) row.pens_3++;
-          else if (age === 59) row.pens_2++;
-          else if (age === 60) row.pens_1++;
+          if (age === 56) inc('pens_5');
+          else if (age === 57) inc('pens_4');
+          else if (age === 58) inc('pens_3');
+          else if (age === 59) inc('pens_2');
+          else if (age === 60) inc('pens_1');
        }
 
-       row.total++;
+       inc('total');
     });
 
     return Array.from(mapAgg.values()).sort((a, b) => getKabupatenRank(a.wilayah) - getKabupatenRank(b.wilayah));
   }, [safeDataGuru, activeKategori, activeBentuk, listKabupaten]);
 
   const grandTotals = useMemo(() => {
-    return aggregatedData.reduce((acc, curr) => {
-      acc.status_n += curr.status_n; acc.status_s += curr.status_s;
-      acc.gen_l += curr.gen_l; acc.gen_p += curr.gen_p;
-      acc.kual_s1 += curr.kual_s1; acc.kual_s2 += curr.kual_s2; acc.kual_kurang += curr.kual_kurang; acc.kual_lain += curr.kual_lain;
-      acc.peg_pns += curr.peg_pns; acc.peg_pppk += curr.peg_pppk; acc.peg_gty += curr.peg_gty; acc.peg_honor += curr.peg_honor; acc.peg_lain += curr.peg_lain;
-      acc.sert_sudah += curr.sert_sudah; acc.sert_belum += curr.sert_belum;
-      acc.usia_30 += curr.usia_30; acc.usia_40 += curr.usia_40; acc.usia_50 += curr.usia_50; acc.usia_51 += curr.usia_51;
-      acc.pens_5 += curr.pens_5; acc.pens_4 += curr.pens_4; acc.pens_3 += curr.pens_3; acc.pens_2 += curr.pens_2; acc.pens_1 += curr.pens_1;
-      acc.total += curr.total;
-      return acc;
-    }, { 
-      status_n: 0, status_s: 0, gen_l: 0, gen_p: 0,
-      kual_s1: 0, kual_s2: 0, kual_kurang: 0, kual_lain: 0,
-      peg_pns: 0, peg_pppk: 0, peg_gty: 0, peg_honor: 0, peg_lain: 0,
-      sert_sudah: 0, sert_belum: 0,
-      usia_30: 0, usia_40: 0, usia_50: 0, usia_51: 0,
-      pens_5: 0, pens_4: 0, pens_3: 0, pens_2: 0, pens_1: 0, total: 0 
+    const initial = { total: 0 };
+    BASE_KEYS.forEach(k => initial[k] = 0);
+    JENJANG_LABELS.forEach(j => {
+        initial[`${j.id}_total`] = 0;
+        BASE_KEYS.forEach(k => initial[`${j.id}_${k}`] = 0);
     });
+
+    return aggregatedData.reduce((acc, curr) => {
+        Object.keys(initial).forEach(k => {
+            acc[k] += curr[k] || 0;
+        });
+        return acc;
+    }, initial);
   }, [aggregatedData]);
 
   let pieSegments = [];
@@ -481,6 +544,9 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
      ];
   }
 
+  // -------------------------------------------------------------------------
+  // FUNGSI UNDUH EXCEL DINAMIS
+  // -------------------------------------------------------------------------
   const downloadExcel = async () => {
     const workbook = new ExcelJS.Workbook();
     const safeJenjangName = activeLabel.replace(/\//g, '-');
@@ -488,13 +554,18 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
 
     let columns = [{ header: 'Wilayah (Kabupaten/Kota)', key: 'wilayah', width: 30 }];
     
-    if (activeView === 'STATUS') columns.push({header:'Negeri',key:'status_n',width:15}, {header:'Swasta',key:'status_s',width:15});
-    else if (activeView === 'GENDER') columns.push({header:'Laki-laki',key:'gen_l',width:15}, {header:'Perempuan',key:'gen_p',width:15});
-    else if (activeView === 'KUALIFIKASI') columns.push({header:'S1/D4',key:'kual_s1',width:15}, {header:'S2/S3',key:'kual_s2',width:15}, {header:'Kurang S1',key:'kual_kurang',width:15}, {header:'Lainnya',key:'kual_lain',width:15});
-    else if (activeView === 'KEPEGAWAIAN') columns.push({header:'PNS',key:'peg_pns',width:15}, {header:'PPPK',key:'peg_pppk',width:15}, {header:'GTY/PTY',key:'peg_gty',width:15}, {header:'Honor',key:'peg_honor',width:15}, {header:'Lainnya',key:'peg_lain',width:15});
-    else if (activeView === 'SERTIFIKASI') columns.push({header:'Sertifikasi',key:'sert_sudah',width:15}, {header:'Belum',key:'sert_belum',width:15});
-    else if (activeView === 'USIA') columns.push({header:'<=30 Thn',key:'usia_30',width:15}, {header:'31-40 Thn',key:'usia_40',width:15}, {header:'41-50 Thn',key:'usia_50',width:15}, {header:'>=51 Thn',key:'usia_51',width:15});
-    else if (activeView === 'PENSIUN') columns.push({header:'Usia 56 (5 Thn)',key:'pens_5',width:15}, {header:'Usia 57 (4 Thn)',key:'pens_4',width:15}, {header:'Usia 58 (3 Thn)',key:'pens_3',width:15}, {header:'Usia 59 (2 Thn)',key:'pens_2',width:15}, {header:'Usia 60 (1 Thn)',key:'pens_1',width:15});
+    // Sesuaikan Header Excel jika berada di mode "Semua Jenjang"
+    if (isSemuaJenjangView) {
+        JENJANG_LABELS.forEach(j => {
+            getColumnsForView(activeView, `${j.id}_`).forEach(col => {
+                columns.push({ header: `${j.label} - ${col.label}`, key: col.key, width: 15 });
+            });
+        });
+    } else {
+        getColumnsForView(activeView).forEach(col => {
+            columns.push({ header: col.label, key: col.key, width: 15 });
+        });
+    }
 
     if (activeView === 'PENSIUN') columns.push({ header: 'Total Proyeksi Pensiun', key: 'total_pensiun', width: 25 });
     else columns.push({ header: 'Total Guru', key: 'total', width: 15 });
@@ -503,12 +574,16 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
 
     aggregatedData.forEach(item => {
        const row = {...item};
-       if (activeView === 'PENSIUN') row.total_pensiun = row.pens_1 + row.pens_2 + row.pens_3 + row.pens_4 + row.pens_5;
+       if (activeView === 'PENSIUN') {
+           row.total_pensiun = row.pens_1 + row.pens_2 + row.pens_3 + row.pens_4 + row.pens_5;
+       }
        worksheet.addRow(row);
     });
 
     const totalRowData = { wilayah: 'TOTAL KESELURUHAN', ...grandTotals };
-    if (activeView === 'PENSIUN') totalRowData.total_pensiun = grandTotals.pens_1 + grandTotals.pens_2 + grandTotals.pens_3 + grandTotals.pens_4 + grandTotals.pens_5;
+    if (activeView === 'PENSIUN') {
+        totalRowData.total_pensiun = grandTotals.pens_1 + grandTotals.pens_2 + grandTotals.pens_3 + grandTotals.pens_4 + grandTotals.pens_5;
+    }
     
     const totalRow = worksheet.addRow(totalRowData);
 
@@ -531,14 +606,14 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
   };
 
   const StatCard = ({ label, value, percentage, colorClasses }) => (
-    <div className={`flex flex-col justify-between ${colorClasses.bg} p-3 md:p-4 rounded-2xl border ${colorClasses.border} transition-colors ${colorClasses.hover}`}>
+    <div className={`flex flex-col justify-between ${colorClasses.bg} p-4 rounded-2xl border ${colorClasses.border} transition-colors ${colorClasses.hover} h-full`}>
        <div className="flex items-center gap-2 mb-2">
           <div className={`w-3 h-3 rounded-full ${colorClasses.dot} shadow-inner`}></div>
-          <span className={`font-black text-[10px] md:text-[11px] ${colorClasses.textMain} uppercase leading-tight tracking-wide`}>{label}</span>
+          <span className={`font-black text-[11px] md:text-xs ${colorClasses.textMain} uppercase leading-tight tracking-wide`}>{label}</span>
        </div>
        <div className="flex items-end justify-between">
-          <span className={`font-black text-lg md:text-xl ${colorClasses.textVal} leading-none`}>{value.toLocaleString()}</span>
-          <span className={`font-bold text-[10px] md:text-[11px] ${colorClasses.textPct}`}>({percentage}%)</span>
+          <span className={`font-black text-xl md:text-2xl ${colorClasses.textVal} leading-none`}>{value.toLocaleString()}</span>
+          <span className={`font-bold text-[11px] md:text-sm ${colorClasses.textPct}`}>({percentage}%)</span>
        </div>
     </div>
   );
@@ -550,7 +625,7 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
     amber: { bg: 'bg-amber-50', border: 'border-amber-100', hover: 'hover:bg-amber-100', dot: 'bg-amber-500', textMain: 'text-amber-900', textVal: 'text-amber-600', textPct: 'text-amber-500' },
     red: { bg: 'bg-red-50', border: 'border-red-100', hover: 'hover:bg-red-100', dot: 'bg-red-500', textMain: 'text-red-900', textVal: 'text-red-600', textPct: 'text-red-500' },
     pink: { bg: 'bg-pink-50', border: 'border-pink-100', hover: 'hover:bg-pink-100', dot: 'bg-pink-500', textMain: 'text-pink-900', textVal: 'text-pink-600', textPct: 'text-pink-500' },
-    gray: { bg: 'bg-gray-100', border: 'border-gray-200', hover: 'hover:bg-gray-200', dot: 'bg-gray-500', textMain: 'text-gray-700', textVal: 'text-gray-600', textPct: 'text-gray-500' }
+    gray: { bg: 'bg-slate-50', border: 'border-slate-200', hover: 'hover:bg-slate-100', dot: 'bg-slate-500', textMain: 'text-slate-700', textVal: 'text-slate-600', textPct: 'text-slate-500' }
   };
 
   const TABS = [
@@ -573,23 +648,26 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
   }
 
   return (
-    <div className="h-full flex flex-col animate-in fade-in duration-500">
+    <div className="min-h-screen flex flex-col bg-slate-50 animate-in fade-in duration-500">
       
-      <div className="bg-white px-4 md:px-6 py-4 border-b border-gray-100 flex flex-col gap-4 shrink-0 shadow-sm z-20">
+      {/* TABS HEADER: FILTER TAB VIEW & DROPDOWNS */}
+      <div className="bg-white px-4 md:px-6 py-4 border-b border-gray-100 flex flex-col gap-4 shrink-0 shadow-sm z-20 sticky top-0">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
            
-           <div className="flex items-center gap-2 bg-gray-100 p-1.5 rounded-2xl w-full md:w-auto overflow-x-auto custom-scrollbar pb-1">
+           {/* MAIN VIEW TOGGLE (PTK TABS) */}
+           <div className="flex items-center bg-gray-100 p-1.5 rounded-2xl w-full md:w-auto overflow-x-auto custom-scrollbar">
              {TABS.map(t => (
                 <button 
                   key={t.id} 
                   onClick={() => setActiveView(t.id)} 
-                  className={`flex items-center gap-1.5 px-3 py-2 md:py-2.5 rounded-xl font-black text-[10px] md:text-xs transition-all whitespace-nowrap ${activeView === t.id ? `bg-white ${t.color} shadow-sm scale-[1.02]` : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'}`}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-black text-xs transition-all whitespace-nowrap ${activeView === t.id ? `bg-white ${t.color} shadow-sm scale-[1.02]` : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'}`}
                 >
-                  <t.icon size={14} /> {t.label}
+                  <t.icon size={16} /> {t.label}
                 </button>
              ))}
            </div>
 
+           {/* DROPDOWN KATEGORI & UNDUH */}
            <div className="flex items-center gap-3 w-full md:w-auto">
               <div className="flex items-center bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm w-full md:w-auto transition-colors focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100">
                 <GraduationCap size={16} className="text-gray-400 mr-2" />
@@ -610,12 +688,13 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
                 </select>
               </div>
 
-              <button onClick={downloadExcel} className="flex items-center justify-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white px-5 py-2.5 rounded-xl font-black uppercase text-[10px] md:text-xs shadow-sm border border-blue-200 transition-all active:scale-95 shrink-0 w-full md:w-auto">
+              <button onClick={downloadExcel} className="flex items-center justify-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white px-5 py-2.5 rounded-xl font-black uppercase text-xs shadow-sm border border-blue-200 transition-all active:scale-95 shrink-0">
                 <FileSpreadsheet size={16} /> Unduh
               </button>
            </div>
         </div>
 
+        {/* HORIZONTAL SUB-TABS FILTER */}
         <div className="flex items-center gap-1.5 md:gap-2 overflow-x-auto pb-1 mt-1">
           <button 
             onClick={() => setActiveBentuk('SEMUA')} 
@@ -647,288 +726,265 @@ export default function DapodikGuru({ selectedYear = '2026' }) {
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col lg:flex-row min-h-0 bg-gray-50/50">
-        
-        <div className="flex-1 lg:w-2/3 p-4 md:p-6 flex flex-col min-h-0 overflow-hidden border-r border-gray-200">
-          <div className="bg-white rounded-3xl shadow-sm border border-gray-100 flex-1 flex flex-col overflow-hidden relative">
-            <div className="flex-1 overflow-auto p-4 custom-scrollbar">
-              <table className="w-full text-center border-separate border-spacing-y-2">
-                <thead className="sticky top-0 bg-gray-50 z-10 shadow-sm rounded-xl">
-                  <tr className="text-[10px] font-black uppercase text-gray-500 whitespace-nowrap">
-                    <th className="px-4 py-3 text-left rounded-l-xl">Wilayah</th>
-                    
-                    {activeView === 'STATUS' && (
-                      <><th className="px-4 py-3 text-blue-600">Negeri</th><th className="px-4 py-3 text-orange-600">Swasta</th></>
-                    )}
-                    {activeView === 'GENDER' && (
-                      <><th className="px-4 py-3 text-blue-600">Laki-laki</th><th className="px-4 py-3 text-pink-600">Perempuan</th></>
-                    )}
-                    {activeView === 'KUALIFIKASI' && (
-                      <><th className="px-3 py-3 text-emerald-600">S1/D4</th><th className="px-3 py-3 text-blue-600">S2/S3</th><th className="px-3 py-3 text-amber-600">&lt; S1</th><th className="px-3 py-3 text-gray-500">Lainnya</th></>
-                    )}
-                    {activeView === 'KEPEGAWAIAN' && (
-                      <><th className="px-3 py-3 text-blue-600">PNS</th><th className="px-3 py-3 text-emerald-600">PPPK</th><th className="px-3 py-3 text-orange-600">GTY/PTY</th><th className="px-3 py-3 text-red-600">Honor</th><th className="px-3 py-3 text-gray-500">Lainnya</th></>
-                    )}
-                    {activeView === 'SERTIFIKASI' && (
-                      <><th className="px-4 py-3 text-emerald-600">Sertifikasi</th><th className="px-4 py-3 text-red-600">Belum</th></>
-                    )}
-                    {activeView === 'USIA' && (
-                      <><th className="px-3 py-3 text-emerald-600">&lt;= 30</th><th className="px-3 py-3 text-blue-600">31-40</th><th className="px-3 py-3 text-amber-600">41-50</th><th className="px-3 py-3 text-red-600">&gt;= 51</th></>
-                    )}
-                    {activeView === 'PENSIUN' && (
-                      <><th className="px-2 py-3 text-emerald-600">Usia 56</th><th className="px-2 py-3 text-blue-600">Usia 57</th><th className="px-2 py-3 text-amber-600">Usia 58</th><th className="px-2 py-3 text-orange-600">Usia 59</th><th className="px-2 py-3 text-red-600">Usia 60</th></>
-                    )}
-
-                    <th className="px-4 py-3 text-gray-800">{activeView === 'PENSIUN' ? 'Total Proyeksi' : 'Total Guru'}</th>
-                    <th className="px-4 py-3 rounded-r-xl">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {aggregatedData.map((row, idx) => (
-                    <tr key={idx} className="bg-white shadow-sm hover:shadow-md hover:scale-[1.01] transition-all group">
-                      <td className="px-4 py-3 rounded-l-2xl font-black text-gray-800 uppercase text-left border-y border-l border-gray-100 whitespace-nowrap">{row.wilayah}</td>
-                      
-                      {activeView === 'STATUS' && (
-                        <><td className="px-4 py-3 font-bold text-blue-600 text-sm border-y border-gray-100 bg-blue-50/30">{row.status_n.toLocaleString()}</td><td className="px-4 py-3 font-bold text-orange-600 text-sm border-y border-gray-100 bg-orange-50/30">{row.status_s.toLocaleString()}</td></>
-                      )}
-                      {activeView === 'GENDER' && (
-                        <><td className="px-4 py-3 font-bold text-blue-600 text-sm border-y border-gray-100 bg-blue-50/30">{row.gen_l.toLocaleString()}</td><td className="px-4 py-3 font-bold text-pink-600 text-sm border-y border-gray-100 bg-pink-50/30">{row.gen_p.toLocaleString()}</td></>
-                      )}
-                      {activeView === 'KUALIFIKASI' && (
-                        <><td className="px-3 py-3 font-bold text-emerald-600 text-sm border-y border-gray-100 bg-emerald-50/30">{row.kual_s1.toLocaleString()}</td><td className="px-3 py-3 font-bold text-blue-600 text-sm border-y border-gray-100 bg-blue-50/30">{row.kual_s2.toLocaleString()}</td><td className="px-3 py-3 font-bold text-amber-600 text-sm border-y border-gray-100 bg-amber-50/30">{row.kual_kurang.toLocaleString()}</td><td className="px-3 py-3 font-bold text-gray-500 text-sm border-y border-gray-100 bg-gray-50/50">{row.kual_lain.toLocaleString()}</td></>
-                      )}
-                      {activeView === 'KEPEGAWAIAN' && (
-                        <><td className="px-3 py-3 font-bold text-blue-600 text-sm border-y border-gray-100 bg-blue-50/30">{row.peg_pns.toLocaleString()}</td><td className="px-3 py-3 font-bold text-emerald-600 text-sm border-y border-gray-100 bg-emerald-50/30">{row.peg_pppk.toLocaleString()}</td><td className="px-3 py-3 font-bold text-orange-600 text-sm border-y border-gray-100 bg-orange-50/30">{row.peg_gty.toLocaleString()}</td><td className="px-3 py-3 font-bold text-red-600 text-sm border-y border-gray-100 bg-red-50/30">{row.peg_honor.toLocaleString()}</td><td className="px-3 py-3 font-bold text-gray-500 text-sm border-y border-gray-100 bg-gray-50/50">{row.peg_lain.toLocaleString()}</td></>
-                      )}
-                      {activeView === 'SERTIFIKASI' && (
-                        <><td className="px-4 py-3 font-bold text-emerald-600 text-sm border-y border-gray-100 bg-emerald-50/30">{row.sert_sudah.toLocaleString()}</td><td className="px-4 py-3 font-bold text-red-600 text-sm border-y border-gray-100 bg-red-50/30">{row.sert_belum.toLocaleString()}</td></>
-                      )}
-                      {activeView === 'USIA' && (
-                        <><td className="px-3 py-3 font-bold text-emerald-600 text-sm border-y border-gray-100 bg-emerald-50/30">{row.usia_30.toLocaleString()}</td><td className="px-3 py-3 font-bold text-blue-600 text-sm border-y border-gray-100 bg-blue-50/30">{row.usia_40.toLocaleString()}</td><td className="px-3 py-3 font-bold text-amber-600 text-sm border-y border-gray-100 bg-amber-50/30">{row.usia_50.toLocaleString()}</td><td className="px-3 py-3 font-bold text-red-600 text-sm border-y border-gray-100 bg-red-50/30">{row.usia_51.toLocaleString()}</td></>
-                      )}
-                      {activeView === 'PENSIUN' && (
-                        <><td className="px-2 py-3 font-bold text-emerald-600 text-sm border-y border-gray-100 bg-emerald-50/30">{row.pens_5.toLocaleString()}</td><td className="px-2 py-3 font-bold text-blue-600 text-sm border-y border-gray-100 bg-blue-50/30">{row.pens_4.toLocaleString()}</td><td className="px-2 py-3 font-bold text-amber-600 text-sm border-y border-gray-100 bg-amber-50/30">{row.pens_3.toLocaleString()}</td><td className="px-2 py-3 font-bold text-orange-600 text-sm border-y border-gray-100 bg-orange-50/30">{row.pens_2.toLocaleString()}</td><td className="px-2 py-3 font-bold text-red-600 text-sm border-y border-gray-100 bg-red-50/30">{row.pens_1.toLocaleString()}</td></>
-                      )}
-
-                      <td className="px-4 py-3 font-black text-gray-800 text-base border-y border-gray-100 bg-gray-50/80">
-                        {activeView === 'PENSIUN' ? (row.pens_1 + row.pens_2 + row.pens_3 + row.pens_4 + row.pens_5).toLocaleString() : row.total.toLocaleString()}
-                      </td>
-
-                      <td className="px-4 py-3 rounded-r-2xl border-y border-r border-gray-100">
-                         <button onClick={() => handleBukaRincian(row.wilayah)} className="flex items-center justify-center gap-2 bg-blue-50 text-blue-600 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase hover:bg-blue-600 hover:text-white transition-colors mx-auto">
-                           <Eye size={14} /> Rincian
-                         </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                {aggregatedData.length > 0 && (
-                  <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
-                    <tr className="bg-gray-100 text-center font-black uppercase text-xs border-t-2 border-gray-300 whitespace-nowrap">
-                      <td className="px-4 py-4 text-left rounded-l-2xl border-y border-l border-gray-300 text-gray-900">TOTAL KALIMANTAN BARAT</td>
-                      
-                      {activeView === 'STATUS' && (
-                        <><td className="px-4 py-4 text-blue-700 border-y border-gray-300">{grandTotals.status_n.toLocaleString()}</td><td className="px-4 py-4 text-orange-700 border-y border-gray-300">{grandTotals.status_s.toLocaleString()}</td></>
-                      )}
-                      {activeView === 'GENDER' && (
-                        <><td className="px-4 py-4 text-blue-700 border-y border-gray-300">{grandTotals.gen_l.toLocaleString()}</td><td className="px-4 py-4 text-pink-700 border-y border-gray-300">{grandTotals.gen_p.toLocaleString()}</td></>
-                      )}
-                      {activeView === 'KUALIFIKASI' && (
-                        <><td className="px-3 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.kual_s1.toLocaleString()}</td><td className="px-3 py-4 text-blue-700 border-y border-gray-300">{grandTotals.kual_s2.toLocaleString()}</td><td className="px-3 py-4 text-amber-700 border-y border-gray-300">{grandTotals.kual_kurang.toLocaleString()}</td><td className="px-3 py-4 text-gray-600 border-y border-gray-300">{grandTotals.kual_lain.toLocaleString()}</td></>
-                      )}
-                      {activeView === 'KEPEGAWAIAN' && (
-                        <><td className="px-3 py-4 text-blue-700 border-y border-gray-300">{grandTotals.peg_pns.toLocaleString()}</td><td className="px-3 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.peg_pppk.toLocaleString()}</td><td className="px-3 py-4 text-orange-700 border-y border-gray-300">{grandTotals.peg_gty.toLocaleString()}</td><td className="px-3 py-4 text-red-700 border-y border-gray-300">{grandTotals.peg_honor.toLocaleString()}</td><td className="px-3 py-4 text-gray-600 border-y border-gray-300">{grandTotals.peg_lain.toLocaleString()}</td></>
-                      )}
-                      {activeView === 'SERTIFIKASI' && (
-                        <><td className="px-4 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.sert_sudah.toLocaleString()}</td><td className="px-4 py-4 text-red-700 border-y border-gray-300">{grandTotals.sert_belum.toLocaleString()}</td></>
-                      )}
-                      {activeView === 'USIA' && (
-                        <><td className="px-3 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.usia_30.toLocaleString()}</td><td className="px-3 py-4 text-blue-700 border-y border-gray-300">{grandTotals.usia_40.toLocaleString()}</td><td className="px-3 py-4 text-amber-700 border-y border-gray-300">{grandTotals.usia_50.toLocaleString()}</td><td className="px-3 py-4 text-red-700 border-y border-gray-300">{grandTotals.usia_51.toLocaleString()}</td></>
-                      )}
-                      {activeView === 'PENSIUN' && (
-                        <><td className="px-2 py-4 text-emerald-700 border-y border-gray-300">{grandTotals.pens_5.toLocaleString()}</td><td className="px-2 py-4 text-blue-700 border-y border-gray-300">{grandTotals.pens_4.toLocaleString()}</td><td className="px-2 py-4 text-amber-700 border-y border-gray-300">{grandTotals.pens_3.toLocaleString()}</td><td className="px-2 py-4 text-orange-700 border-y border-gray-300">{grandTotals.pens_2.toLocaleString()}</td><td className="px-2 py-4 text-red-700 border-y border-gray-300">{grandTotals.pens_1.toLocaleString()}</td></>
-                      )}
-
-                      <td className="px-4 py-4 text-gray-900 border-y border-gray-300 text-base">
-                        {activeView === 'PENSIUN' ? (grandTotals.pens_1 + grandTotals.pens_2 + grandTotals.pens_3 + grandTotals.pens_4 + grandTotals.pens_5).toLocaleString() : grandTotals.total.toLocaleString()}
-                      </td>
-                      <td className="px-4 py-4 rounded-r-2xl border-y border-r border-gray-300">
-                         <button onClick={() => handleBukaRincian('SEMUA')} className="flex items-center justify-center gap-2 bg-gray-800 text-white px-3 py-1.5 rounded-xl text-[10px] font-black uppercase hover:bg-gray-900 transition-colors mx-auto shadow-md">
-                           <Search size={14} /> Semua
-                         </button>
-                      </td>
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
-              <div className="mt-4 px-2 text-right text-xs font-bold italic text-gray-400 pb-2">
-                 Sumber : Data Dapodik PTK Update Pada Tanggal : {displayLastUpdated}
-              </div>
+      {/* TOP SECTION: VISUALISASI GRAFIK & STAT CARDS */}
+      <div className="bg-white border-b border-gray-200 py-6 px-4 md:px-8 shrink-0">
+         <div className="w-full max-w-[98%] mx-auto flex flex-col lg:flex-row items-center justify-between gap-8">
+            
+            {/* Bagian Kiri: Judul & Komponen PremiumPieChart */}
+            <div className="flex-1 w-full max-w-sm flex flex-col items-center lg:items-start text-center lg:text-left">
+               <h2 className="text-2xl md:text-3xl font-black text-gray-800 uppercase tracking-tighter leading-tight">
+                  Proporsi {activeView}
+               </h2>
+               <p className="text-sm md:text-base font-bold text-gray-400 uppercase tracking-widest mt-1 mb-6">
+                  Jenjang {activeLabel}
+               </p>
+               <div className="w-full h-full min-h-[220px]">
+                  <PremiumPieChart segments={pieSegments} total={pieTotal} />
+               </div>
             </div>
-          </div>
-        </div>
 
-        <div className="lg:w-1/3 flex flex-col bg-white border-l border-gray-100 relative overflow-y-auto custom-scrollbar">
-          
-          <div className="text-center w-full px-4 pt-6 pb-2 shrink-0">
-            <h2 className="text-xl font-black text-gray-800 uppercase tracking-tighter">Proporsi {activeView}</h2>
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">
-              Jenjang {activeLabel}
-            </p>
-          </div>
+            {/* Bagian Kanan: Komponen StatCard (Grid Layout) */}
+            <div className="flex-1 w-full lg:max-w-2xl">
+               {activeView === 'STATUS' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                     <StatCard label="Guru Negeri" value={grandTotals.status_n} percentage={pieTotal > 0 ? ((grandTotals.status_n/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
+                     <StatCard label="Guru Swasta" value={grandTotals.status_s} percentage={pieTotal > 0 ? ((grandTotals.status_s/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.orange} />
+                  </div>
+               )}
 
-          <div className="flex items-center justify-center min-h-[220px] relative px-4 shrink-0">
-             <PremiumPieChart segments={pieSegments} total={pieTotal} />
-          </div>
+               {activeView === 'GENDER' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                     <StatCard label="Laki-Laki" value={grandTotals.gen_l} percentage={pieTotal > 0 ? ((grandTotals.gen_l/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
+                     <StatCard label="Perempuan" value={grandTotals.gen_p} percentage={pieTotal > 0 ? ((grandTotals.gen_p/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.pink} />
+                  </div>
+               )}
 
-          <div className="px-4 pb-6 pt-2 w-full shrink-0">
-             
-             {activeView === 'STATUS' && (
-                <div className="flex flex-col gap-2">
-                   <StatCard label="Guru Negeri" value={grandTotals.status_n} percentage={pieTotal > 0 ? ((grandTotals.status_n/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
-                   <StatCard label="Guru Swasta" value={grandTotals.status_s} percentage={pieTotal > 0 ? ((grandTotals.status_s/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.orange} />
-                </div>
-             )}
+               {activeView === 'KUALIFIKASI' && (
+                  <div className="grid grid-cols-2 gap-4">
+                     <StatCard label="S1 / D4" value={grandTotals.kual_s1} percentage={pieTotal > 0 ? ((grandTotals.kual_s1/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.emerald} />
+                     <StatCard label="S2 / S3" value={grandTotals.kual_s2} percentage={pieTotal > 0 ? ((grandTotals.kual_s2/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
+                     <StatCard label="< S1" value={grandTotals.kual_kurang} percentage={pieTotal > 0 ? ((grandTotals.kual_kurang/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.amber} />
+                     <StatCard label="Lainnya" value={grandTotals.kual_lain} percentage={pieTotal > 0 ? ((grandTotals.kual_lain/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.gray} />
+                  </div>
+               )}
 
-             {activeView === 'GENDER' && (
-                <div className="flex flex-col gap-2">
-                   <StatCard label="Laki-Laki" value={grandTotals.gen_l} percentage={pieTotal > 0 ? ((grandTotals.gen_l/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
-                   <StatCard label="Perempuan" value={grandTotals.gen_p} percentage={pieTotal > 0 ? ((grandTotals.gen_p/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.pink} />
-                </div>
-             )}
-
-             {activeView === 'KUALIFIKASI' && (
-                <div className="grid grid-cols-2 gap-2">
-                   <StatCard label="S1 / D4" value={grandTotals.kual_s1} percentage={pieTotal > 0 ? ((grandTotals.kual_s1/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.emerald} />
-                   <StatCard label="S2 / S3" value={grandTotals.kual_s2} percentage={pieTotal > 0 ? ((grandTotals.kual_s2/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
-                   <StatCard label="< S1" value={grandTotals.kual_kurang} percentage={pieTotal > 0 ? ((grandTotals.kual_kurang/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.amber} />
-                   <StatCard label="Lainnya" value={grandTotals.kual_lain} percentage={pieTotal > 0 ? ((grandTotals.kual_lain/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.gray} />
-                </div>
-             )}
-
-             {activeView === 'KEPEGAWAIAN' && (
-                <div className="flex flex-col gap-2">
-                   <div className="grid grid-cols-2 gap-2">
+               {activeView === 'KEPEGAWAIAN' && (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
                      <StatCard label="PNS" value={grandTotals.peg_pns} percentage={pieTotal > 0 ? ((grandTotals.peg_pns/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
                      <StatCard label="PPPK" value={grandTotals.peg_pppk} percentage={pieTotal > 0 ? ((grandTotals.peg_pppk/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.emerald} />
-                   </div>
-                   <StatCard label="GTY / PTY" value={grandTotals.peg_gty} percentage={pieTotal > 0 ? ((grandTotals.peg_gty/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.orange} />
-                   <div className="grid grid-cols-2 gap-2">
+                     <StatCard label="GTY / PTY" value={grandTotals.peg_gty} percentage={pieTotal > 0 ? ((grandTotals.peg_gty/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.orange} />
                      <StatCard label="Honor" value={grandTotals.peg_honor} percentage={pieTotal > 0 ? ((grandTotals.peg_honor/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.red} />
                      <StatCard label="Lainnya" value={grandTotals.peg_lain} percentage={pieTotal > 0 ? ((grandTotals.peg_lain/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.gray} />
-                   </div>
-                </div>
-             )}
+                  </div>
+               )}
 
-             {activeView === 'SERTIFIKASI' && (
-                <div className="flex flex-col gap-2">
-                   <StatCard label="Sudah Sertifikasi" value={grandTotals.sert_sudah} percentage={pieTotal > 0 ? ((grandTotals.sert_sudah/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.emerald} />
-                   <StatCard label="Belum Sertifikasi" value={grandTotals.sert_belum} percentage={pieTotal > 0 ? ((grandTotals.sert_belum/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.red} />
-                </div>
-             )}
+               {activeView === 'SERTIFIKASI' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                     <StatCard label="Sudah Sertifikasi" value={grandTotals.sert_sudah} percentage={pieTotal > 0 ? ((grandTotals.sert_sudah/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.emerald} />
+                     <StatCard label="Belum Sertifikasi" value={grandTotals.sert_belum} percentage={pieTotal > 0 ? ((grandTotals.sert_belum/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.red} />
+                  </div>
+               )}
 
-             {activeView === 'USIA' && (
-                <div className="grid grid-cols-2 gap-2">
-                   <StatCard label="<= 30 Tahun" value={grandTotals.usia_30} percentage={pieTotal > 0 ? ((grandTotals.usia_30/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.emerald} />
-                   <StatCard label="31 - 40 Tahun" value={grandTotals.usia_40} percentage={pieTotal > 0 ? ((grandTotals.usia_40/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
-                   <StatCard label="41 - 50 Tahun" value={grandTotals.usia_50} percentage={pieTotal > 0 ? ((grandTotals.usia_50/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.amber} />
-                   <StatCard label=">= 51 Tahun" value={grandTotals.usia_51} percentage={pieTotal > 0 ? ((grandTotals.usia_51/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.red} />
-                </div>
-             )}
+               {activeView === 'USIA' && (
+                  <div className="grid grid-cols-2 gap-4">
+                     <StatCard label="<= 30 Tahun" value={grandTotals.usia_30} percentage={pieTotal > 0 ? ((grandTotals.usia_30/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.emerald} />
+                     <StatCard label="31 - 40 Tahun" value={grandTotals.usia_40} percentage={pieTotal > 0 ? ((grandTotals.usia_40/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
+                     <StatCard label="41 - 50 Tahun" value={grandTotals.usia_50} percentage={pieTotal > 0 ? ((grandTotals.usia_50/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.amber} />
+                     <StatCard label=">= 51 Tahun" value={grandTotals.usia_51} percentage={pieTotal > 0 ? ((grandTotals.usia_51/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.red} />
+                  </div>
+               )}
 
-             {activeView === 'PENSIUN' && (
-                <div className="flex flex-col gap-2">
-                   <div className="grid grid-cols-2 gap-2">
-                     <StatCard label="1 Thn Lagi (Usia 60)" value={grandTotals.pens_1} percentage={pieTotal > 0 ? ((grandTotals.pens_1/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.red} />
-                     <StatCard label="2 Thn Lagi (Usia 59)" value={grandTotals.pens_2} percentage={pieTotal > 0 ? ((grandTotals.pens_2/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.orange} />
-                   </div>
-                   <StatCard label="3 Thn Lagi (Usia 58)" value={grandTotals.pens_3} percentage={pieTotal > 0 ? ((grandTotals.pens_3/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.amber} />
-                   <div className="grid grid-cols-2 gap-2">
-                     <StatCard label="4 Thn Lagi (Usia 57)" value={grandTotals.pens_4} percentage={pieTotal > 0 ? ((grandTotals.pens_4/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
-                     <StatCard label="5 Thn Lagi (Usia 56)" value={grandTotals.pens_5} percentage={pieTotal > 0 ? ((grandTotals.pens_5/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.emerald} />
-                   </div>
-                </div>
-             )}
-
-          </div>
-        </div>
-
+               {activeView === 'PENSIUN' && (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+                     <StatCard label="1 Thn (Usia 60)" value={grandTotals.pens_1} percentage={pieTotal > 0 ? ((grandTotals.pens_1/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.red} />
+                     <StatCard label="2 Thn (Usia 59)" value={grandTotals.pens_2} percentage={pieTotal > 0 ? ((grandTotals.pens_2/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.orange} />
+                     <StatCard label="3 Thn (Usia 58)" value={grandTotals.pens_3} percentage={pieTotal > 0 ? ((grandTotals.pens_3/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.amber} />
+                     <StatCard label="4 Thn (Usia 57)" value={grandTotals.pens_4} percentage={pieTotal > 0 ? ((grandTotals.pens_4/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.blue} />
+                     <StatCard label="5 Thn (Usia 56)" value={grandTotals.pens_5} percentage={pieTotal > 0 ? ((grandTotals.pens_5/pieTotal)*100).toFixed(1) : 0} colorClasses={colors.emerald} />
+                  </div>
+               )}
+            </div>
+         </div>
       </div>
 
-      {activeView === 'STATUS' && (
+      {/* BOTTOM SECTION: MAIN TABLE (DINAMIS MENDUKUNG KOLOM BERSARANG) */}
+      <div className="flex-1 w-full max-w-[98%] mx-auto p-4 md:p-6 mb-12">
+        <div className="bg-white rounded-3xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="overflow-x-auto custom-scrollbar">
+            <table className="w-full text-center border-separate border-spacing-0">
+              
+              <thead className="sticky top-0 bg-gray-50 z-10 shadow-sm">
+                {isSemuaJenjangView ? (
+                   <>
+                     <tr className="text-[10px] md:text-xs font-black uppercase text-gray-500 whitespace-nowrap">
+                       <th rowSpan={2} className="px-4 py-4 text-center border-b-2 border-gray-200 bg-gray-50 text-gray-700 w-16">Nomor</th>
+                       <th rowSpan={2} className="px-4 py-4 text-left border-b-2 border-gray-200 bg-gray-50 text-gray-700 sticky left-0 z-20 w-48 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] border-r">Wilayah / Kabupaten / Kota</th>
+                       
+                       {/* NESTED HEADERS UNTUK SEMUA JENJANG */}
+                       {JENJANG_LABELS.map(j => (
+                         <th key={j.id} colSpan={getColumnsForView(activeView).length} className="px-4 py-2 border-b border-gray-200 text-center border-r bg-gray-100 text-gray-700 tracking-wide">
+                           {j.label}
+                         </th>
+                       ))}
+                       
+                       <th rowSpan={2} className="px-4 py-4 border-b-2 border-gray-200 text-gray-800 w-32 border-l">{activeView === 'PENSIUN' ? 'Total Proyeksi' : 'Total Guru'}</th>
+                       <th rowSpan={2} className="px-4 py-4 border-b-2 border-gray-200 w-32">Aksi</th>
+                     </tr>
+                     <tr className="text-[10px] md:text-xs font-black uppercase text-gray-500 whitespace-nowrap">
+                       {JENJANG_LABELS.map(j => (
+                         getColumnsForView(activeView, `${j.id}_`).map((col, cIdx, arr) => (
+                           <th key={col.key} className={`px-2 py-2 border-b-2 border-gray-200 ${col.color} ${cIdx === arr.length - 1 ? 'border-r' : ''}`}>
+                             {col.label}
+                           </th>
+                         ))
+                       ))}
+                     </tr>
+                   </>
+                ) : (
+                   <tr className="text-[10px] md:text-xs font-black uppercase text-gray-500 whitespace-nowrap">
+                     <th className="px-4 py-4 text-center border-b-2 border-gray-200 bg-gray-50 text-gray-700 w-16">Nomor</th>
+                     <th className="px-4 py-4 text-left border-b-2 border-gray-200 bg-gray-50 text-gray-700 sticky left-0 z-20 w-48 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] border-r">Wilayah / Kabupaten / Kota</th>
+                     
+                     {getColumnsForView(activeView).map(col => (
+                       <th key={col.key} className={`px-4 py-4 border-b-2 border-gray-200 ${col.color}`}>{col.label}</th>
+                     ))}
+                     
+                     <th className="px-4 py-4 border-b-2 border-gray-200 text-gray-800 w-32">{activeView === 'PENSIUN' ? 'Total Proyeksi' : 'Total Guru'}</th>
+                     <th className="px-4 py-4 border-b-2 border-gray-200 w-32">Aksi</th>
+                   </tr>
+                )}
+              </thead>
+              
+              <tbody className="divide-y divide-gray-100">
+                {aggregatedData.map((row, idx) => (
+                  <tr key={idx} className="hover:bg-blue-50/30 transition-colors group">
+                    <td className="px-4 py-3 font-bold text-xs md:text-sm text-gray-500 text-center">{idx + 1}</td>
+                    <td className="px-4 py-3 font-black text-xs md:text-sm text-gray-800 uppercase text-left sticky left-0 bg-white group-hover:bg-blue-50/30 z-10 whitespace-nowrap shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] border-r border-gray-100">{row.wilayah}</td>
+                    
+                    {/* ISI TABEL DINAMIS */}
+                    {isSemuaJenjangView ? (
+                       JENJANG_LABELS.map(j => (
+                         getColumnsForView(activeView, `${j.id}_`).map((col, cIdx, arr) => (
+                           <td key={col.key} className={`px-2 py-3 font-bold text-xs ${col.color} ${cIdx === arr.length - 1 ? 'border-r border-gray-100' : ''}`}>
+                             {row[col.key].toLocaleString()}
+                           </td>
+                         ))
+                       ))
+                    ) : (
+                       getColumnsForView(activeView).map(col => (
+                         <td key={col.key} className={`px-4 py-3 font-bold text-xs md:text-sm ${col.color}`}>
+                           {row[col.key].toLocaleString()}
+                         </td>
+                       ))
+                    )}
+
+                    <td className="px-4 py-3 font-black text-xs md:text-sm text-gray-800 bg-gray-50 border-l border-gray-100">
+                      {activeView === 'PENSIUN' ? (row.pens_1 + row.pens_2 + row.pens_3 + row.pens_4 + row.pens_5).toLocaleString() : row.total.toLocaleString()}
+                    </td>
+
+                    <td className="px-4 py-3 border-l border-gray-100">
+                       <button onClick={() => handleBukaRincian(row.wilayah)} className="flex items-center justify-center gap-1.5 bg-blue-50 text-blue-600 px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-black uppercase hover:bg-blue-600 hover:text-white transition-colors mx-auto">
+                         <Eye size={14} /> Rincian
+                       </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              
+              <tfoot className="sticky bottom-0 z-10 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
+                <tr className="bg-gray-100 text-center font-black uppercase text-[10px] md:text-xs border-t-2 border-gray-300">
+                  <td className="px-4 py-4 border-t-2 border-gray-300"></td>
+                  <td className="px-4 py-4 text-left text-gray-900 border-t-2 border-gray-300 sticky left-0 bg-gray-100 z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] border-r">TOTAL KALBAR</td>
+                  
+                  {/* FOOTER TOTAL DINAMIS */}
+                  {isSemuaJenjangView ? (
+                     JENJANG_LABELS.map(j => (
+                       getColumnsForView(activeView, `${j.id}_`).map((col, cIdx, arr) => (
+                         <td key={col.key} className={`px-2 py-4 border-t-2 border-gray-300 ${col.color} ${cIdx === arr.length - 1 ? 'border-r border-gray-200' : ''}`}>
+                           {grandTotals[col.key].toLocaleString()}
+                         </td>
+                       ))
+                     ))
+                  ) : (
+                     getColumnsForView(activeView).map(col => (
+                       <td key={col.key} className={`px-4 py-4 border-t-2 border-gray-300 ${col.color}`}>
+                         {grandTotals[col.key].toLocaleString()}
+                       </td>
+                     ))
+                  )}
+
+                  <td className="px-4 py-4 text-gray-900 border-t-2 border-gray-300 text-sm bg-gray-200/50 border-l border-gray-200">
+                    {activeView === 'PENSIUN' ? (grandTotals.pens_1 + grandTotals.pens_2 + grandTotals.pens_3 + grandTotals.pens_4 + grandTotals.pens_5).toLocaleString() : grandTotals.total.toLocaleString()}
+                  </td>
+                  <td className="px-4 py-4 border-t-2 border-gray-300 border-l border-gray-200">
+                     <button onClick={() => handleBukaRincian('SEMUA')} className="flex items-center justify-center gap-1.5 bg-gray-800 text-white px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-black uppercase hover:bg-gray-900 transition-colors mx-auto shadow-md">
+                       <Search size={14} /> Semua
+                     </button>
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div className="bg-gray-50 px-4 py-3 text-right text-[10px] md:text-xs font-bold italic text-gray-400 border-t border-gray-200">
+              Sumber : Data Dapodik PTK Update Pada Tanggal : {displayLastUpdated}
+          </div>
+        </div>
+      </div>
+
+      {/* KONDISIONAL RENDER MODAL RINCIAN */}
+      {modalOpen && activeView === 'STATUS' && (
         <RincianStatusSekolahGuru 
-          isOpen={modalOpen} 
-          onClose={() => setModalOpen(false)}
-          data={safeDataGuru}
-          initialWilayah={selectedWilayah}
-          activeJenjang={activeLabel}
-          displayLastUpdated={displayLastUpdated}
+          isOpen={modalOpen} onClose={() => setModalOpen(false)}
+          data={safeDataGuru} initialWilayah={selectedWilayah}
+          activeJenjang={activeLabel} displayLastUpdated={displayLastUpdated}
         />
       )}
 
-      {activeView === 'GENDER' && (
+      {modalOpen && activeView === 'GENDER' && (
         <RincianGenderGuru 
-          isOpen={modalOpen} 
-          onClose={() => setModalOpen(false)}
-          data={safeDataGuru}
-          initialWilayah={selectedWilayah}
-          activeJenjang={activeLabel}
-          displayLastUpdated={displayLastUpdated}
+          isOpen={modalOpen} onClose={() => setModalOpen(false)}
+          data={safeDataGuru} initialWilayah={selectedWilayah}
+          activeJenjang={activeLabel} displayLastUpdated={displayLastUpdated}
         />
       )}
 
-      {activeView === 'KUALIFIKASI' && (
+      {modalOpen && activeView === 'KUALIFIKASI' && (
         <RincianKualifikasiGuru 
-          isOpen={modalOpen} 
-          onClose={() => setModalOpen(false)}
-          data={safeDataGuru}
-          initialWilayah={selectedWilayah}
-          activeJenjang={activeLabel}
-          displayLastUpdated={displayLastUpdated}
+          isOpen={modalOpen} onClose={() => setModalOpen(false)}
+          data={safeDataGuru} initialWilayah={selectedWilayah}
+          activeJenjang={activeLabel} displayLastUpdated={displayLastUpdated}
         />
       )}
 
-      {activeView === 'KEPEGAWAIAN' && (
+      {modalOpen && activeView === 'KEPEGAWAIAN' && (
         <RincianKepegawaianGuru 
-          isOpen={modalOpen} 
-          onClose={() => setModalOpen(false)}
-          data={safeDataGuru}
-          initialWilayah={selectedWilayah}
-          activeJenjang={activeLabel}
-          displayLastUpdated={displayLastUpdated}
+          isOpen={modalOpen} onClose={() => setModalOpen(false)}
+          data={safeDataGuru} initialWilayah={selectedWilayah}
+          activeJenjang={activeLabel} displayLastUpdated={displayLastUpdated}
         />
       )}
 
-      {activeView === 'SERTIFIKASI' && (
+      {modalOpen && activeView === 'SERTIFIKASI' && (
         <RincianProfesiGuru 
-          isOpen={modalOpen} 
-          onClose={() => setModalOpen(false)}
-          data={safeDataGuru}
-          initialWilayah={selectedWilayah}
-          activeJenjang={activeLabel}
-          displayLastUpdated={displayLastUpdated}
+          isOpen={modalOpen} onClose={() => setModalOpen(false)}
+          data={safeDataGuru} initialWilayah={selectedWilayah}
+          activeJenjang={activeLabel} displayLastUpdated={displayLastUpdated}
         />
       )}
 
-      {activeView === 'USIA' && (
+      {modalOpen && activeView === 'USIA' && (
         <RincianUsiaGuru 
-          isOpen={modalOpen} 
-          onClose={() => setModalOpen(false)}
-          data={safeDataGuru}
-          initialWilayah={selectedWilayah}
-          activeJenjang={activeLabel}
-          displayLastUpdated={displayLastUpdated}
+          isOpen={modalOpen} onClose={() => setModalOpen(false)}
+          data={safeDataGuru} initialWilayah={selectedWilayah}
+          activeJenjang={activeLabel} displayLastUpdated={displayLastUpdated}
         />
       )}
 
-      {activeView === 'PENSIUN' && (
+      {modalOpen && activeView === 'PENSIUN' && (
         <RincianProyeksiPensiunGuru 
-          isOpen={modalOpen} 
-          onClose={() => setModalOpen(false)}
-          data={safeDataGuru}
-          initialWilayah={selectedWilayah}
-          activeJenjang={activeLabel}
-          displayLastUpdated={displayLastUpdated}
+          isOpen={modalOpen} onClose={() => setModalOpen(false)}
+          data={safeDataGuru} initialWilayah={selectedWilayah}
+          activeJenjang={activeLabel} displayLastUpdated={displayLastUpdated}
         />
       )}
 

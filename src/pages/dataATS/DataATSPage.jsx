@@ -40,7 +40,6 @@ export default function DataATSPage({ onBack }) {
   const [activeSubTab, setActiveSubTab] = useState('SEMUA'); // Default awal
   const [selectedWilayah, setSelectedWilayah] = useState('SEMUA');
   const [loading, setLoading] = useState(true);
-  const [isSyncing, setIsSyncing] = useState(false); 
   const [rawData, setRawData] = useState([]);
   const [lastUpdated, setLastUpdated] = useState('');
 
@@ -51,7 +50,7 @@ export default function DataATSPage({ onBack }) {
     if (tabId === 'MAIN_KEMBALI') setActiveSubTab('KEMBALI_DO');
   };
 
-  // 1. Fungsi Mengambil Data dari Firestore Lokal
+  // Fungsi Mengambil Data dari Firestore Lokal
   const fetchAtsData = async () => {
     setLoading(true);
     try {
@@ -84,29 +83,6 @@ export default function DataATSPage({ onBack }) {
       console.error("Gagal mengambil data ATS:", error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  // 2. Fungsi Menarik Data Langsung dari Server Pusat
-  const triggerManualSync = async () => {
-    const confirmSync = window.confirm(
-      "Yakin ingin melakukan sinkronisasi data ATS se-Kalimantan Barat sekarang?\n\nProses ini akan memerintahkan server untuk menarik data langsung dari web pusat dan memakan waktu sekitar 3-5 menit."
-    );
-    if (!confirmSync) return;
-    
-    setIsSyncing(true);
-    try {
-      const response = await fetch("https://manualsyncats-npe26fnxwq-et.a.run.app", { method: 'POST' });
-      if (response.ok) {
-        alert("Sinkronisasi berhasil! Memuat ulang data terbaru...");
-        await fetchAtsData(); 
-      } else {
-        throw new Error("Server gagal merespons permintaan sinkronisasi.");
-      }
-    } catch (err) {
-      alert("Gagal sinkronisasi: " + err.message);
-    } finally {
-      setIsSyncing(false);
     }
   };
 
@@ -267,22 +243,11 @@ export default function DataATSPage({ onBack }) {
             <div className="flex items-center gap-2">
               <button 
                 onClick={fetchAtsData}
-                disabled={loading || isSyncing}
+                disabled={loading}
                 title="Refresh Data Lokal"
                 className="p-2 bg-white/10 text-white hover:bg-white/20 border border-white/20 rounded-xl transition-colors disabled:opacity-50"
               >
-                <RefreshCw className={`w-5 h-5 ${loading && !isSyncing ? 'animate-spin' : ''}`} />
-              </button>
-
-              <button 
-                onClick={triggerManualSync}
-                disabled={isSyncing || loading}
-                className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white hover:bg-amber-400 border border-amber-600 rounded-xl font-black text-sm transition-all shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-                <span className="hidden md:block">
-                  {isSyncing ? 'Menarik Data Pusat...' : 'Sinkronisasi ATS'}
-                </span>
+                <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
               </button>
             </div>
           </div>
@@ -309,7 +274,7 @@ export default function DataATSPage({ onBack }) {
               <select
                 value={selectedWilayah}
                 onChange={(e) => setSelectedWilayah(e.target.value)}
-                disabled={isSyncing || loading}
+                disabled={loading}
                 className="flex-1 md:w-64 bg-white border-2 border-orange-200 text-orange-900 text-sm font-black rounded-xl focus:ring-orange-500 focus:border-orange-500 block p-2.5 outline-none transition-all disabled:opacity-50 shadow-sm"
               >
                 {daftarWilayah.map(wil => (
@@ -354,7 +319,7 @@ export default function DataATSPage({ onBack }) {
                   <button
                     key={tab.id}
                     onClick={() => setActiveSubTab(tab.id)}
-                    disabled={isSyncing || loading}
+                    disabled={loading}
                     className={`flex items-center gap-2 px-5 py-3 rounded-xl font-black text-xs md:text-sm whitespace-nowrap transition-all border-2 disabled:opacity-50
                       ${isActive 
                         ? `${tab.bgActive} text-white border-transparent shadow-md scale-[1.02]` 
@@ -370,17 +335,17 @@ export default function DataATSPage({ onBack }) {
           </div>
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mt-4">
-            {loading || isSyncing ? (
+            {loading ? (
               <div className="flex flex-col items-center justify-center p-20 gap-4">
                 <Loader2 className="w-10 h-10 text-orange-500 animate-spin" />
                 <p className="font-bold text-gray-500">
-                  {isSyncing ? "Sedang mengekstrak data dari Kemdikbud (Bisa memakan waktu 3-5 menit)..." : "Mengkalkulasi Data ATS lokal..."}
+                  Mengkalkulasi Data ATS lokal...
                 </p>
               </div>
             ) : processedData.length === 0 ? (
               <div className="flex flex-col items-center justify-center p-20 gap-4">
                 <AlertCircle className="w-12 h-12 text-gray-300" />
-                <p className="font-bold text-gray-400">Data ATS belum tersedia. Silakan klik tombol Sinkronisasi.</p>
+                <p className="font-bold text-gray-400">Data ATS belum tersedia atau server lokal sedang sinkronisasi.</p>
               </div>
             ) : (
               <div className="w-full overflow-x-auto overflow-y-visible">
